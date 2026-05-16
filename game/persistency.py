@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import logging
 import pickle
 import shutil
@@ -21,6 +22,8 @@ from pydcs_extensions import (
 
 if TYPE_CHECKING:
     from game import Game
+    from game.logistics import LogisticsManager
+    from game.logistics.warehouse import WarehouseCategory
 
 _dcs_saved_game_folder: Optional[str] = None
 _prefer_liberation_payloads: bool = False
@@ -75,7 +78,7 @@ class MigrationUnpickler(pickle.Unpickler):
             elif name == "Alakourtti":
                 from dcs.terrain.kola.airports import Alakurtti
                 return Alakurtti
-        
+
         # Sinai terrain airports
         if module == "dcs.terrain.sinai.airports":
             if name == "Borj_El_Arab_International_Airport":
@@ -84,7 +87,7 @@ class MigrationUnpickler(pickle.Unpickler):
             elif name == "Palmahim":
                 from dcs.terrain.sinai.airports import Palmachim
                 return Palmachim
-        
+
         # Syria terrain airports
         if module == "dcs.terrain.syria.airports":
             if name == "Amman":
@@ -92,13 +95,13 @@ class MigrationUnpickler(pickle.Unpickler):
                 return Marka
             elif name in ["Helipad_88", "Helipad_183", "Helipad_217", "Helipad_218"]:
                 return dcs.terrain.Airport  # use base-class if airport was removed
-        
+
         # Afghanistan terrain airports
         if module == "dcs.terrain.afghanistan.airports":
             if name == "Khost_Heliport":
                 from dcs.terrain.afghanistan.airports import FOB_Salerno
                 return FOB_Salerno
-        
+
         # Falklands terrain airports
         if module == "dcs.terrain.falklands.airports":
             if name == "Aerodromo_De_Tolhuin":
@@ -116,13 +119,13 @@ class MigrationUnpickler(pickle.Unpickler):
             elif name == "Hipico":
                 from dcs.terrain.falklands.airports import Hipico_Flying_Club
                 return Hipico_Flying_Club
-        
+
         # Germany Cold War terrain airports
         if module == "dcs.terrain.germanycoldwar.airports":
             if name == "Leipzig_Halle":
                 from dcs.terrain.germanycoldwar.airports import Schkeuditz
                 return Schkeuditz
-        
+
         return None
 
     def _handle_weather_classes(self, module: str, name: str) -> Any:
@@ -157,14 +160,14 @@ class MigrationUnpickler(pickle.Unpickler):
         if name == "Thunderstorm":
             from game.weather.weather import Thunderstorm
             return Thunderstorm
-        
+
         return None
 
     def _handle_ch_russian_assets(self, module: str, name: str) -> Any:
         """Handle migrations for Russian military assets pack"""
         if module != "pydcs_extensions.russianmilitaryassetspack.russianmilitaryassetspack":
             return None
-        
+
         if name == "Admiral_Gorshkov":
             from pydcs_extensions.russianmilitaryassetspack import CH_Admiral_Gorshkov
             return CH_Admiral_Gorshkov
@@ -216,9 +219,9 @@ class MigrationUnpickler(pickle.Unpickler):
         if name == "CH_Project22160":
             from dcs.ships import CHAP_Project22160
             return CHAP_Project22160
-        
+
         return None
-    
+
     def _handle_su30(self, module: str, name: str) -> Any:
         """Handle migrations for Su-30 aircraft variants"""
         if name == "Su_30MKA_AG":
@@ -235,7 +238,7 @@ class MigrationUnpickler(pickle.Unpickler):
             return Su_30MKM
 
         return None
-    
+
     def _handle_misc(self, module: str, name: str) -> Any:
         """Handle migrations for mods"""
         if module == "pydcs_extensions.f4b.f4b":
@@ -248,7 +251,7 @@ class MigrationUnpickler(pickle.Unpickler):
                 return ELM2084_MMR_AD_RT
             elif name == "IRON_DOME_CP":
                 return Iron_Dome_David_Sling_CP
-        
+
         if module == "pydcs_extensions.swedishmilitaryassetspack.swedishmilitaryassetspack":
             if name == "BV410_RBS90":
                 return RBS_90
@@ -258,17 +261,17 @@ class MigrationUnpickler(pickle.Unpickler):
                 return Artillerisystem08_M982
             elif name == "BV410_RBS70":
                 return RBS_70
-        
+
         if name == "Superbug_AITanker":
             return pydcs_extensions.fa18efg.FA_18ET
-        
+
         if name in ["SaveManager", "SaveGameBundle"]:
             return DummyObject
         if name in ["CaletaTortel", "Caleta_Tortel_Airport"]:
             return dcs.terrain.Airport  # use base-class if airport was removed
-        
+
         return None
-    
+
     def _handle_default(self, module: str, name: str) -> Any:
         """Handle default class resolution with fallback logic"""
         # Special handling for vehicles and ships with case conversion
@@ -371,6 +374,15 @@ def pre_pretense_backups_dir() -> Path:
     return _create_dir_if_needed(save_dir() / "PrePretenseBackups")
 
 
+def logistics_csv_dir() -> Path:
+    """
+    Directory where warehouse CSV exports and imports are stored.
+    Lives alongside save files so players can find them easily:
+      <Saved Games>/Retribution/Saves/Logistics/
+    """
+    return _create_dir_if_needed(save_dir() / "Logistics")
+
+
 def server_port() -> int:
     global _server_port
     return _server_port
@@ -427,7 +439,7 @@ def _unload_static_data(game: Game) -> dict[str, Any]:
 
 def autosave(game: Game) -> bool:
     """
-    Autosave to the autosave location
+    Autosave to the autosave location.
     :param game: Game to save
     :return: True if saved successfully
     """
@@ -440,3 +452,202 @@ def autosave(game: Game) -> bool:
     except Exception:
         logging.exception("Could not save game")
         return False
+
+
+# =============================================================================
+# Warehouse CSV export / import
+#
+# Why CSV and not JSON?
+#   CSV opens directly in Excel, LibreOffice, and Google Sheets with no
+#   conversion step. Players can edit stock values in a spreadsheet and import
+#   them back in — useful for mission editors who want to pre-set supply lines
+#   before a campaign starts, or for sharing warehouse templates between players.
+#
+# CSV format (one row per warehouse × category combination):
+#   cp_id, cp_name, coalition, category, quantity, capacity, reserved
+#
+# Example rows:
+#   1,Batumi,blue,fuel,850.0,2000.0,0.0
+#   1,Batumi,blue,ammunition,3000.0,5000.0,500.0
+#   2,FARP Eagle,blue,troops,120.0,300.0,0.0
+# =============================================================================
+
+# Column names used in the CSV header row.
+_CSV_HEADERS = [
+    "cp_id",
+    "cp_name",
+    "coalition",
+    "category",
+    "quantity",
+    "capacity",
+    "reserved",
+]
+
+
+def export_warehouses_to_csv(
+    logistics: LogisticsManager,
+    path: Optional[Path] = None,
+    coalition: Optional[str] = None,
+) -> Path:
+    """
+    Export all warehouse stock levels to a CSV file.
+
+    Args:
+        logistics:  The LogisticsManager from game.logistics.
+        path:       Where to write the file. Defaults to
+                    <Saves>/Logistics/warehouses_export.csv
+        coalition:  If given, only export warehouses for that side
+                    ("blue" or "red"). Omit to export all.
+
+    Returns:
+        The Path the file was written to.
+
+    Usage from the Qt Warehouses tab:
+        from game import persistency
+        path = persistency.export_warehouses_to_csv(game.logistics)
+        QMessageBox.information(self, "Exported", f"Saved to:\n{path}")
+    """
+    if path is None:
+        path = logistics_csv_dir() / "warehouses_export.csv"
+
+    warehouses = (
+        logistics.warehouses_for_coalition(coalition)
+        if coalition
+        else list(logistics._warehouses.values())
+    )
+
+    rows_written = 0
+    try:
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=_CSV_HEADERS)
+            writer.writeheader()
+            for wh in warehouses:
+                for cat, item in wh.stock.items():
+                    writer.writerow({
+                        "cp_id":     wh.cp_id,
+                        "cp_name":   wh.cp_name,
+                        "coalition": wh.coalition,
+                        "category":  cat.value,
+                        "quantity":  round(item.quantity, 2),
+                        "capacity":  item.capacity,
+                        "reserved":  round(item.reserved, 2),
+                    })
+                    rows_written += 1
+        logging.info(
+            "Warehouse CSV exported: %d rows → %s", rows_written, path
+        )
+    except Exception:
+        logging.exception("Failed to export warehouse CSV to %s", path)
+        raise
+
+    return path
+
+
+def import_warehouses_from_csv(
+    logistics: LogisticsManager,
+    path: Optional[Path] = None,
+    overwrite: bool = True,
+) -> tuple[int, list[str]]:
+    """
+    Import warehouse stock levels from a CSV file.
+
+    Only updates warehouses that already exist in the logistics manager
+    (matched by cp_id). Unknown cp_ids are skipped and reported in the
+    warnings list so the player knows something didn't match.
+
+    Args:
+        logistics:  The LogisticsManager from game.logistics.
+        path:       CSV file to read. Defaults to
+                    <Saves>/Logistics/warehouses_export.csv
+        overwrite:  If True (default), imported quantity replaces current
+                    stock. If False, imported quantity is *added* to current
+                    stock (useful for seeding extra supply mid-campaign).
+
+    Returns:
+        (rows_imported, warnings)
+        rows_imported — how many stock rows were successfully applied.
+        warnings      — list of human-readable strings for skipped rows.
+
+    Usage from the Qt Warehouses tab:
+        from game import persistency
+        imported, warnings = persistency.import_warehouses_from_csv(game.logistics)
+        if warnings:
+            QMessageBox.warning(self, "Import warnings", "\\n".join(warnings))
+    """
+    if path is None:
+        path = logistics_csv_dir() / "warehouses_export.csv"
+
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Warehouse CSV not found at {path}.\n"
+            "Export first, or choose a file to import."
+        )
+
+    # Import WarehouseCategory here to avoid a circular import at module level.
+    from game.logistics.warehouse import WarehouseCategory
+
+    rows_imported = 0
+    warnings: list[str] = []
+
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+
+            # Validate headers
+            if reader.fieldnames is None or not all(
+                h in reader.fieldnames for h in _CSV_HEADERS
+            ):
+                raise ValueError(
+                    f"CSV is missing required columns. Expected: {_CSV_HEADERS}\n"
+                    f"Found: {reader.fieldnames}"
+                )
+
+            for line_num, row in enumerate(reader, start=2):  # +2: 1-indexed + header
+                try:
+                    cp_id    = int(row["cp_id"])
+                    category = row["category"].strip().lower()
+                    quantity = float(row["quantity"])
+                    capacity = float(row["capacity"])
+                    reserved = float(row["reserved"])
+                except (ValueError, KeyError) as e:
+                    warnings.append(f"Line {line_num}: could not parse row — {e}")
+                    continue
+
+                wh = logistics.get_warehouse(cp_id)
+                if wh is None:
+                    warnings.append(
+                        f"Line {line_num}: cp_id={cp_id} "
+                        f"({row.get('cp_name', '?')}) not found in campaign — skipped."
+                    )
+                    continue
+
+                try:
+                    cat = WarehouseCategory(category)
+                except ValueError:
+                    warnings.append(
+                        f"Line {line_num}: unknown category '{category}' — skipped. "
+                        f"Valid values: {[c.value for c in WarehouseCategory]}"
+                    )
+                    continue
+
+                item = wh.stock[cat]
+                if overwrite:
+                    # Replace quantity entirely. Cap at capacity.
+                    item.quantity = min(max(0.0, quantity), capacity)
+                    item.capacity = capacity
+                    item.reserved = min(reserved, item.quantity)
+                else:
+                    # Add to existing stock (surplus silently capped at capacity).
+                    item.add(quantity)
+
+                rows_imported += 1
+
+    except Exception:
+        logging.exception("Failed to import warehouse CSV from %s", path)
+        raise
+
+    logging.info(
+        "Warehouse CSV imported: %d rows from %s (%d warnings)",
+        rows_imported, path, len(warnings),
+    )
+    return rows_imported, warnings
