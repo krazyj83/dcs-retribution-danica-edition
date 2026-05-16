@@ -5,10 +5,10 @@ Logistics & Supply Chain window for DCS Retribution.
 Opens as a popup dialog from the main toolbar (alongside Settings, Stats, Notes).
 
 Three tabs:
-  1. Drop Zones  — create/edit/delete troop and cargo drop zones
-  2. Warehouses  — view stock levels, transfer stock between bases,
+  1. Drop Zones  - create/edit/delete troop and cargo drop zones
+  2. Warehouses  - view stock levels, transfer stock between bases,
                    export/import warehouse inventory via CSV
-  3. Transfers   — schedule, monitor, and cancel logistics deliveries
+  3. Transfers   - schedule, monitor, and cancel logistics deliveries
 """
 
 from __future__ import annotations
@@ -99,7 +99,7 @@ class DropZoneDialog(QDialog):
         self.coalition = coalition
         self.existing = existing
         self.setWindowTitle(
-            f"{'Edit' if existing else 'New'} Drop Zone — {cp_name}"
+            f"{'Edit' if existing else 'New'} Drop Zone - {cp_name}"
         )
         self.setMinimumWidth(420)
         self._build_ui()
@@ -192,7 +192,7 @@ class DropZoneDialog(QDialog):
 
 
 # ======================================================================
-# Tab 1 — Drop Zones
+# Tab 1 - Drop Zones
 # ======================================================================
 
 class DropZonesTab(QWidget):
@@ -261,7 +261,7 @@ class DropZonesTab(QWidget):
             self.table.setItem(row, 2, QTableWidgetItem(f"{dz.lat:.6f}"))
             self.table.setItem(row, 3, QTableWidgetItem(f"{dz.lon:.6f}"))
             self.table.setItem(row, 4, QTableWidgetItem(f"{dz.radius_m:.0f}"))
-            active_item = QTableWidgetItem("✓" if dz.active else "✗")
+            active_item = QTableWidgetItem("Yes" if dz.active else "No")
             active_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row, 5, active_item)
             self.table.setItem(row, 6, QTableWidgetItem(dz.notes))
@@ -325,7 +325,7 @@ class DropZonesTab(QWidget):
 
 
 # ======================================================================
-# Tab 2 — Warehouses (with CSV import / export)
+# Tab 2 - Warehouses (with CSV import / export)
 # ======================================================================
 
 class WarehouseTab(QWidget):
@@ -339,7 +339,6 @@ class WarehouseTab(QWidget):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
 
-        # ── Stock table ──────────────────────────────────────────────
         self.table = QTableWidget()
         cats = list(WarehouseCategory)
         self.table.setColumnCount(1 + len(cats))
@@ -353,7 +352,6 @@ class WarehouseTab(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(self.table)
 
-        # ── Direct transfer panel ────────────────────────────────────
         transfer_group = QGroupBox("Direct Stock Transfer (instant, no aircraft)")
         exp_layout = QFormLayout()
 
@@ -379,38 +377,26 @@ class WarehouseTab(QWidget):
         transfer_group.setLayout(exp_layout)
         layout.addWidget(transfer_group)
 
-        # ── Shared status label ──────────────────────────────────────
         self.status_label = QLabel("")
         layout.addWidget(self.status_label)
 
-        # ── CSV import / export ──────────────────────────────────────
-        csv_group = QGroupBox("Warehouse CSV — export / import stock to spreadsheet")
+        csv_group = QGroupBox("Warehouse CSV - export / import stock to spreadsheet")
         csv_layout = QVBoxLayout()
 
         csv_info = QLabel(
             "Export saves all stock levels to a CSV file you can open in Excel or "
             "LibreOffice. Edit the quantities and import back in to pre-set supply "
-            "lines, or share warehouse templates with other players.\n"
-            "Files are saved to: <Saved Games>/Retribution/Saves/Logistics/"
+            "lines, or share warehouse templates with other players."
         )
         csv_info.setWordWrap(True)
         csv_info.setStyleSheet("color: grey; font-size: 11px;")
         csv_layout.addWidget(csv_info)
 
         csv_btn_row = QHBoxLayout()
-        self.export_csv_btn = QPushButton("⬇  Export to CSV")
-        self.export_csv_btn.setToolTip(
-            "Save all warehouse stock levels to a CSV file."
-        )
+        self.export_csv_btn = QPushButton("Export to CSV")
         self.export_csv_btn.clicked.connect(self._on_export_csv)
-
-        self.import_csv_btn = QPushButton("⬆  Import from CSV")
-        self.import_csv_btn.setToolTip(
-            "Load stock levels from a CSV file. "
-            "Unknown bases or categories are skipped with a warning."
-        )
+        self.import_csv_btn = QPushButton("Import from CSV")
         self.import_csv_btn.clicked.connect(self._on_import_csv)
-
         csv_btn_row.addWidget(self.export_csv_btn)
         csv_btn_row.addWidget(self.import_csv_btn)
         csv_btn_row.addStretch()
@@ -444,8 +430,6 @@ class WarehouseTab(QWidget):
                 )
                 self.table.setItem(row, col, cell)
 
-    # ── Direct transfer ──────────────────────────────────────────────
-
     def _on_direct_transfer(self) -> None:
         from_cp_id = self.from_combo.currentData()
         to_cp_id   = self.to_combo.currentData()
@@ -453,114 +437,89 @@ class WarehouseTab(QWidget):
         amount     = self.amount_spin.value()
 
         if from_cp_id == to_cp_id:
-            self.status_label.setText("⚠ Source and destination must differ.")
+            self.status_label.setText("Source and destination must differ.")
             return
         if amount <= 0:
-            self.status_label.setText("⚠ Amount must be greater than zero.")
+            self.status_label.setText("Amount must be greater than zero.")
             return
 
         src_wh = self.logistics.get_warehouse(from_cp_id)
         dst_wh = self.logistics.get_warehouse(to_cp_id)
         if src_wh is None or dst_wh is None:
-            self.status_label.setText("⚠ Warehouse not found.")
+            self.status_label.setText("Warehouse not found.")
             return
 
         transferred = src_wh.export_to(dst_wh, category, amount)
         self.status_label.setText(
-            f"✓ Transferred {transferred:.0f} {category.value} "
-            f"from {src_wh.cp_name} → {dst_wh.cp_name}"
+            f"Transferred {transferred:.0f} {category.value} "
+            f"from {src_wh.cp_name} to {dst_wh.cp_name}"
         )
         self.refresh()
 
-    # ── CSV export ───────────────────────────────────────────────────
-
     def _on_export_csv(self) -> None:
-        from game import persistency
-        try:
-            path = persistency.export_warehouses_to_csv(
-                self.logistics,
-                coalition=self.coalition,
-            )
-            self.status_label.setText(f"✓ Exported to: {path}")
-            QMessageBox.information(
-                self,
-                "Export successful",
-                f"Warehouse inventory exported to:\n\n{path}\n\n"
-                "Open in Excel or LibreOffice, edit the quantities, "
-                "then use Import to apply them back.",
-            )
-        except Exception as e:
-            self.status_label.setText("⚠ Export failed — see logs.")
-            QMessageBox.critical(self, "Export failed", str(e))
-
-    # ── CSV import ───────────────────────────────────────────────────
-
-    def _on_import_csv(self) -> None:
-        from game import persistency
-
-        default_dir = str(persistency.logistics_csv_dir())
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Import Warehouse CSV",
-            default_dir,
-            "CSV files (*.csv);;All files (*)",
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Warehouse CSV", "", "CSV files (*.csv)"
         )
         if not path:
             return
-
-        reply = QMessageBox.question(
-            self,
-            "Import mode",
-            "How should imported quantities be applied?\n\n"
-            "Yes  — Replace current stock with CSV values\n"
-            "No   — Add CSV values on top of current stock",
-            QMessageBox.StandardButton.Yes
-            | QMessageBox.StandardButton.No
-            | QMessageBox.StandardButton.Cancel,
-        )
-        if reply == QMessageBox.StandardButton.Cancel:
-            return
-        overwrite = reply == QMessageBox.StandardButton.Yes
-
         try:
-            imported, warnings = persistency.import_warehouses_from_csv(
-                self.logistics,
-                path=Path(path),
-                overwrite=overwrite,
-            )
-            mode_str = "replaced" if overwrite else "added"
-            msg = (
-                f"Successfully {mode_str} {imported} stock rows from:\n{path}"
-            )
-            if warnings:
-                msg += (
-                    f"\n\n{len(warnings)} row(s) skipped:\n"
-                    + "\n".join(warnings)
-                )
-                self.status_label.setText(
-                    f"✓ Imported {imported} rows with {len(warnings)} warnings."
-                )
-                QMessageBox.warning(self, "Import complete with warnings", msg)
-            else:
-                self.status_label.setText(
-                    f"✓ Imported {imported} rows successfully."
-                )
-                QMessageBox.information(self, "Import successful", msg)
-            self.refresh()
-
-        except FileNotFoundError as e:
-            self.status_label.setText("⚠ File not found.")
-            QMessageBox.critical(self, "Import failed", str(e))
-        except ValueError as e:
-            self.status_label.setText("⚠ Invalid CSV format.")
-            QMessageBox.critical(self, "Import failed — invalid format", str(e))
+            import csv
+            cats = list(WarehouseCategory)
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["base"] + [c.value for c in cats])
+                for wh in self.logistics.warehouses_for_coalition(self.coalition):
+                    writer.writerow(
+                        [wh.cp_name] + [wh.stock[c].quantity for c in cats]
+                    )
+            self.status_label.setText(f"Exported to: {path}")
+            QMessageBox.information(self, "Export successful", f"Exported to:\n{path}")
         except Exception as e:
-            self.status_label.setText("⚠ Import failed — see logs.")
+            self.status_label.setText("Export failed.")
+            QMessageBox.critical(self, "Export failed", str(e))
+
+    def _on_import_csv(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Warehouse CSV", "", "CSV files (*.csv);;All files (*)"
+        )
+        if not path:
+            return
+        try:
+            import csv
+            imported = 0
+            warnings = []
+            with open(path, newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    base = row.get("base", "").strip()
+                    wh = next(
+                        (w for w in self.logistics._warehouses.values()
+                         if w.cp_name == base), None
+                    )
+                    if wh is None:
+                        warnings.append(f"Unknown base: {base}")
+                        continue
+                    for cat in WarehouseCategory:
+                        val = row.get(cat.value, "").strip()
+                        if val:
+                            try:
+                                wh.stock[cat].quantity = float(val)
+                                imported += 1
+                            except ValueError:
+                                warnings.append(f"Invalid value for {base}/{cat.value}: {val}")
+            self.status_label.setText(f"Imported {imported} rows.")
+            self.refresh()
+            if warnings:
+                QMessageBox.warning(self, "Import warnings", "\n".join(warnings))
+            else:
+                QMessageBox.information(self, "Import successful", f"Imported {imported} rows.")
+        except Exception as e:
+            self.status_label.setText("Import failed.")
             QMessageBox.critical(self, "Import failed", str(e))
 
 
 # ======================================================================
-# Tab 3 — Transfers
+# Tab 3 - Transfers
 # ======================================================================
 
 class TransfersTab(QWidget):
@@ -667,7 +626,7 @@ class TransfersTab(QWidget):
             self.table.setItem(row, 4, QTableWidgetItem(f"{t.quantity:.0f}"))
             self.table.setItem(
                 row, 5,
-                QTableWidgetItem(f"{t.delivered:.0f}" if t.delivered else "—"),
+                QTableWidgetItem(f"{t.delivered:.0f}" if t.delivered else "-"),
             )
             status_item = QTableWidgetItem(t.status.value.capitalize())
             status_item.setForeground(STATUS_COLORS.get(t.status, QColor("white")))
@@ -695,11 +654,11 @@ class TransfersTab(QWidget):
         notes     = self.tnotes_edit.text().strip()
 
         if src_cp_id == dst_cp_id:
-            self.sched_status.setText("⚠ Source and destination must differ.")
+            self.sched_status.setText("Source and destination must differ.")
             return
         if not dz_id:
             self.sched_status.setText(
-                "⚠ No active drop zone at destination. Add one in the Drop Zones tab."
+                "No active drop zone at destination. Add one in the Drop Zones tab."
             )
             return
 
@@ -715,11 +674,11 @@ class TransfersTab(QWidget):
         )
         if transfer is None:
             self.sched_status.setText(
-                "⚠ Insufficient available stock at source warehouse."
+                "Insufficient available stock at source warehouse."
             )
         else:
             self.sched_status.setText(
-                f"✓ Transfer {transfer.transfer_id[:8]} scheduled."
+                f"Transfer {transfer.transfer_id[:8]} scheduled."
             )
             self.transferScheduled.emit(transfer)
             self.refresh()
@@ -772,7 +731,8 @@ class QLogisticsWindow(QDialog):
         header.setFont(font)
         layout.addWidget(header)
 
-        if self.game is None or not hasattr(self.game, "logistics"):
+        # If no game is loaded at all, show placeholder
+        if self.game is None:
             placeholder = QLabel(
                 "No campaign is currently loaded.\n"
                 "Start or load a campaign to manage logistics."
@@ -784,6 +744,11 @@ class QLogisticsWindow(QDialog):
             close_btn.clicked.connect(self.close)
             layout.addWidget(close_btn)
             return
+
+        # If game exists but logistics attribute is missing, create it
+        if not hasattr(self.game, "logistics") or self.game.logistics is None:
+            from game.logistics import LogisticsManager
+            self.game.logistics = LogisticsManager()
 
         logistics: LogisticsManager = self.game.logistics
         coalition = "blue"
