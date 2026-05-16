@@ -70,6 +70,30 @@ class GameLoop:
         self.pause()
         if not self.started:
             self.start()
+
+        # ----------------------------------------------------------------
+        # Logistics hook A — notify the logistics manager that the turn
+        # is ending so it can:
+        #   - move PLANNED transfers → IN_FLIGHT (stock consumed at source)
+        #   - apply warehouse spoilage (fuel evaporation etc.)
+        # This must run BEFORE generate_miz so the mission generator can
+        # see which transfers are now IN_FLIGHT and spawn their flights.
+        # ----------------------------------------------------------------
+        if hasattr(self.game, "logistics"):
+            try:
+                self.game.logistics.on_turn_end(
+                    current_turn=self.game.turn
+                )
+                logging.info(
+                    "Logistics: on_turn_end completed for turn %d",
+                    self.game.turn,
+                )
+            except Exception:
+                logging.exception(
+                    "Logistics: on_turn_end raised an unexpected error — "
+                    "continuing with mission generation anyway"
+                )
+
         self.sim.generate_miz(output)
 
     def pause_and_debrief(self, state_path: Path, force_end: bool) -> Debriefing:
@@ -79,6 +103,39 @@ class GameLoop:
     def complete_with_results(self, debriefing: Debriefing) -> None:
         self.pause()
         self.sim.process_results(debriefing, self.events)
+
+        # ----------------------------------------------------------------
+        # Logistics hook C — process delivery results from state.json.
+        # By the time process_results() has finished, the debriefing object
+        # holds everything that happened in DCS (units destroyed, bases
+        # captured, and — once the Lua script is in place — logistics events).
+        #
+        # debriefing.state_data is the raw dict parsed from state.json.
+        # We pass it to on_state_processed so the logistics manager can:
+        #   - mark IN_FLIGHT transfers as DELIVERED or FAILED
+        #   - credit delivered stock to destination warehouses
+        #   - release reservations for failed transfers
+        # ----------------------------------------------------------------
+        if hasattr(self.game, "logistics"):
+            try:
+                # state_data holds the parsed state.json dict.
+                # Fall back to an empty dict if the attribute doesn't exist
+                # yet (e.g. older debriefing objects from before this feature).
+                state_dict = getattr(debriefing, "state_data", {}) or {}
+                self.game.logistics.on_state_processed(
+                    state=state_dict,
+                    current_turn=self.game.turn,
+                )
+                logging.info(
+                    "Logistics: on_state_processed completed for turn %d",
+                    self.game.turn,
+                )
+            except Exception:
+                logging.exception(
+                    "Logistics: on_state_processed raised an unexpected error — "
+                    "campaign results are unaffected"
+                )
+
         self.completed = True
         self.send_update(rate_limit=False)
 
