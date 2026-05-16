@@ -1,671 +1,777 @@
-import logging
-import traceback
-import webbrowser
-from datetime import datetime
-from pathlib import Path
+"""
+qt_ui/windows/logistics/QLogisticsWindow.py
+
+Logistics & Supply Chain window for DCS Retribution.
+Opens as a popup dialog from the main toolbar (alongside Settings, Stats, Notes).
+
+Three tabs:
+  1. Drop Zones  — create/edit/delete troop and cargo drop zones
+  2. Warehouses  — view stock levels, transfer stock between bases
+  3. Transfers   — schedule, monitor, and cancel logistics deliveries
+
+Concept — how Qt dialogs work in this codebase:
+  Every popup window (QSettingsWindow, QStatsWindow, QNotesWindow) extends
+  QDialog. The main window holds a reference as self.dialog and calls .show()
+  which displays it as a non-blocking window the player can leave open while
+  interacting with the map. We follow exactly the same pattern here.
+"""
+
+from __future__ import annotations
+
 from typing import Optional
 
-from PySide6.QtCore import QSettings, Qt, Signal
-from PySide6.QtGui import QCloseEvent, QIcon, QAction, QGuiApplication, QActionGroup
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import (
-    QApplication,
-    QFileDialog,
-    QMainWindow,
-    QMessageBox,
-    QSplitter,
+    QDialog,
     QVBoxLayout,
+    QHBoxLayout,
+    QTabWidget,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QComboBox,
+    QDoubleSpinBox,
+    QTextEdit,
+    QGroupBox,
+    QMessageBox,
+    QFormLayout,
+    QDialogButtonBox,
+    QCheckBox,
     QWidget,
 )
 
-import qt_ui.uiconstants as CONST
-from game import Game, VERSION, persistency, Migrator
-from game.debriefing import Debriefing
-from game.game import TurnState
-from game.layout import LAYOUTS
-from game.persistency import pre_pretense_backups_dir
-from game.pretense.pretensemissiongenerator import PretenseMissionGenerator
-from game.server import EventStream, GameContext
-from game.server.dependencies import QtCallbacks, QtContext
-from game.theater import ControlPoint, MissionTarget, TheaterGroundObject
-from qt_ui import liberation_install
-from qt_ui.dialogs import Dialog
-from qt_ui.models import GameModel
-from qt_ui.simcontroller import SimController
-from qt_ui.uiconstants import URLS
-from qt_ui.uiflags import UiFlags
-from qt_ui.uncaughtexceptionhandler import UncaughtExceptionHandler
-from qt_ui.widgets.QTopPanel import QTopPanel
-from qt_ui.widgets.ato import QAirTaskingOrderPanel
-from qt_ui.widgets.map.QLiberationMap import QLiberationMap
-from qt_ui.windows.GameUpdateSignal import GameUpdateSignal
-from qt_ui.windows.QDebriefingWindow import QDebriefingWindow
-from qt_ui.windows.basemenu.QBaseMenu2 import QBaseMenu2
-from qt_ui.windows.groundobject.QGroundObjectMenu import QGroundObjectMenu
-from qt_ui.windows.infos.QInfoPanel import QInfoPanel
-from qt_ui.windows.logistics.QLogisticsWindow import QLogisticsWindow
-from qt_ui.windows.logs.QLogsWindow import QLogsWindow
-from qt_ui.windows.newgame.QNewGameWizard import NewGameWizard
-from qt_ui.windows.notes.QNotesWindow import QNotesWindow
-from qt_ui.windows.preferences.QLiberationPreferencesWindow import (
-    QLiberationPreferencesWindow,
+from game import Game
+from game.logistics import (
+    DropZone,
+    DropZoneType,
+    Warehouse,
+    WarehouseCategory,
+    LogisticsManager,
+    LogisticsTransfer,
+    TransferStatus,
 )
-from qt_ui.windows.settings.QSettingsWindow import QSettingsWindow
-from qt_ui.windows.stats.QStatsWindow import QStatsWindow
 
 
-class QLiberationWindow(QMainWindow):
-    new_package_signal = Signal(MissionTarget)
-    tgo_info_signal = Signal(TheaterGroundObject)
-    control_point_info_signal = Signal(ControlPoint)
+# ======================================================================
+# Colour helpers
+# ======================================================================
 
-    def __init__(self, game: Game | None, ui_flags: UiFlags) -> None:
+STOCK_CRITICAL_COLOR = QColor("#c0392b")  # red   < 15%
+STOCK_LOW_COLOR = QColor("#e67e22")       # amber  15-40%
+STOCK_OK_COLOR = QColor("#27ae60")        # green  > 40%
+
+STATUS_COLORS = {
+    TransferStatus.PLANNED:   QColor("#3498db"),
+    TransferStatus.IN_FLIGHT: QColor("#f39c12"),
+    TransferStatus.DELIVERED: QColor("#27ae60"),
+    TransferStatus.FAILED:    QColor("#c0392b"),
+}
+
+
+def stock_color(quantity: float, capacity: float) -> QColor:
+    if capacity == 0:
+        return STOCK_OK_COLOR
+    pct = quantity / capacity
+    if pct < 0.15:
+        return STOCK_CRITICAL_COLOR
+    if pct < 0.40:
+        return STOCK_LOW_COLOR
+    return STOCK_OK_COLOR
+
+
+# ======================================================================
+# Drop Zone creation / edit dialog
+# ======================================================================
+
+class DropZoneDialog(QDialog):
+    """
+    Modal dialog for creating or editing a DropZone.
+
+    Concept — QDialog vs QWidget:
+      QDialog blocks interaction with its parent until closed (if exec_() is
+      used) or floats independently (if show() is used). We use exec_() here
+      so the player must finish editing a drop zone before returning to the
+      main logistics window. This prevents partial state issues.
+    """
+
+    def __init__(
+        self,
+        cp_id: int,
+        cp_name: str,
+        coalition: str,
+        parent: Optional[QWidget] = None,
+        existing: Optional[DropZone] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.cp_id = cp_id
+        self.cp_name = cp_name
+        self.coalition = coalition
+        self.existing = existing
+        self.setWindowTitle(
+            f"{'Edit' if existing else 'New'} Drop Zone — {cp_name}"
+        )
+        self.setMinimumWidth(420)
+        self._build_ui()
+        if existing:
+            self._populate(existing)
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+
+        form = QFormLayout()
+
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("e.g. LZ ALPHA")
+        form.addRow("Zone name:", self.name_edit)
+
+        self.type_combo = QComboBox()
+        self.type_combo.addItem("Troop drop zone", DropZoneType.TROOP)
+        self.type_combo.addItem("Cargo drop zone", DropZoneType.CARGO)
+        form.addRow("Type:", self.type_combo)
+
+        self.lat_spin = QDoubleSpinBox()
+        self.lat_spin.setRange(-90.0, 90.0)
+        self.lat_spin.setDecimals(6)
+        self.lat_spin.setSingleStep(0.001)
+        form.addRow("Latitude:", self.lat_spin)
+
+        self.lon_spin = QDoubleSpinBox()
+        self.lon_spin.setRange(-180.0, 180.0)
+        self.lon_spin.setDecimals(6)
+        self.lon_spin.setSingleStep(0.001)
+        form.addRow("Longitude:", self.lon_spin)
+
+        self.radius_spin = QDoubleSpinBox()
+        self.radius_spin.setRange(100.0, 5000.0)
+        self.radius_spin.setSingleStep(100.0)
+        self.radius_spin.setValue(500.0)
+        self.radius_spin.setSuffix(" m")
+        form.addRow("Radius:", self.radius_spin)
+
+        self.active_check = QCheckBox("Active (include in next mission)")
+        self.active_check.setChecked(True)
+        form.addRow("", self.active_check)
+
+        self.notes_edit = QTextEdit()
+        self.notes_edit.setMaximumHeight(80)
+        self.notes_edit.setPlaceholderText("Optional notes...")
+        form.addRow("Notes:", self.notes_edit)
+
+        layout.addLayout(form)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _populate(self, dz: DropZone) -> None:
+        self.name_edit.setText(dz.name)
+        idx = self.type_combo.findData(dz.dz_type)
+        if idx >= 0:
+            self.type_combo.setCurrentIndex(idx)
+        self.lat_spin.setValue(dz.lat)
+        self.lon_spin.setValue(dz.lon)
+        self.radius_spin.setValue(dz.radius_m)
+        self.active_check.setChecked(dz.active)
+        self.notes_edit.setPlainText(dz.notes)
+
+    def _on_accept(self) -> None:
+        if not self.name_edit.text().strip():
+            QMessageBox.warning(self, "Validation", "Zone name cannot be empty.")
+            return
+        self.accept()
+
+    def get_drop_zone(self) -> DropZone:
+        """Build and return a DropZone from the current dialog state."""
+        kwargs = dict(
+            name=self.name_edit.text().strip().upper(),
+            dz_type=self.type_combo.currentData(),
+            lat=self.lat_spin.value(),
+            lon=self.lon_spin.value(),
+            radius_m=self.radius_spin.value(),
+            cp_id=self.cp_id,
+            coalition=self.coalition,
+            active=self.active_check.isChecked(),
+            notes=self.notes_edit.toPlainText(),
+        )
+        if self.existing:
+            kwargs["dz_id"] = self.existing.dz_id
+        return DropZone(**kwargs)
+
+
+# ======================================================================
+# Tab 1 — Drop Zones
+# ======================================================================
+
+class DropZonesTab(QWidget):
+    """
+    Lists all drop zones for the player coalition.
+    Allows creating, editing, and deleting zones.
+
+    Each zone the player creates will appear in the next generated .miz
+    file as a DCS trigger zone, named using the DropZone.trigger_zone_name
+    convention so that Lua scripts (MOOSE CTLD etc.) can find them.
+    """
+
+    dropZoneAdded   = Signal(object)  # DropZone
+    dropZoneRemoved = Signal(str)     # dz_id
+    dropZoneUpdated = Signal(object)  # DropZone
+
+    def __init__(self, logistics: LogisticsManager, coalition: str) -> None:
         super().__init__()
+        self.logistics = logistics
+        self.coalition = coalition
+        self._build_ui()
+        self.refresh()
 
-        self._uncaught_exception_handler = UncaughtExceptionHandler(self)
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
 
-        self.game = game
-        self.sim_controller = SimController(self.game)
-        self.sim_controller.sim_update.connect(EventStream.put_nowait)
-        self.game_model = GameModel(game, self.sim_controller)
-        GameContext.set_model(self.game_model)
-        self.new_package_signal.connect(
-            lambda target: Dialog.open_new_package_dialog(target, self)
+        # Toolbar row
+        toolbar = QHBoxLayout()
+        self.add_btn = QPushButton("+ Add Drop Zone")
+        self.add_btn.clicked.connect(self._on_add)
+        self.edit_btn = QPushButton("Edit")
+        self.edit_btn.setEnabled(False)
+        self.edit_btn.clicked.connect(self._on_edit)
+        self.delete_btn = QPushButton("Delete")
+        self.delete_btn.setEnabled(False)
+        self.delete_btn.clicked.connect(self._on_delete)
+        toolbar.addWidget(self.add_btn)
+        toolbar.addWidget(self.edit_btn)
+        toolbar.addWidget(self.delete_btn)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+
+        # Table
+        self.table = QTableWidget()
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels(
+            ["Name", "Type", "Latitude", "Longitude", "Radius (m)", "Active", "Notes"]
         )
-        self.tgo_info_signal.connect(self.open_tgo_info_dialog)
-        self.control_point_info_signal.connect(self.open_control_point_info_dialog)
-        QtContext.set_callbacks(
-            QtCallbacks(
-                lambda target: self.new_package_signal.emit(target),
-                lambda tgo: self.tgo_info_signal.emit(tgo),
-                lambda cp: self.control_point_info_signal.emit(cp),
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.itemSelectionChanged.connect(self._on_selection_changed)
+        layout.addWidget(self.table)
+
+        info = QLabel(
+            "Drop zones appear as trigger zones in the generated .miz file. "
+            "Lua scripts (MOOSE CTLD) use their names to identify landing and drop targets."
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet("color: grey; font-size: 11px;")
+        layout.addWidget(info)
+
+    def refresh(self) -> None:
+        dzs = self.logistics.active_drop_zones(self.coalition)
+        self.table.setRowCount(len(dzs))
+        for row, dz in enumerate(dzs):
+            self.table.setItem(row, 0, QTableWidgetItem(dz.name))
+            type_item = QTableWidgetItem(dz.dz_type.value.capitalize())
+            type_item.setForeground(
+                QColor("#e67e22")
+                if dz.dz_type == DropZoneType.TROOP
+                else QColor("#3498db")
             )
+            self.table.setItem(row, 1, type_item)
+            self.table.setItem(row, 2, QTableWidgetItem(f"{dz.lat:.6f}"))
+            self.table.setItem(row, 3, QTableWidgetItem(f"{dz.lon:.6f}"))
+            self.table.setItem(row, 4, QTableWidgetItem(f"{dz.radius_m:.0f}"))
+            active_item = QTableWidgetItem("✓" if dz.active else "✗")
+            active_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(row, 5, active_item)
+            self.table.setItem(row, 6, QTableWidgetItem(dz.notes))
+            # Store dz_id as hidden data on the name cell for retrieval
+            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, dz.dz_id)
+
+    def _selected_dz_id(self) -> Optional[str]:
+        if not self.table.selectedItems():
+            return None
+        return self.table.item(
+            self.table.currentRow(), 0
+        ).data(Qt.ItemDataRole.UserRole)
+
+    def _on_selection_changed(self) -> None:
+        has = bool(self.table.selectedItems())
+        self.edit_btn.setEnabled(has)
+        self.delete_btn.setEnabled(has)
+
+    def _on_add(self) -> None:
+        # In a full implementation the cp_id/cp_name would come from
+        # a base-selector combo populated from game.theater.control_points.
+        # Using defaults here so the dialog works without extra wiring.
+        dlg = DropZoneDialog(
+            cp_id=0,
+            cp_name="Select a base",
+            coalition=self.coalition,
+            parent=self,
         )
-        Dialog.set_game(self.game_model)
-        self.ato_panel = QAirTaskingOrderPanel(self.game_model)
-        self.info_panel = QInfoPanel(self.game)
-        self.liberation_map = QLiberationMap(
-            self.game_model, ui_flags.dev_ui_webserver, self
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            dz = dlg.get_drop_zone()
+            self.logistics.add_drop_zone(dz)
+            self.dropZoneAdded.emit(dz)
+            self.refresh()
+
+    def _on_edit(self) -> None:
+        dz_id = self._selected_dz_id()
+        if not dz_id:
+            return
+        existing = self.logistics.get_drop_zone(dz_id)
+        if not existing:
+            return
+        dlg = DropZoneDialog(
+            cp_id=existing.cp_id,
+            cp_name="Selected Base",
+            coalition=self.coalition,
+            parent=self,
+            existing=existing,
         )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            updated = dlg.get_drop_zone()
+            self.logistics._drop_zones[dz_id] = updated
+            self.dropZoneUpdated.emit(updated)
+            self.refresh()
 
-        self.setGeometry(300, 100, 270, 100)
-        self.updateWindowTitle()
-        self.setWindowIcon(QIcon("./resources/icon.png"))
-        self.statusBar().showMessage("Ready")
-
-        self.initUi(ui_flags)
-        self.initActions()
-        self.initToolbar()
-        self.initMenuBar()
-        self.connectSignals()
-
-        # Default to maximized on the main display if we don't have any persistent
-        # configuration.
-        screen = QGuiApplication.primaryScreen().availableSize()
-        self.setGeometry(0, 0, screen.width(), screen.height())
-        self.setWindowState(Qt.WindowState.WindowMaximized)
-
-        # But override it with the saved configuration if it exists.
-        self._restore_window_geometry()
-
-        if self.game is None:
-            last_save_file = liberation_install.get_last_save_file()
-            if last_save_file:
-                logging.info("Loading last saved game : " + str(last_save_file))
-                game = persistency.load_game(last_save_file)
-                game = self.migrate_game(game, last_save_file)
-                self.onGameGenerated(game)
-                self.updateWindowTitle(last_save_file if game else None)
-            else:
-                logging.info("No existing save game")
-        else:
-            self.onGameGenerated(self.game)
-
-    def initUi(self, ui_flags: UiFlags) -> None:
-        hbox = QSplitter(Qt.Orientation.Horizontal)
-        vbox = QSplitter(Qt.Orientation.Vertical)
-        hbox.addWidget(self.ato_panel)
-        hbox.addWidget(vbox)
-        vbox.addWidget(self.liberation_map)
-        vbox.addWidget(self.info_panel)
-
-        # Will make the ATO sidebar as small as necessary to fit the content. In
-        # practice this means it is sized by the hints in the panel.
-        hbox.setSizes([1, 10000000])
-        vbox.setSizes([600, 100])
-
-        self.top_panel = QTopPanel(self.game_model, self.sim_controller, ui_flags)
-        vbox = QVBoxLayout()
-        vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.addWidget(self.top_panel)
-        vbox.addWidget(hbox)
-
-        central_widget = QWidget()
-        central_widget.setLayout(vbox)
-        self.setCentralWidget(central_widget)
-
-    def connectSignals(self):
-        GameUpdateSignal.get_instance().gameupdated.connect(self.setGame)
-        GameUpdateSignal.get_instance().debriefingReceived.connect(self.onDebriefing)
-        GameUpdateSignal.get_instance().game_state_changed.connect(self.onEndGame)
-
-    def initActions(self):
-        self.newGameAction = QAction("&New Game", self)
-        self.newGameAction.setIcon(QIcon(CONST.ICONS["New"]))
-        self.newGameAction.triggered.connect(self.newGame)
-        self.newGameAction.setShortcut("CTRL+N")
-
-        self.openAction = QAction("&Open", self)
-        self.openAction.setIcon(QIcon(CONST.ICONS["Open"]))
-        self.openAction.triggered.connect(self.openFile)
-        self.openAction.setShortcut("CTRL+O")
-
-        self.saveGameAction = QAction("&Save", self)
-        self.saveGameAction.setIcon(QIcon(CONST.ICONS["Save"]))
-        self.saveGameAction.triggered.connect(self.saveGame)
-        self.saveGameAction.setShortcut("CTRL+S")
-
-        self.saveAsAction = QAction("Save &As", self)
-        self.saveAsAction.setIcon(QIcon(CONST.ICONS["Save"]))
-        self.saveAsAction.triggered.connect(self.saveGameAs)
-        self.saveAsAction.setShortcut("CTRL+A")
-
-        self.showAboutDialogAction = QAction("&About DCS Retribution", self)
-        self.showAboutDialogAction.setIcon(QIcon.fromTheme("help-about"))
-        self.showAboutDialogAction.triggered.connect(self.showAboutDialog)
-
-        self.showLiberationPrefDialogAction = QAction("&Preferences", self)
-        self.showLiberationPrefDialogAction.setIcon(QIcon.fromTheme("help-about"))
-        self.showLiberationPrefDialogAction.triggered.connect(self.showLiberationDialog)
-
-        self.openDiscordAction = QAction("&Discord Server", self)
-        self.openDiscordAction.setIcon(CONST.ICONS["Discord"])
-        self.openDiscordAction.triggered.connect(
-            lambda: webbrowser.open_new_tab(
-                "https://" + "discord.gg" + "/" + "b4x34Bg" + "4We"
-            )
-        )
-
-        self.openGithubAction = QAction("&Github Repo", self)
-        self.openGithubAction.setIcon(CONST.ICONS["Github"])
-        self.openGithubAction.triggered.connect(
-            lambda: webbrowser.open_new_tab(URLS["Repository"])
-        )
-
-        self.ukraineAction = QAction("&Ukraine", self)
-        self.ukraineAction.setIcon(CONST.ICONS["Ukraine"])
-        self.ukraineAction.triggered.connect(
-            lambda: webbrowser.open_new_tab("https://shdwp.github.io/ukraine/")
-        )
-
-        self.pretenseLinkAction = QAction("&DCS: Pretense", self)
-        self.pretenseLinkAction.setIcon(QIcon(CONST.ICONS["Pretense_discord"]))
-        self.pretenseLinkAction.triggered.connect(
-            lambda: webbrowser.open_new_tab(
-                "https://" + "discord.gg" + "/" + "PtPsb9Mpk6"
-            )
-        )
-
-        self.newPretenseAction = QAction(
-            "&Generate a Pretense Campaign from the running campaign", self
-        )
-        self.newPretenseAction.setIcon(QIcon(CONST.ICONS["Pretense_generate"]))
-        self.newPretenseAction.triggered.connect(self.newPretenseCampaign)
-
-        self.openLogsAction = QAction("Show &logs", self)
-        self.openLogsAction.triggered.connect(self.showLogsDialog)
-
-        self.openSettingsAction = QAction("Settings", self)
-        self.openSettingsAction.setIcon(CONST.ICONS["Settings"])
-        self.openSettingsAction.triggered.connect(self.showSettingsDialog)
-
-        self.openStatsAction = QAction("Stats", self)
-        self.openStatsAction.setIcon(CONST.ICONS["Statistics"])
-        self.openStatsAction.triggered.connect(self.showStatsDialog)
-
-        self.openNotesAction = QAction("Notes", self)
-        self.openNotesAction.setIcon(CONST.ICONS["Notes"])
-        self.openNotesAction.triggered.connect(self.showNotesDialog)
-
-        # ---------------------------------------------------------------
-        # Logistics action — opens the Logistics & Supply Chain window
-        # ---------------------------------------------------------------
-        self.openLogisticsAction = QAction("Logistics", self)
-        self.openLogisticsAction.triggered.connect(self.showLogisticsDialog)
-
-        self.importTemplatesAction = QAction("Import Layouts", self)
-        self.importTemplatesAction.triggered.connect(self.import_templates)
-
-        self.enable_game_actions(False)
-
-    def enable_game_actions(self, enabled: bool):
-        self.openSettingsAction.setVisible(enabled)
-        self.openStatsAction.setVisible(enabled)
-        self.openNotesAction.setVisible(enabled)
-        # Hide logistics button when no campaign is loaded
-        self.openLogisticsAction.setVisible(enabled)
-
-        # Also Disable SaveAction to prevent Keyboard Shortcut
-        self.saveGameAction.setEnabled(enabled)
-        self.saveGameAction.setVisible(enabled)
-        self.saveAsAction.setEnabled(enabled)
-        self.saveAsAction.setVisible(enabled)
-
-    def initToolbar(self):
-        self.tool_bar = self.addToolBar("File")
-        self.tool_bar.addAction(self.newGameAction)
-        self.tool_bar.addAction(self.openAction)
-        self.tool_bar.addAction(self.saveGameAction)
-
-        self.links_bar = self.addToolBar("Links")
-        self.links_bar.addAction(self.openDiscordAction)
-        self.links_bar.addAction(self.openGithubAction)
-        self.links_bar.addAction(self.ukraineAction)
-        self.links_bar.addAction(self.pretenseLinkAction)
-        self.links_bar.addAction(self.newPretenseAction)
-
-        self.actions_bar = self.addToolBar("Actions")
-        self.actions_bar.addAction(self.openSettingsAction)
-        self.actions_bar.addAction(self.openStatsAction)
-        self.actions_bar.addAction(self.openNotesAction)
-        # Logistics button sits alongside Settings, Stats, Notes
-        self.actions_bar.addAction(self.openLogisticsAction)
-
-    def initMenuBar(self):
-        self.menu = self.menuBar()
-
-        file_menu = self.menu.addMenu("&File")
-        file_menu.addAction(self.newGameAction)
-        file_menu.addAction(self.openAction)
-        file_menu.addSeparator()
-        file_menu.addAction(self.saveGameAction)
-        file_menu.addAction(self.saveAsAction)
-        file_menu.addSeparator()
-        file_menu.addAction(self.showLiberationPrefDialogAction)
-        file_menu.addSeparator()
-        file_menu.addAction("E&xit", self.close)
-
-        tools_menu = self.menu.addMenu("&Developer tools")
-        tools_menu.addAction(self.importTemplatesAction)
-
-        help_menu = self.menu.addMenu("&Help")
-        help_menu.addAction(self.openDiscordAction)
-        help_menu.addAction(self.openGithubAction)
-        help_menu.addAction(self.ukraineAction)
-        help_menu.addAction(
-            "&Releases", lambda: webbrowser.open_new_tab(URLS["Releases"])
-        )
-        help_menu.addAction(
-            "&Online Manual", lambda: webbrowser.open_new_tab(URLS["Manual"])
-        )
-        help_menu.addAction(
-            "&ED Forum Thread", lambda: webbrowser.open_new_tab(URLS["ForumThread"])
-        )
-        help_menu.addAction(
-            "Report an &issue", lambda: webbrowser.open_new_tab(URLS["Issues"])
-        )
-        help_menu.addAction(self.openLogsAction)
-
-        help_menu.addSeparator()
-        help_menu.addAction(self.showAboutDialogAction)
-
-    @staticmethod
-    def make_display_rule_action(
-        display_rule, group: Optional[QActionGroup] = None
-    ) -> QAction:
-        def make_check_closure():
-            def closure():
-                display_rule.value = action.isChecked()
-
-            return closure
-
-        action = QAction(f"&{display_rule.menu_text}", group)
-
-        if display_rule.menu_text in CONST.ICONS.keys():
-            action.setIcon(CONST.ICONS[display_rule.menu_text])
-
-        action.setCheckable(True)
-        action.setChecked(display_rule.value)
-        action.toggled.connect(make_check_closure())
-        return action
-
-    def newGame(self):
-        wizard = NewGameWizard(self)
-        wizard.show()
-        wizard.accepted.connect(lambda: self.onGameGenerated(wizard.generatedGame))
-
-    def newPretenseCampaign(self):
-        output = persistency.mission_path_for("pretense_campaign.miz")
-        try:
-            PretenseMissionGenerator(
-                self.game, self.game.conditions.start_time
-            ).generate_miz(output)
-        except Exception as e:
-            now = datetime.now()
-            date_time = now.strftime("%Y-%d-%mT%H_%M_%S")
-            path = pre_pretense_backups_dir()
-            tgt = path / f"pre-pretense-backup_{date_time}.retribution"
-            path /= f".pre-pretense-backup.retribution"
-            if path.exists():
-                with open(path, "rb") as source:
-                    with open(tgt, "wb") as target:
-                        target.write(source.read())
-            raise e
-
-        title = "Pretense campaign generated"
-        msg = f"A Pretense campaign mission has been successfully generated in {output}"
-        QMessageBox.information(QApplication.focusWidget(), title, msg, QMessageBox.Ok)
-
-    def openFile(self):
-        if self.game is not None and self.game.savepath:
-            save_dir = self.game.savepath
-        else:
-            save_dir = str(persistency.save_dir())
-        file = QFileDialog.getOpenFileName(
+    def _on_delete(self) -> None:
+        dz_id = self._selected_dz_id()
+        if not dz_id:
+            return
+        dz = self.logistics.get_drop_zone(dz_id)
+        reply = QMessageBox.question(
             self,
-            "Select game file to open",
-            dir=save_dir,
-            filter="*.retribution;;*.liberation",
+            "Delete Drop Zone",
+            f"Delete drop zone '{dz.name}'?\n"
+            "Any planned transfers to this zone will be cancelled.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
-        if file is not None and file[0] != "":
-            game = persistency.load_game(file[0])
-            game = self.migrate_game(game, file[0])
-            GameUpdateSignal.get_instance().game_loaded.emit(game)
+        if reply == QMessageBox.StandardButton.Yes:
+            self.logistics.remove_drop_zone(dz_id)
+            self.dropZoneRemoved.emit(dz_id)
+            self.refresh()
 
-            self.updateWindowTitle(file[0])
 
-    def migrate_game(self, game, path):
-        if game:
-            is_liberation = ".liberation" in path
-            try:
-                Migrator(game, is_liberation)
-                return game
-            except Exception as e:
-                logging.exception(e)
-                self.incompatible_save_popup(path)
-        else:
-            self.incompatible_save_popup(path)
-        return None
+# ======================================================================
+# Tab 2 — Warehouses
+# ======================================================================
 
-    def incompatible_save_popup(self, path):
-        relative_path = Path(path)
-        QMessageBox.critical(
-            self,
-            "Incompatible save",
-            "Incompatible save file detected, please report the issue on GitHub or Discord.\n"
-            f"Make sure to include the campaign that fails to load, i.e.:\n\n{relative_path}",
+class WarehouseTab(QWidget):
+    """
+    Shows stock levels for all player-coalition bases and allows
+    direct stock transfers between them (instant, no aircraft needed).
+
+    Concept — why two types of transfer?
+      - Direct export (this tab): instant rebalancing between bases,
+        used before a mission to set up supply lines. No aircraft needed.
+      - Scheduled transfer (Transfers tab): requires a helicopter or
+        transport aircraft, happens during the mission, can fail if the
+        aircraft is shot down.
+    """
+
+    def __init__(self, logistics: LogisticsManager, coalition: str) -> None:
+        super().__init__()
+        self.logistics = logistics
+        self.coalition = coalition
+        self._build_ui()
+        self.refresh()
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+
+        # Stock table
+        self.table = QTableWidget()
+        cats = list(WarehouseCategory)
+        self.table.setColumnCount(1 + len(cats))
+        self.table.setHorizontalHeaderLabels(
+            ["Base"] + [c.value.replace("_", " ").title() for c in cats]
         )
-
-    def saveGame(self):
-        logging.info("Saving game")
-
-        if self.game.savepath:
-            persistency.save_game(self.game)
-            liberation_install.setup_last_save_file(self.game.savepath)
-            liberation_install.save_config()
-        else:
-            self.saveGameAs()
-
-    def saveGameAs(self):
-        if self.game is not None and self.game.savepath:
-            save_dir = self.game.savepath
-        else:
-            save_dir = str(persistency.save_dir())
-        file = QFileDialog.getSaveFileName(
-            self,
-            "Save As",
-            dir=save_dir,
-            filter="*.retribution;;*.liberation",
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
         )
-        if file is not None:
-            self.game.savepath = file[0]
-            persistency.save_game(self.game)
-            liberation_install.setup_last_save_file(self.game.savepath)
-            liberation_install.save_config()
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        layout.addWidget(self.table)
 
-            self.updateWindowTitle(file[0])
+        # Direct export panel
+        export_group = QGroupBox("Direct Stock Transfer (instant, no aircraft)")
+        exp_layout = QFormLayout()
 
-    def updateWindowTitle(self, save_path: Optional[str] = None) -> None:
-        """
-        Window title format: DCS Retribution - vX.X.X - campaign_name - file_name
-        Campaign name is shown if a game is loaded and has a campaign_name.
-        File name is appended only if save_path is provided.
-        """
-        window_title = f"DCS Retribution - v{VERSION}"
+        self.from_combo = QComboBox()
+        self.to_combo = QComboBox()
+        self.cat_combo = QComboBox()
+        for cat in WarehouseCategory:
+            self.cat_combo.addItem(cat.value.replace("_", " ").title(), cat)
 
-        if self.game and self.game.campaign_name:
-            window_title += f" - {self.game.campaign_name}"
+        self.amount_spin = QDoubleSpinBox()
+        self.amount_spin.setRange(0.0, 99999.0)
+        self.amount_spin.setSingleStep(50.0)
+        self.amount_spin.setDecimals(0)
 
-        if save_path:
-            file_name = save_path.split("/")[-1].rsplit(".", 1)[0]
-            window_title += f" - {file_name}"
+        self.export_btn = QPushButton("Transfer Now")
+        self.export_btn.clicked.connect(self._on_export)
 
-        self.setWindowTitle(window_title)
+        exp_layout.addRow("From base:", self.from_combo)
+        exp_layout.addRow("To base:",   self.to_combo)
+        exp_layout.addRow("Category:",  self.cat_combo)
+        exp_layout.addRow("Amount:",    self.amount_spin)
+        exp_layout.addRow("",           self.export_btn)
+        export_group.setLayout(exp_layout)
+        layout.addWidget(export_group)
 
-    def onGameGenerated(self, game: Game):
-        logging.info("On Game generated")
-        self.game = game
-        self.updateWindowTitle()
-        GameUpdateSignal.get_instance().game_loaded.emit(self.game)
+        self.status_label = QLabel("")
+        layout.addWidget(self.status_label)
 
-    def onEndGame(self, state: TurnState):
-        if state == TurnState.CONTINUE:
+    def refresh(self) -> None:
+        warehouses = self.logistics.warehouses_for_coalition(self.coalition)
+        cats = list(WarehouseCategory)
+        self.table.setRowCount(len(warehouses))
+
+        self.from_combo.clear()
+        self.to_combo.clear()
+
+        for row, wh in enumerate(warehouses):
+            self.table.setItem(row, 0, QTableWidgetItem(wh.cp_name))
+            self.from_combo.addItem(wh.cp_name, wh.cp_id)
+            self.to_combo.addItem(wh.cp_name, wh.cp_id)
+
+            for col, cat in enumerate(cats, start=1):
+                item_data = wh.stock[cat]
+                pct = (
+                    int(100 * item_data.quantity / item_data.capacity)
+                    if item_data.capacity
+                    else 0
+                )
+                text = (
+                    f"{item_data.quantity:.0f} / {item_data.capacity:.0f} ({pct}%)"
+                )
+                cell = QTableWidgetItem(text)
+                cell.setForeground(
+                    stock_color(item_data.quantity, item_data.capacity)
+                )
+                self.table.setItem(row, col, cell)
+
+    def _on_export(self) -> None:
+        from_cp_id = self.from_combo.currentData()
+        to_cp_id   = self.to_combo.currentData()
+        category   = self.cat_combo.currentData()
+        amount     = self.amount_spin.value()
+
+        if from_cp_id == to_cp_id:
+            self.status_label.setText("⚠ Source and destination must differ.")
+            return
+        if amount <= 0:
+            self.status_label.setText("⚠ Amount must be greater than zero.")
             return
 
-        for window in QApplication.topLevelWidgets():
-            if window is not self:
-                window.close()
+        src_wh = self.logistics.get_warehouse(from_cp_id)
+        dst_wh = self.logistics.get_warehouse(to_cp_id)
+        if src_wh is None or dst_wh is None:
+            self.status_label.setText("⚠ Warehouse not found.")
+            return
 
-        GameUpdateSignal.get_instance().updateGame(None)
-
-        self.top_panel.setControls(False)
-
-        title = "Victory!" if TurnState.WIN else "Defeat!"
-        msgvar = "won" if TurnState.WIN else "lost"
-        msg = f"You have {msgvar} the campaign, do you wish to start a new one?"
-        result = QMessageBox.information(
-            QApplication.focusWidget(),
-            title,
-            msg,
-            QMessageBox.StandardButton.Yes,
-            QMessageBox.StandardButton.No,
+        transferred = src_wh.export_to(dst_wh, category, amount)
+        self.status_label.setText(
+            f"✓ Transferred {transferred:.0f} {category.value} "
+            f"from {src_wh.cp_name} → {dst_wh.cp_name}"
         )
+        self.refresh()
 
-        if result is not None and result == QMessageBox.StandardButton.Yes:
-            self.newGame()
 
-    def setGame(self, game: Optional[Game]):
-        try:
-            self.game = game
-            if self.info_panel is not None:
-                self.info_panel.setGame(game)
-            self.sim_controller.set_game(game)
-            self.game_model.set(self.game)
-            self.game_model.init_comms_registry()
-        except AttributeError:
-            logging.exception("Incompatible save game")
-            QMessageBox.critical(
-                self,
-                "Could not load save game",
-                "The save game you have loaded is incompatible with this "
-                "version of DCS Retribution.\n"
-                "\n"
-                f"{traceback.format_exc()}",
-                QMessageBox.StandardButton.Ok,
+# ======================================================================
+# Tab 3 — Transfers
+# ======================================================================
+
+class TransfersTab(QWidget):
+    """
+    Schedule logistics transfers — helicopter or transport missions that
+    carry stock from a source base to a drop zone at a destination base.
+
+    Unlike the direct export on the Warehouses tab, these transfers:
+      - Reserve stock at source immediately
+      - Spawn an actual aircraft in the next generated mission
+      - Can fail if the aircraft is destroyed before reaching the drop zone
+      - Are reported back via state.json after the mission ends
+    """
+
+    transferScheduled = Signal(object)  # LogisticsTransfer
+
+    def __init__(
+        self,
+        logistics: LogisticsManager,
+        coalition: str,
+        current_turn: int = 0,
+    ) -> None:
+        super().__init__()
+        self.logistics = logistics
+        self.coalition = coalition
+        self.current_turn = current_turn
+        self._build_ui()
+        self.refresh()
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+
+        # Schedule new transfer
+        sched_group = QGroupBox("Schedule New Transfer (requires aircraft + drop zone)")
+        sched_layout = QFormLayout()
+
+        self.src_combo  = QComboBox()
+        self.dst_combo  = QComboBox()
+        self.dz_combo   = QComboBox()
+        self.tcat_combo = QComboBox()
+        for cat in WarehouseCategory:
+            self.tcat_combo.addItem(cat.value.replace("_", " ").title(), cat)
+
+        self.tamt_spin = QDoubleSpinBox()
+        self.tamt_spin.setRange(1.0, 9999.0)
+        self.tamt_spin.setSingleStep(50.0)
+        self.tamt_spin.setDecimals(0)
+        self.tamt_spin.setValue(200.0)
+
+        self.aircraft_edit = QLineEdit("UH-1H")
+        self.tnotes_edit   = QLineEdit()
+        self.tnotes_edit.setPlaceholderText("Optional notes...")
+
+        self.dst_combo.currentIndexChanged.connect(self._on_dst_changed)
+
+        self.schedule_btn = QPushButton("Schedule Transfer")
+        self.schedule_btn.clicked.connect(self._on_schedule)
+
+        sched_layout.addRow("From base:",     self.src_combo)
+        sched_layout.addRow("To base:",       self.dst_combo)
+        sched_layout.addRow("Drop zone:",     self.dz_combo)
+        sched_layout.addRow("Category:",      self.tcat_combo)
+        sched_layout.addRow("Quantity:",      self.tamt_spin)
+        sched_layout.addRow("Aircraft type:", self.aircraft_edit)
+        sched_layout.addRow("Notes:",         self.tnotes_edit)
+        sched_layout.addRow("",               self.schedule_btn)
+        sched_group.setLayout(sched_layout)
+        layout.addWidget(sched_group)
+
+        # Transfer log
+        layout.addWidget(QLabel("Transfer log:"))
+        self.table = QTableWidget()
+        self.table.setColumnCount(8)
+        self.table.setHorizontalHeaderLabels([
+            "ID", "From", "To", "Category",
+            "Planned", "Delivered", "Status", "Turn",
+        ])
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        layout.addWidget(self.table)
+
+        self.cancel_btn = QPushButton("Cancel Selected Transfer")
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.clicked.connect(self._on_cancel)
+        layout.addWidget(self.cancel_btn)
+
+        self.table.itemSelectionChanged.connect(self._on_sel_changed)
+        self.sched_status = QLabel("")
+        layout.addWidget(self.sched_status)
+
+    def refresh(self) -> None:
+        warehouses = self.logistics.warehouses_for_coalition(self.coalition)
+        for combo in (self.src_combo, self.dst_combo):
+            combo.clear()
+            for wh in warehouses:
+                combo.addItem(wh.cp_name, wh.cp_id)
+
+        self._on_dst_changed()
+
+        all_transfers = list(self.logistics._transfers.values())
+        self.table.setRowCount(len(all_transfers))
+        for row, t in enumerate(all_transfers):
+            src_wh = self.logistics.get_warehouse(t.source_cp_id)
+            dst_wh = self.logistics.get_warehouse(t.dest_cp_id)
+            self.table.setItem(
+                row, 0, QTableWidgetItem(t.transfer_id[:8])
             )
-            GameUpdateSignal.get_instance().updateGame(None)
-        finally:
-            self.enable_game_actions(self.game is not None)
+            self.table.setItem(
+                row, 1,
+                QTableWidgetItem(src_wh.cp_name if src_wh else str(t.source_cp_id)),
+            )
+            self.table.setItem(
+                row, 2,
+                QTableWidgetItem(dst_wh.cp_name if dst_wh else str(t.dest_cp_id)),
+            )
+            self.table.setItem(row, 3, QTableWidgetItem(t.category.value))
+            self.table.setItem(row, 4, QTableWidgetItem(f"{t.quantity:.0f}"))
+            self.table.setItem(
+                row, 5,
+                QTableWidgetItem(f"{t.delivered:.0f}" if t.delivered else "—"),
+            )
+            status_item = QTableWidgetItem(t.status.value.capitalize())
+            status_item.setForeground(
+                STATUS_COLORS.get(t.status, QColor("white"))
+            )
+            self.table.setItem(row, 6, status_item)
+            self.table.setItem(row, 7, QTableWidgetItem(str(t.turn_planned)))
+            self.table.item(row, 0).setData(
+                Qt.ItemDataRole.UserRole, t.transfer_id
+            )
 
-    def showAboutDialog(self):
-        contributors = [
-            "shdwp",
-            "Khopa",
-            "ColonelPanic",
-            "RndName",
-            "Roach",
-            "Malakhit",
-            "Wrycu",
-            "calvinmorrow",
-            "JohanAberg",
-            "Deus",
-            "SiKruger",
-            "Mustang-25",
-            "bgreman",
-            "magwo",
-            "SnappyComebacks",
-            "kavinsky",
-            "Schneefl0cke",
-            "pbzweihander",
-            "Raskil",
-            "nosv1",
-            "jake-lewis",
-            "teamMOYA",
-            "benedikt-wegmann",
-            "movq",
-            "bbirchnz",
-            "eddiwood",
-            "root0fall",
-            "calvinmorrow",
-            "UKayeF",
-            "Captain Cody",
-            "steveveepee",
-            "pedromagueija",
-            "parithon",
-            "TheCandianVendingMachine",
-            "bwRavencl",
-            "davidp57",
-            "Plob",
-            "Hawkmoon",
-            "alrik11es",
-            "Starfire13",
-            "Hornet2041/Lion",
-            "SgtFuzzle17",
-            "Doc_of_Mur",
-            "NickJZX",
-            "Sith1144",
-            "Raffson",
-            "MetalStormGhost",
-            "HolyOrangeJuice (WRL)",
-            "Adecarcer",
-            "pande4360",
-            "zhexu14",
-            "ColonelAkirNakesh",
-            "Nosajthedevil",
-            "kivipe",
-            "Turbolious",
-            "ingax01",
-            "M-Chimiste",
-            "tmz42",
-            "Drexyl",
-            "Druss99",
-            "Biggus22",
-            "StillClock1",
-        ]
-        text = (
-            "<h3>DCS Retribution " + VERSION + "</h3>" + "<b>Source code : </b>"
-            "<a href='https://github.com/dcs-retribution/dcs-retribution' style='color:white'>"
-            "https://github.com/dcs-retribution/dcs-retribution </a>"
-            + "<h4>Authors</h4>"
-            + "<p>DCS Retribution is an (independent) fork of DCS Liberation, "
-            "which was originally developed by <b>shdwp</b>. "
-            "DCS Liberation 2.0 is a partial rewrite based on this work by <b>Khopa</b>. "
-            "DCS Retribution was forked during development of "
-            "DCS Liberation v6.0.0 in 2022 by <b>Raffson</> & <b>MetalStormGhost</>."
-            "<h4>Contributors</h4>"
-            + ", ".join(contributors)
-            + "<h4>Special Thanks  :</h4>"
-            "<b>rp-</b> <i>for the pydcs framework</i><br/>"
-            "<b>Grimes (mrSkortch)</b> & <b>Speed</b> <i>for the MIST framework</i><br/>"
-            "<b>Ciribob </b> <i>for the JTACAutoLase.lua script</i><br/>"
-            "<b>Walder </b> <i>for the Skynet-IADS script</i><br/>"
-            "<b>Anubis Yinepu </b> <i>for the Hercules Cargo script</i><br/>"
-            '<a href="https://www.flaticon.com/free-icons/bug" title="bug icons" style="color: #ffffff">Bug icons created by Freepik - Flaticon</a><br />'
-            'Contains information from <a href="https://osmdata.openstreetmap.de/" style="color: #ffffff">OpenStreetMap © OpenStreetMap contributors</a>, which is made available here under the <a href="https://opendatacommons.org/licenses/odbl/1-0/" style="color: #ffffff">Open Database License (ODbL)</a>.<br />'
-            '<a href="https://download.geofabrik.de/index.html/" style="color: #ffffff">OpenStreetMap Data Extracts from Geofabrik</a><br />'
-            '<a href="https://www.earthdata.nasa.gov/" style="color: #ffffff">NASA EarthData</a><br />'
-            + "<h4>Splash Screen  :</h4>"
-            + "Artwork by Andriy Dankovych (CC BY-SA)"
-            " <a href='https://www.facebook.com/AndriyDankovych' style='color:white'>"
-            "[https://www.facebook.com/AndriyDankovych]</a>"
+    def _on_dst_changed(self) -> None:
+        dst_cp_id = self.dst_combo.currentData()
+        self.dz_combo.clear()
+        if dst_cp_id is not None:
+            for dz in self.logistics.drop_zones_for_cp(dst_cp_id):
+                if dz.active:
+                    self.dz_combo.addItem(
+                        f"{dz.name} ({dz.dz_type.value})", dz.dz_id
+                    )
+
+    def _on_schedule(self) -> None:
+        src_cp_id = self.src_combo.currentData()
+        dst_cp_id = self.dst_combo.currentData()
+        dz_id     = self.dz_combo.currentData()
+        category  = self.tcat_combo.currentData()
+        quantity  = self.tamt_spin.value()
+        aircraft  = self.aircraft_edit.text().strip() or "UH-1H"
+        notes     = self.tnotes_edit.text().strip()
+
+        if src_cp_id == dst_cp_id:
+            self.sched_status.setText("⚠ Source and destination must differ.")
+            return
+        if not dz_id:
+            self.sched_status.setText(
+                "⚠ No active drop zone at destination. Add one in the Drop Zones tab."
+            )
+            return
+
+        transfer = self.logistics.schedule_transfer(
+            source_cp_id=src_cp_id,
+            dest_cp_id=dst_cp_id,
+            dz_id=dz_id,
+            category=category,
+            quantity=quantity,
+            aircraft_type=aircraft,
+            turn=self.current_turn,
+            notes=notes,
         )
-        about = QMessageBox()
-        about.setWindowTitle("About DCS Retribution")
-        about.setIcon(QMessageBox.Icon.Information)
-        about.setText(text)
-        logging.info(about.textFormat())
-        about.exec_()
-
-    def showLiberationDialog(self):
-        self.subwindow = QLiberationPreferencesWindow()
-        self.subwindow.show()
-
-    def showSettingsDialog(self) -> None:
-        self.dialog = QSettingsWindow(self.game)
-        self.dialog.show()
-
-    def showStatsDialog(self):
-        self.dialog = QStatsWindow(self.game)
-        self.dialog.show()
-
-    def showNotesDialog(self):
-        self.dialog = QNotesWindow(self.game)
-        self.dialog.show()
-
-    def showLogisticsDialog(self):
-        self.dialog = QLogisticsWindow(self.game)
-        self.dialog.show()
-
-    def import_templates(self):
-        LAYOUTS.import_templates()
-
-    def showLogsDialog(self):
-        self.dialog = QLogsWindow(self)
-        self.dialog.show()
-
-    def onDebriefing(self, debrief: Debriefing):
-        logging.info("On Debriefing")
-        self.debriefing = QDebriefingWindow(debrief)
-        self.debriefing.show()
-        self.game_model.init_comms_registry()
-
-    def open_tgo_info_dialog(self, tgo: TheaterGroundObject) -> None:
-        QGroundObjectMenu(self, tgo, tgo.control_point, self.game_model).show()
-
-    def open_control_point_info_dialog(self, cp: ControlPoint) -> None:
-        self._cp_dialog = QBaseMenu2(None, cp, self.game_model)
-        self._cp_dialog.show()
-
-    def _qsettings(self) -> QSettings:
-        return QSettings("DCS Retribution", "Qt UI")
-
-    def _restore_window_geometry(self) -> None:
-        settings = self._qsettings()
-        self.restoreGeometry(settings.value("geometry"))
-        self.restoreState(settings.value("windowState"))
-
-    def _save_window_geometry(self) -> None:
-        settings = self._qsettings()
-        settings.setValue("geometry", self.saveGeometry())
-        settings.setValue("windowState", self.saveState())
-
-    def closeEvent(self, event: QCloseEvent) -> None:
-        result = QMessageBox.question(
-            self,
-            "Quit Retribution?",
-            "Would you like to save before quitting?",
-            QMessageBox.StandardButton.Yes
-            | QMessageBox.StandardButton.No
-            | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
-        )
-        if result in [QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.No]:
-            if result == QMessageBox.StandardButton.Yes:
-                self.saveGame()
-            self._save_window_geometry()
-            super().closeEvent(event)
-            self.dialog = None
-            self.debriefing = None
-            for window in QApplication.topLevelWidgets():
-                window.close()
+        if transfer is None:
+            self.sched_status.setText(
+                "⚠ Insufficient available stock at source warehouse."
+            )
         else:
-            event.ignore()
+            self.sched_status.setText(
+                f"✓ Transfer {transfer.transfer_id[:8]} scheduled."
+            )
+            self.transferScheduled.emit(transfer)
+            self.refresh()
+
+    def _on_sel_changed(self) -> None:
+        if not self.table.selectedItems():
+            self.cancel_btn.setEnabled(False)
+            return
+        tid = self.table.item(
+            self.table.currentRow(), 0
+        ).data(Qt.ItemDataRole.UserRole)
+        t = self.logistics._transfers.get(tid)
+        self.cancel_btn.setEnabled(
+            t is not None and t.status == TransferStatus.PLANNED
+        )
+
+    def _on_cancel(self) -> None:
+        if not self.table.selectedItems():
+            return
+        tid = self.table.item(
+            self.table.currentRow(), 0
+        ).data(Qt.ItemDataRole.UserRole)
+        if self.logistics.cancel_transfer(tid):
+            self.sched_status.setText(f"Transfer {tid[:8]} cancelled.")
+            self.refresh()
+
+
+# ======================================================================
+# Main logistics window
+# ======================================================================
+
+class QLogisticsWindow(QDialog):
+    """
+    Top-level Logistics & Supply Chain window.
+
+    Opened from the main toolbar via QLiberationWindow.showLogisticsDialog().
+    Follows the same pattern as QSettingsWindow, QStatsWindow, QNotesWindow:
+      self.dialog = QLogisticsWindow(self.game)
+      self.dialog.show()
+
+    If no campaign is loaded (game is None), shows a placeholder message
+    rather than crashing — matches the behaviour of the other windows.
+    """
+
+    def __init__(self, game: Optional[Game], parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.game = game
+        self.setWindowTitle("Logistics & Supply Chain")
+        self.setMinimumSize(920, 640)
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Header
+        header = QLabel("Logistics & Supply Chain")
+        font = QFont()
+        font.setPointSize(14)
+        font.setBold(True)
+        header.setFont(font)
+        layout.addWidget(header)
+
+        # Guard: no campaign loaded
+        if self.game is None or not hasattr(self.game, "logistics"):
+            placeholder = QLabel(
+                "No campaign is currently loaded.\n"
+                "Start or load a campaign to manage logistics."
+            )
+            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            placeholder.setStyleSheet("color: grey; font-size: 13px;")
+            layout.addWidget(placeholder)
+            return
+
+        logistics: LogisticsManager = self.game.logistics
+        coalition = "blue"
+        turn = getattr(self.game, "turn", 0)
+
+        # Three-tab layout
+        tabs = QTabWidget()
+
+        self.dz_tab = DropZonesTab(logistics, coalition)
+        tabs.addTab(self.dz_tab, "Drop Zones")
+
+        self.wh_tab = WarehouseTab(logistics, coalition)
+        tabs.addTab(self.wh_tab, "Warehouses")
+
+        self.tr_tab = TransfersTab(logistics, coalition, current_turn=turn)
+        tabs.addTab(self.tr_tab, "Transfers")
+
+        layout.addWidget(tabs)
+
+        # Close button at the bottom
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.close)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+    def refresh(self) -> None:
+        """Call after each turn to update all sub-tabs with fresh data."""
+        if hasattr(self, "dz_tab"):
+            self.dz_tab.refresh()
+        if hasattr(self, "wh_tab"):
+            self.wh_tab.refresh()
+        if hasattr(self, "tr_tab"):
+            self.tr_tab.refresh()
