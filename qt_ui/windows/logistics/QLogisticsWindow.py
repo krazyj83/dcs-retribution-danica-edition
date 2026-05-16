@@ -6,18 +6,14 @@ Opens as a popup dialog from the main toolbar (alongside Settings, Stats, Notes)
 
 Three tabs:
   1. Drop Zones  — create/edit/delete troop and cargo drop zones
-  2. Warehouses  — view stock levels, transfer stock between bases
+  2. Warehouses  — view stock levels, transfer stock between bases,
+                   export/import warehouse inventory via CSV
   3. Transfers   — schedule, monitor, and cancel logistics deliveries
-
-Concept — how Qt dialogs work in this codebase:
-  Every popup window (QSettingsWindow, QStatsWindow, QNotesWindow) extends
-  QDialog. The main window holds a reference as self.dialog and calls .show()
-  which displays it as a non-blocking window the player can leave open while
-  interacting with the map. We follow exactly the same pattern here.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -42,6 +38,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QCheckBox,
     QWidget,
+    QFileDialog,
 )
 
 from game import Game
@@ -61,8 +58,8 @@ from game.logistics import (
 # ======================================================================
 
 STOCK_CRITICAL_COLOR = QColor("#c0392b")  # red   < 15%
-STOCK_LOW_COLOR = QColor("#e67e22")       # amber  15-40%
-STOCK_OK_COLOR = QColor("#27ae60")        # green  > 40%
+STOCK_LOW_COLOR      = QColor("#e67e22")  # amber  15-40%
+STOCK_OK_COLOR       = QColor("#27ae60")  # green  > 40%
 
 STATUS_COLORS = {
     TransferStatus.PLANNED:   QColor("#3498db"),
@@ -88,16 +85,6 @@ def stock_color(quantity: float, capacity: float) -> QColor:
 # ======================================================================
 
 class DropZoneDialog(QDialog):
-    """
-    Modal dialog for creating or editing a DropZone.
-
-    Concept — QDialog vs QWidget:
-      QDialog blocks interaction with its parent until closed (if exec_() is
-      used) or floats independently (if show() is used). We use exec_() here
-      so the player must finish editing a drop zone before returning to the
-      main logistics window. This prevents partial state issues.
-    """
-
     def __init__(
         self,
         cp_id: int,
@@ -121,7 +108,6 @@ class DropZoneDialog(QDialog):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-
         form = QFormLayout()
 
         self.name_edit = QLineEdit()
@@ -189,7 +175,6 @@ class DropZoneDialog(QDialog):
         self.accept()
 
     def get_drop_zone(self) -> DropZone:
-        """Build and return a DropZone from the current dialog state."""
         kwargs = dict(
             name=self.name_edit.text().strip().upper(),
             dz_type=self.type_combo.currentData(),
@@ -211,18 +196,9 @@ class DropZoneDialog(QDialog):
 # ======================================================================
 
 class DropZonesTab(QWidget):
-    """
-    Lists all drop zones for the player coalition.
-    Allows creating, editing, and deleting zones.
-
-    Each zone the player creates will appear in the next generated .miz
-    file as a DCS trigger zone, named using the DropZone.trigger_zone_name
-    convention so that Lua scripts (MOOSE CTLD etc.) can find them.
-    """
-
-    dropZoneAdded   = Signal(object)  # DropZone
-    dropZoneRemoved = Signal(str)     # dz_id
-    dropZoneUpdated = Signal(object)  # DropZone
+    dropZoneAdded   = Signal(object)
+    dropZoneRemoved = Signal(str)
+    dropZoneUpdated = Signal(object)
 
     def __init__(self, logistics: LogisticsManager, coalition: str) -> None:
         super().__init__()
@@ -234,7 +210,6 @@ class DropZonesTab(QWidget):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
 
-        # Toolbar row
         toolbar = QHBoxLayout()
         self.add_btn = QPushButton("+ Add Drop Zone")
         self.add_btn.clicked.connect(self._on_add)
@@ -250,7 +225,6 @@ class DropZonesTab(QWidget):
         toolbar.addStretch()
         layout.addLayout(toolbar)
 
-        # Table
         self.table = QTableWidget()
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels(
@@ -291,7 +265,6 @@ class DropZonesTab(QWidget):
             active_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row, 5, active_item)
             self.table.setItem(row, 6, QTableWidgetItem(dz.notes))
-            # Store dz_id as hidden data on the name cell for retrieval
             self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, dz.dz_id)
 
     def _selected_dz_id(self) -> Optional[str]:
@@ -307,14 +280,9 @@ class DropZonesTab(QWidget):
         self.delete_btn.setEnabled(has)
 
     def _on_add(self) -> None:
-        # In a full implementation the cp_id/cp_name would come from
-        # a base-selector combo populated from game.theater.control_points.
-        # Using defaults here so the dialog works without extra wiring.
         dlg = DropZoneDialog(
-            cp_id=0,
-            cp_name="Select a base",
-            coalition=self.coalition,
-            parent=self,
+            cp_id=0, cp_name="Select a base",
+            coalition=self.coalition, parent=self,
         )
         if dlg.exec() == QDialog.DialogCode.Accepted:
             dz = dlg.get_drop_zone()
@@ -330,11 +298,8 @@ class DropZonesTab(QWidget):
         if not existing:
             return
         dlg = DropZoneDialog(
-            cp_id=existing.cp_id,
-            cp_name="Selected Base",
-            coalition=self.coalition,
-            parent=self,
-            existing=existing,
+            cp_id=existing.cp_id, cp_name="Selected Base",
+            coalition=self.coalition, parent=self, existing=existing,
         )
         if dlg.exec() == QDialog.DialogCode.Accepted:
             updated = dlg.get_drop_zone()
@@ -348,8 +313,7 @@ class DropZonesTab(QWidget):
             return
         dz = self.logistics.get_drop_zone(dz_id)
         reply = QMessageBox.question(
-            self,
-            "Delete Drop Zone",
+            self, "Delete Drop Zone",
             f"Delete drop zone '{dz.name}'?\n"
             "Any planned transfers to this zone will be cancelled.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -361,22 +325,10 @@ class DropZonesTab(QWidget):
 
 
 # ======================================================================
-# Tab 2 — Warehouses
+# Tab 2 — Warehouses (with CSV import / export)
 # ======================================================================
 
 class WarehouseTab(QWidget):
-    """
-    Shows stock levels for all player-coalition bases and allows
-    direct stock transfers between them (instant, no aircraft needed).
-
-    Concept — why two types of transfer?
-      - Direct export (this tab): instant rebalancing between bases,
-        used before a mission to set up supply lines. No aircraft needed.
-      - Scheduled transfer (Transfers tab): requires a helicopter or
-        transport aircraft, happens during the mission, can fail if the
-        aircraft is shot down.
-    """
-
     def __init__(self, logistics: LogisticsManager, coalition: str) -> None:
         super().__init__()
         self.logistics = logistics
@@ -387,7 +339,7 @@ class WarehouseTab(QWidget):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
 
-        # Stock table
+        # ── Stock table ──────────────────────────────────────────────
         self.table = QTableWidget()
         cats = list(WarehouseCategory)
         self.table.setColumnCount(1 + len(cats))
@@ -401,13 +353,13 @@ class WarehouseTab(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(self.table)
 
-        # Direct export panel
-        export_group = QGroupBox("Direct Stock Transfer (instant, no aircraft)")
+        # ── Direct transfer panel ────────────────────────────────────
+        transfer_group = QGroupBox("Direct Stock Transfer (instant, no aircraft)")
         exp_layout = QFormLayout()
 
         self.from_combo = QComboBox()
-        self.to_combo = QComboBox()
-        self.cat_combo = QComboBox()
+        self.to_combo   = QComboBox()
+        self.cat_combo  = QComboBox()
         for cat in WarehouseCategory:
             self.cat_combo.addItem(cat.value.replace("_", " ").title(), cat)
 
@@ -416,19 +368,55 @@ class WarehouseTab(QWidget):
         self.amount_spin.setSingleStep(50.0)
         self.amount_spin.setDecimals(0)
 
-        self.export_btn = QPushButton("Transfer Now")
-        self.export_btn.clicked.connect(self._on_export)
+        self.transfer_btn = QPushButton("Transfer Now")
+        self.transfer_btn.clicked.connect(self._on_direct_transfer)
 
         exp_layout.addRow("From base:", self.from_combo)
         exp_layout.addRow("To base:",   self.to_combo)
         exp_layout.addRow("Category:",  self.cat_combo)
         exp_layout.addRow("Amount:",    self.amount_spin)
-        exp_layout.addRow("",           self.export_btn)
-        export_group.setLayout(exp_layout)
-        layout.addWidget(export_group)
+        exp_layout.addRow("",           self.transfer_btn)
+        transfer_group.setLayout(exp_layout)
+        layout.addWidget(transfer_group)
 
+        # ── Shared status label ──────────────────────────────────────
         self.status_label = QLabel("")
         layout.addWidget(self.status_label)
+
+        # ── CSV import / export ──────────────────────────────────────
+        csv_group = QGroupBox("Warehouse CSV — export / import stock to spreadsheet")
+        csv_layout = QVBoxLayout()
+
+        csv_info = QLabel(
+            "Export saves all stock levels to a CSV file you can open in Excel or "
+            "LibreOffice. Edit the quantities and import back in to pre-set supply "
+            "lines, or share warehouse templates with other players.\n"
+            "Files are saved to: <Saved Games>/Retribution/Saves/Logistics/"
+        )
+        csv_info.setWordWrap(True)
+        csv_info.setStyleSheet("color: grey; font-size: 11px;")
+        csv_layout.addWidget(csv_info)
+
+        csv_btn_row = QHBoxLayout()
+        self.export_csv_btn = QPushButton("⬇  Export to CSV")
+        self.export_csv_btn.setToolTip(
+            "Save all warehouse stock levels to a CSV file."
+        )
+        self.export_csv_btn.clicked.connect(self._on_export_csv)
+
+        self.import_csv_btn = QPushButton("⬆  Import from CSV")
+        self.import_csv_btn.setToolTip(
+            "Load stock levels from a CSV file. "
+            "Unknown bases or categories are skipped with a warning."
+        )
+        self.import_csv_btn.clicked.connect(self._on_import_csv)
+
+        csv_btn_row.addWidget(self.export_csv_btn)
+        csv_btn_row.addWidget(self.import_csv_btn)
+        csv_btn_row.addStretch()
+        csv_layout.addLayout(csv_btn_row)
+        csv_group.setLayout(csv_layout)
+        layout.addWidget(csv_group)
 
     def refresh(self) -> None:
         warehouses = self.logistics.warehouses_for_coalition(self.coalition)
@@ -442,24 +430,23 @@ class WarehouseTab(QWidget):
             self.table.setItem(row, 0, QTableWidgetItem(wh.cp_name))
             self.from_combo.addItem(wh.cp_name, wh.cp_id)
             self.to_combo.addItem(wh.cp_name, wh.cp_id)
-
             for col, cat in enumerate(cats, start=1):
                 item_data = wh.stock[cat]
                 pct = (
                     int(100 * item_data.quantity / item_data.capacity)
-                    if item_data.capacity
-                    else 0
+                    if item_data.capacity else 0
                 )
-                text = (
+                cell = QTableWidgetItem(
                     f"{item_data.quantity:.0f} / {item_data.capacity:.0f} ({pct}%)"
                 )
-                cell = QTableWidgetItem(text)
                 cell.setForeground(
                     stock_color(item_data.quantity, item_data.capacity)
                 )
                 self.table.setItem(row, col, cell)
 
-    def _on_export(self) -> None:
+    # ── Direct transfer ──────────────────────────────────────────────
+
+    def _on_direct_transfer(self) -> None:
         from_cp_id = self.from_combo.currentData()
         to_cp_id   = self.to_combo.currentData()
         category   = self.cat_combo.currentData()
@@ -485,24 +472,99 @@ class WarehouseTab(QWidget):
         )
         self.refresh()
 
+    # ── CSV export ───────────────────────────────────────────────────
+
+    def _on_export_csv(self) -> None:
+        from game import persistency
+        try:
+            path = persistency.export_warehouses_to_csv(
+                self.logistics,
+                coalition=self.coalition,
+            )
+            self.status_label.setText(f"✓ Exported to: {path}")
+            QMessageBox.information(
+                self,
+                "Export successful",
+                f"Warehouse inventory exported to:\n\n{path}\n\n"
+                "Open in Excel or LibreOffice, edit the quantities, "
+                "then use Import to apply them back.",
+            )
+        except Exception as e:
+            self.status_label.setText("⚠ Export failed — see logs.")
+            QMessageBox.critical(self, "Export failed", str(e))
+
+    # ── CSV import ───────────────────────────────────────────────────
+
+    def _on_import_csv(self) -> None:
+        from game import persistency
+
+        default_dir = str(persistency.logistics_csv_dir())
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Warehouse CSV",
+            default_dir,
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not path:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Import mode",
+            "How should imported quantities be applied?\n\n"
+            "Yes  — Replace current stock with CSV values\n"
+            "No   — Add CSV values on top of current stock",
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No
+            | QMessageBox.StandardButton.Cancel,
+        )
+        if reply == QMessageBox.StandardButton.Cancel:
+            return
+        overwrite = reply == QMessageBox.StandardButton.Yes
+
+        try:
+            imported, warnings = persistency.import_warehouses_from_csv(
+                self.logistics,
+                path=Path(path),
+                overwrite=overwrite,
+            )
+            mode_str = "replaced" if overwrite else "added"
+            msg = (
+                f"Successfully {mode_str} {imported} stock rows from:\n{path}"
+            )
+            if warnings:
+                msg += (
+                    f"\n\n{len(warnings)} row(s) skipped:\n"
+                    + "\n".join(warnings)
+                )
+                self.status_label.setText(
+                    f"✓ Imported {imported} rows with {len(warnings)} warnings."
+                )
+                QMessageBox.warning(self, "Import complete with warnings", msg)
+            else:
+                self.status_label.setText(
+                    f"✓ Imported {imported} rows successfully."
+                )
+                QMessageBox.information(self, "Import successful", msg)
+            self.refresh()
+
+        except FileNotFoundError as e:
+            self.status_label.setText("⚠ File not found.")
+            QMessageBox.critical(self, "Import failed", str(e))
+        except ValueError as e:
+            self.status_label.setText("⚠ Invalid CSV format.")
+            QMessageBox.critical(self, "Import failed — invalid format", str(e))
+        except Exception as e:
+            self.status_label.setText("⚠ Import failed — see logs.")
+            QMessageBox.critical(self, "Import failed", str(e))
+
 
 # ======================================================================
 # Tab 3 — Transfers
 # ======================================================================
 
 class TransfersTab(QWidget):
-    """
-    Schedule logistics transfers — helicopter or transport missions that
-    carry stock from a source base to a drop zone at a destination base.
-
-    Unlike the direct export on the Warehouses tab, these transfers:
-      - Reserve stock at source immediately
-      - Spawn an actual aircraft in the next generated mission
-      - Can fail if the aircraft is destroyed before reaching the drop zone
-      - Are reported back via state.json after the mission ends
-    """
-
-    transferScheduled = Signal(object)  # LogisticsTransfer
+    transferScheduled = Signal(object)
 
     def __init__(
         self,
@@ -520,7 +582,6 @@ class TransfersTab(QWidget):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
 
-        # Schedule new transfer
         sched_group = QGroupBox("Schedule New Transfer (requires aircraft + drop zone)")
         sched_layout = QFormLayout()
 
@@ -557,7 +618,6 @@ class TransfersTab(QWidget):
         sched_group.setLayout(sched_layout)
         layout.addWidget(sched_group)
 
-        # Transfer log
         layout.addWidget(QLabel("Transfer log:"))
         self.table = QTableWidget()
         self.table.setColumnCount(8)
@@ -587,7 +647,6 @@ class TransfersTab(QWidget):
             combo.clear()
             for wh in warehouses:
                 combo.addItem(wh.cp_name, wh.cp_id)
-
         self._on_dst_changed()
 
         all_transfers = list(self.logistics._transfers.values())
@@ -595,9 +654,7 @@ class TransfersTab(QWidget):
         for row, t in enumerate(all_transfers):
             src_wh = self.logistics.get_warehouse(t.source_cp_id)
             dst_wh = self.logistics.get_warehouse(t.dest_cp_id)
-            self.table.setItem(
-                row, 0, QTableWidgetItem(t.transfer_id[:8])
-            )
+            self.table.setItem(row, 0, QTableWidgetItem(t.transfer_id[:8]))
             self.table.setItem(
                 row, 1,
                 QTableWidgetItem(src_wh.cp_name if src_wh else str(t.source_cp_id)),
@@ -613,14 +670,10 @@ class TransfersTab(QWidget):
                 QTableWidgetItem(f"{t.delivered:.0f}" if t.delivered else "—"),
             )
             status_item = QTableWidgetItem(t.status.value.capitalize())
-            status_item.setForeground(
-                STATUS_COLORS.get(t.status, QColor("white"))
-            )
+            status_item.setForeground(STATUS_COLORS.get(t.status, QColor("white")))
             self.table.setItem(row, 6, status_item)
             self.table.setItem(row, 7, QTableWidgetItem(str(t.turn_planned)))
-            self.table.item(row, 0).setData(
-                Qt.ItemDataRole.UserRole, t.transfer_id
-            )
+            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, t.transfer_id)
 
     def _on_dst_changed(self) -> None:
         dst_cp_id = self.dst_combo.currentData()
@@ -699,30 +752,19 @@ class TransfersTab(QWidget):
 # ======================================================================
 
 class QLogisticsWindow(QDialog):
-    """
-    Top-level Logistics & Supply Chain window.
-
-    Opened from the main toolbar via QLiberationWindow.showLogisticsDialog().
-    Follows the same pattern as QSettingsWindow, QStatsWindow, QNotesWindow:
-      self.dialog = QLogisticsWindow(self.game)
-      self.dialog.show()
-
-    If no campaign is loaded (game is None), shows a placeholder message
-    rather than crashing — matches the behaviour of the other windows.
-    """
-
-    def __init__(self, game: Optional[Game], parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self, game: Optional[Game], parent: Optional[QWidget] = None
+    ) -> None:
         super().__init__(parent)
         self.game = game
         self.setWindowTitle("Logistics & Supply Chain")
-        self.setMinimumSize(920, 640)
+        self.setMinimumSize(960, 680)
         self._build_ui()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
 
-        # Header
         header = QLabel("Logistics & Supply Chain")
         font = QFont()
         font.setPointSize(14)
@@ -730,7 +772,6 @@ class QLogisticsWindow(QDialog):
         header.setFont(font)
         layout.addWidget(header)
 
-        # Guard: no campaign loaded
         if self.game is None or not hasattr(self.game, "logistics"):
             placeholder = QLabel(
                 "No campaign is currently loaded.\n"
@@ -739,36 +780,32 @@ class QLogisticsWindow(QDialog):
             placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
             placeholder.setStyleSheet("color: grey; font-size: 13px;")
             layout.addWidget(placeholder)
+            close_btn = QPushButton("Close")
+            close_btn.clicked.connect(self.close)
+            layout.addWidget(close_btn)
             return
 
         logistics: LogisticsManager = self.game.logistics
         coalition = "blue"
         turn = getattr(self.game, "turn", 0)
 
-        # Three-tab layout
         tabs = QTabWidget()
-
         self.dz_tab = DropZonesTab(logistics, coalition)
         tabs.addTab(self.dz_tab, "Drop Zones")
-
         self.wh_tab = WarehouseTab(logistics, coalition)
         tabs.addTab(self.wh_tab, "Warehouses")
-
         self.tr_tab = TransfersTab(logistics, coalition, current_turn=turn)
         tabs.addTab(self.tr_tab, "Transfers")
-
         layout.addWidget(tabs)
 
-        # Close button at the bottom
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.close)
         btn_row = QHBoxLayout()
         btn_row.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.close)
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)
 
     def refresh(self) -> None:
-        """Call after each turn to update all sub-tabs with fresh data."""
         if hasattr(self, "dz_tab"):
             self.dz_tab.refresh()
         if hasattr(self, "wh_tab"):
