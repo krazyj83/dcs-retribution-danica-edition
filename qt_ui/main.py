@@ -13,6 +13,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication, QCheckBox, QSplashScreen
 from dcs.liveries.liverycache import LiveryCache
 from dcs.payloads import PayloadDirectories
+from qt_ui.logisticspanel import LogisticsPanel
 
 from game import Game, VERSION, logging_config, persistency
 from game.ato import FlightType
