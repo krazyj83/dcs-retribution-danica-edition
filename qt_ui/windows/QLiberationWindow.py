@@ -42,6 +42,7 @@ from qt_ui.windows.QDebriefingWindow import QDebriefingWindow
 from qt_ui.windows.basemenu.QBaseMenu2 import QBaseMenu2
 from qt_ui.windows.groundobject.QGroundObjectMenu import QGroundObjectMenu
 from qt_ui.windows.infos.QInfoPanel import QInfoPanel
+from qt_ui.windows.logistics.QLogisticsWindow import QLogisticsWindow
 from qt_ui.windows.logs.QLogsWindow import QLogsWindow
 from qt_ui.windows.newgame.QNewGameWizard import NewGameWizard
 from qt_ui.windows.notes.QNotesWindow import QNotesWindow
@@ -225,6 +226,12 @@ class QLiberationWindow(QMainWindow):
         self.openNotesAction.setIcon(CONST.ICONS["Notes"])
         self.openNotesAction.triggered.connect(self.showNotesDialog)
 
+        # ---------------------------------------------------------------
+        # Logistics action — opens the Logistics & Supply Chain window
+        # ---------------------------------------------------------------
+        self.openLogisticsAction = QAction("Logistics", self)
+        self.openLogisticsAction.triggered.connect(self.showLogisticsDialog)
+
         self.importTemplatesAction = QAction("Import Layouts", self)
         self.importTemplatesAction.triggered.connect(self.import_templates)
 
@@ -234,6 +241,8 @@ class QLiberationWindow(QMainWindow):
         self.openSettingsAction.setVisible(enabled)
         self.openStatsAction.setVisible(enabled)
         self.openNotesAction.setVisible(enabled)
+        # Hide logistics button when no campaign is loaded
+        self.openLogisticsAction.setVisible(enabled)
 
         # Also Disable SaveAction to prevent Keyboard Shortcut
         self.saveGameAction.setEnabled(enabled)
@@ -258,6 +267,8 @@ class QLiberationWindow(QMainWindow):
         self.actions_bar.addAction(self.openSettingsAction)
         self.actions_bar.addAction(self.openStatsAction)
         self.actions_bar.addAction(self.openNotesAction)
+        # Logistics button sits alongside Settings, Stats, Notes
+        self.actions_bar.addAction(self.openLogisticsAction)
 
     def initMenuBar(self):
         self.menu = self.menuBar()
@@ -598,6 +609,10 @@ class QLiberationWindow(QMainWindow):
 
     def showNotesDialog(self):
         self.dialog = QNotesWindow(self.game)
+        self.dialog.show()
+
+    def showLogisticsDialog(self):
+        self.dialog = QLogisticsWindow(self.game)
         self.dialog.show()
 
     def import_templates(self):
