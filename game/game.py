@@ -51,6 +51,7 @@ if TYPE_CHECKING:
     from .sim import GameUpdateEvents
     from .squadrons import AirWing
     from .threatzones import ThreatZones
+    from game.logistics import LogisticsManager
 
 COMMISION_UNIT_VARIETY = 4
 COMMISION_LIMITS_SCALE = 1.5
@@ -127,6 +128,8 @@ class Game:
         self.current_group_id = 0
         self.name_generator = naming.namegen
         self.laser_code_registry = LaserCodeRegistry()
+        self.db = GameDb()
+        self.logistics = LogisticsManager()
 
         self.db = GameDb()
 
