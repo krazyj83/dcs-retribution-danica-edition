@@ -32,7 +32,7 @@ app.include_router(supplyroutes.router)
 app.include_router(tgos.router)
 app.include_router(waypoints.router)
 app.include_router(iadsnetwork.router)
-
+app.include_router(logistics_router)
 
 origins = ["file://"]
 if ServerSettings.get().cors_allow_debug_server:
