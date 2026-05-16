@@ -50,6 +50,7 @@ from qt_ui.windows.preferences.QLiberationPreferencesWindow import (
 )
 from qt_ui.windows.settings.QSettingsWindow import QSettingsWindow
 from qt_ui.windows.stats.QStatsWindow import QStatsWindow
+from qt_ui.windows.logistics.QLogisticsWindow import QLogisticsWindow
 
 
 class QLiberationWindow(QMainWindow):
@@ -225,6 +226,9 @@ class QLiberationWindow(QMainWindow):
         self.openNotesAction.setIcon(CONST.ICONS["Notes"])
         self.openNotesAction.triggered.connect(self.showNotesDialog)
 
+        self.openLogisticsAction = QAction("Logistics", self)
+        self.openLogisticsAction.triggered.connect(self.showLogisticsDialog)
+
         self.importTemplatesAction = QAction("Import Layouts", self)
         self.importTemplatesAction.triggered.connect(self.import_templates)
 
@@ -234,6 +238,7 @@ class QLiberationWindow(QMainWindow):
         self.openSettingsAction.setVisible(enabled)
         self.openStatsAction.setVisible(enabled)
         self.openNotesAction.setVisible(enabled)
+        self.openLogisticsAction.setVisible(enabled)
 
         # Also Disable SaveAction to prevent Keyboard Shortcut
         self.saveGameAction.setEnabled(enabled)
@@ -258,6 +263,7 @@ class QLiberationWindow(QMainWindow):
         self.actions_bar.addAction(self.openSettingsAction)
         self.actions_bar.addAction(self.openStatsAction)
         self.actions_bar.addAction(self.openNotesAction)
+        self.actions_bar.addAction(self.openLogisticsAction)
 
     def initMenuBar(self):
         self.menu = self.menuBar()
@@ -598,6 +604,10 @@ class QLiberationWindow(QMainWindow):
 
     def showNotesDialog(self):
         self.dialog = QNotesWindow(self.game)
+        self.dialog.show()
+
+    def showLogisticsDialog(self):
+        self.dialog = QLogisticsWindow(self.game)
         self.dialog.show()
 
     def import_templates(self):
