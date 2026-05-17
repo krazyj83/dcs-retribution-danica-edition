@@ -2,18 +2,15 @@
 qt_ui/windows/logistics/QLogisticsWindow.py
 
 Logistics & Supply Chain window for DCS Retribution.
-Opens as a popup dialog from the main toolbar (alongside Settings, Stats, Notes).
-
-Three tabs:
-  1. Drop Zones  - create/edit/delete troop and cargo drop zones
-  2. Warehouses  - view stock levels, transfer stock between bases,
-                   export/import warehouse inventory via CSV
-  3. Transfers   - schedule, monitor, and cancel logistics deliveries
+Four tabs:
+  1. Drop Zones  - create/edit/delete drop zones for any faction base or map point
+  2. Warehouses  - broad supply stock levels with base filter and sync
+  3. Inventory   - detailed per-base weapon, equipment and ground unit breakdown
+  4. Transfers   - schedule, monitor, and cancel logistics deliveries
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional, List, Tuple
 
 from PySide6.QtCore import Qt, Signal
@@ -39,6 +36,10 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QWidget,
     QFileDialog,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QSplitter,
+    QSpinBox,
 )
 
 from game import Game
@@ -50,22 +51,47 @@ from game.logistics import (
     LogisticsManager,
     LogisticsTransfer,
     TransferStatus,
+    WeaponInventory,
+    WeaponStockItem,
+    build_weapon_inventory,
 )
 
 
 # ======================================================================
-# Colour helpers
+# Colours
 # ======================================================================
 
-STOCK_CRITICAL_COLOR = QColor("#c0392b")  # red   < 15%
-STOCK_LOW_COLOR      = QColor("#e67e22")  # amber  15-40%
-STOCK_OK_COLOR       = QColor("#27ae60")  # green  > 40%
+STOCK_CRITICAL_COLOR = QColor("#c0392b")
+STOCK_LOW_COLOR      = QColor("#e67e22")
+STOCK_OK_COLOR       = QColor("#27ae60")
+BLUE_COLOR           = QColor("#3498db")
+RED_COLOR            = QColor("#e74c3c")
+NEUTRAL_COLOR        = QColor("#95a5a6")
 
 STATUS_COLORS = {
     TransferStatus.PLANNED:   QColor("#3498db"),
     TransferStatus.IN_FLIGHT: QColor("#f39c12"),
     TransferStatus.DELIVERED: QColor("#27ae60"),
     TransferStatus.FAILED:    QColor("#c0392b"),
+}
+
+CATEGORY_COLORS = {
+    "Air-to-Air":               QColor("#3498db"),
+    "Air-to-Ground Missile":    QColor("#e67e22"),
+    "Bomb":                     QColor("#e74c3c"),
+    "Rocket":                   QColor("#f39c12"),
+    "Fuel Tank":                QColor("#95a5a6"),
+    "Pod":                      QColor("#9b59b6"),
+    "Gun / Cannon":             QColor("#1abc9c"),
+    "Anti-Ship":                QColor("#2980b9"),
+    "Armour":                   QColor("#c0392b"),
+    "Air Defence":              QColor("#8e44ad"),
+    "Infantry Fighting Vehicle":QColor("#d35400"),
+    "Artillery":                QColor("#e74c3c"),
+    "Support Vehicle":          QColor("#7f8c8d"),
+    "Radar / Command":          QColor("#16a085"),
+    "Other Ground":             QColor("#95a5a6"),
+    "Other":                    QColor("#7f8c8d"),
 }
 
 
@@ -80,16 +106,7 @@ def stock_color(quantity: float, capacity: float) -> QColor:
     return STOCK_OK_COLOR
 
 
-def get_blue_control_points(game: Game):
-    """Return list of blue coalition control points."""
-    try:
-        return list(game.theater.player_points())
-    except Exception:
-        return []
-
-
 def cp_latlng(cp) -> Tuple[float, float]:
-    """Extract (lat, lon) from a ControlPoint."""
     try:
         ll = cp.position.latlng()
         return ll.lat, ll.lng
@@ -97,31 +114,91 @@ def cp_latlng(cp) -> Tuple[float, float]:
         return 0.0, 0.0
 
 
+def cp_faction(cp) -> str:
+    try:
+        if cp.captured.is_blue:
+            return "blue"
+        elif cp.captured.is_red:
+            return "red"
+        return "neutral"
+    except Exception:
+        return "neutral"
+
+
+def all_control_points(game: Game) -> List:
+    try:
+        cps = list(game.theater.controlpoints)
+        blue    = [cp for cp in cps if cp_faction(cp) == "blue"]
+        red     = [cp for cp in cps if cp_faction(cp) == "red"]
+        neutral = [cp for cp in cps if cp_faction(cp) == "neutral"]
+        return blue + red + neutral
+    except Exception:
+        return []
+
+
+def blue_control_points(game: Game) -> List:
+    try:
+        return list(game.theater.player_points())
+    except Exception:
+        return []
+
+
 def sync_warehouses_from_game(logistics: LogisticsManager, game: Game) -> None:
-    """
-    Populate the LogisticsManager with a Warehouse for every blue control point.
-    Existing warehouses are kept; new ones are added with default stock.
-    """
-    for cp in get_blue_control_points(game):
+    for cp in blue_control_points(game):
         if cp.id not in logistics._warehouses:
-            logistics._warehouses[cp.id] = Warehouse(
-                cp_id=cp.id,
-                cp_name=cp.name,
-            )
+            logistics._warehouses[cp.id] = Warehouse(cp_id=cp.id, cp_name=cp.name)
         else:
-            # Keep stock but update name in case it changed
             logistics._warehouses[cp.id].cp_name = cp.name
 
 
 # ======================================================================
-# Drop Zone creation / edit dialog
+# Map point picker
+# ======================================================================
+
+class MapPointPickerDialog(QDialog):
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Enter Map Coordinates")
+        self.setMinimumWidth(380)
+        layout = QVBoxLayout(self)
+        info = QLabel(
+            "Enter the latitude and longitude of the drop zone.\n"
+            "Read coordinates from DCS by right-clicking the map."
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet("color: grey; font-size: 11px;")
+        layout.addWidget(info)
+        form = QFormLayout()
+        self.lat_spin = QDoubleSpinBox()
+        self.lat_spin.setRange(-90.0, 90.0)
+        self.lat_spin.setDecimals(6)
+        self.lat_spin.setSingleStep(0.001)
+        self.lon_spin = QDoubleSpinBox()
+        self.lon_spin.setRange(-180.0, 180.0)
+        self.lon_spin.setDecimals(6)
+        self.lon_spin.setSingleStep(0.001)
+        form.addRow("Latitude:", self.lat_spin)
+        form.addRow("Longitude:", self.lon_spin)
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def get_latlng(self) -> Tuple[float, float]:
+        return self.lat_spin.value(), self.lon_spin.value()
+
+
+# ======================================================================
+# Drop Zone dialog
 # ======================================================================
 
 class DropZoneDialog(QDialog):
     def __init__(
         self,
         game: Game,
-        coalition: str,
         parent: Optional[QWidget] = None,
         existing: Optional[DropZone] = None,
         preselect_cp_id: Optional[int] = None,
@@ -130,80 +207,64 @@ class DropZoneDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.game = game
-        self.coalition = coalition
         self.existing = existing
+        self._all_cps = all_control_points(game)
         self.setWindowTitle("Edit Drop Zone" if existing else "New Drop Zone")
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(520)
         self._build_ui(preselect_cp_id, preset_lat, preset_lon)
         if existing:
             self._populate(existing)
 
-    def _build_ui(
-        self,
-        preselect_cp_id: Optional[int],
-        preset_lat: Optional[float],
-        preset_lon: Optional[float],
-    ) -> None:
+    def _build_ui(self, preselect_cp_id, preset_lat, preset_lon) -> None:
         layout = QVBoxLayout(self)
         form = QFormLayout()
 
-        # --- Name ---
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("e.g. LZ ALPHA")
         form.addRow("Zone name:", self.name_edit)
 
-        # --- Type ---
         self.type_combo = QComboBox()
         self.type_combo.addItem("Troop drop zone", DropZoneType.TROOP)
         self.type_combo.addItem("Cargo drop zone", DropZoneType.CARGO)
         form.addRow("Type:", self.type_combo)
 
-        # --- Associated base (from blue CPs) ---
         self.base_combo = QComboBox()
-        self.base_combo.addItem("-- No base --", -1)
-        self._blue_cps = get_blue_control_points(self.game)
-        for cp in self._blue_cps:
-            self.base_combo.addItem(cp.name, cp.id)
+        self.base_combo.addItem("-- Custom map point --", -1)
+        for cp in self._all_cps:
+            faction = cp_faction(cp)
+            self.base_combo.addItem(f"[{faction.upper()}] {cp.name}", cp.id)
         form.addRow("Associated base:", self.base_combo)
 
-        # --- Location ---
         loc_group = QGroupBox("Location")
         loc_layout = QVBoxLayout(loc_group)
-
         coord_row = QHBoxLayout()
         self.lat_spin = QDoubleSpinBox()
         self.lat_spin.setRange(-90.0, 90.0)
         self.lat_spin.setDecimals(6)
         self.lat_spin.setSingleStep(0.001)
         self.lat_spin.setPrefix("Lat: ")
-
         self.lon_spin = QDoubleSpinBox()
         self.lon_spin.setRange(-180.0, 180.0)
         self.lon_spin.setDecimals(6)
         self.lon_spin.setSingleStep(0.001)
         self.lon_spin.setPrefix("Lon: ")
-
         coord_row.addWidget(self.lat_spin)
         coord_row.addWidget(self.lon_spin)
         loc_layout.addLayout(coord_row)
-
-        self.use_base_pos_btn = QPushButton("Use selected base location")
-        self.use_base_pos_btn.setToolTip(
-            "Auto-fill coordinates from the base selected above."
-        )
-        self.use_base_pos_btn.clicked.connect(self._on_use_base_pos)
-        loc_layout.addWidget(self.use_base_pos_btn)
-
-        loc_hint = QLabel(
-            "Select a base above and click 'Use selected base location' to "
-            "auto-fill coordinates, or enter coordinates manually."
-        )
+        btn_row = QHBoxLayout()
+        self.use_base_btn = QPushButton("Use selected base location")
+        self.use_base_btn.clicked.connect(self._on_use_base_pos)
+        self.pick_map_btn = QPushButton("Enter map coordinates...")
+        self.pick_map_btn.clicked.connect(self._on_pick_map)
+        btn_row.addWidget(self.use_base_btn)
+        btn_row.addWidget(self.pick_map_btn)
+        loc_layout.addLayout(btn_row)
+        loc_hint = QLabel("Tip: Read coordinates from DCS by right-clicking the map.")
         loc_hint.setWordWrap(True)
         loc_hint.setStyleSheet("color: grey; font-size: 11px;")
         loc_layout.addWidget(loc_hint)
         form.addRow(loc_group)
 
-        # --- Radius ---
         self.radius_spin = QDoubleSpinBox()
         self.radius_spin.setRange(100.0, 5000.0)
         self.radius_spin.setSingleStep(100.0)
@@ -211,33 +272,27 @@ class DropZoneDialog(QDialog):
         self.radius_spin.setSuffix(" m")
         form.addRow("Radius:", self.radius_spin)
 
-        # --- Active ---
         self.active_check = QCheckBox("Active (include in next mission)")
         self.active_check.setChecked(True)
         form.addRow("", self.active_check)
 
-        # --- Notes ---
         self.notes_edit = QTextEdit()
-        self.notes_edit.setMaximumHeight(80)
+        self.notes_edit.setMaximumHeight(70)
         self.notes_edit.setPlaceholderText("Optional notes...")
         form.addRow("Notes:", self.notes_edit)
 
         layout.addLayout(form)
-
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        # Apply presets
         if preselect_cp_id is not None:
             idx = self.base_combo.findData(preselect_cp_id)
             if idx >= 0:
                 self.base_combo.setCurrentIndex(idx)
-
         if preset_lat is not None:
             self.lat_spin.setValue(preset_lat)
         if preset_lon is not None:
@@ -246,14 +301,21 @@ class DropZoneDialog(QDialog):
     def _on_use_base_pos(self) -> None:
         cp_id = self.base_combo.currentData()
         if cp_id == -1:
-            QMessageBox.information(self, "No base selected", "Please select a base first.")
+            QMessageBox.information(self, "No base", "Please select a base first.")
             return
-        cp = next((c for c in self._blue_cps if c.id == cp_id), None)
-        if cp is None:
-            return
-        lat, lon = cp_latlng(cp)
-        self.lat_spin.setValue(lat)
-        self.lon_spin.setValue(lon)
+        cp = next((c for c in self._all_cps if c.id == cp_id), None)
+        if cp:
+            lat, lon = cp_latlng(cp)
+            self.lat_spin.setValue(lat)
+            self.lon_spin.setValue(lon)
+
+    def _on_pick_map(self) -> None:
+        dlg = MapPointPickerDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            lat, lon = dlg.get_latlng()
+            self.lat_spin.setValue(lat)
+            self.lon_spin.setValue(lon)
+            self.base_combo.setCurrentIndex(0)
 
     def _populate(self, dz: DropZone) -> None:
         self.name_edit.setText(dz.name)
@@ -279,23 +341,20 @@ class DropZoneDialog(QDialog):
         cp_id = self.base_combo.currentData()
         if cp_id == -1:
             cp_id = 0
-        cp = next((c for c in self._blue_cps if c.id == cp_id), None)
-        cp_name = cp.name if cp else "Unknown"
-        kwargs = dict(
+        cp = next((c for c in self._all_cps if c.id == cp_id), None)
+        return DropZone(
             name=self.name_edit.text().strip().upper(),
             dz_type=self.type_combo.currentData(),
             lat=self.lat_spin.value(),
             lon=self.lon_spin.value(),
             radius_m=self.radius_spin.value(),
             cp_id=cp_id,
-            cp_name=cp_name,
-            coalition=self.coalition,
+            cp_name=cp.name if cp else "Custom point",
+            coalition=cp_faction(cp) if cp else "blue",
             active=self.active_check.isChecked(),
             notes=self.notes_edit.toPlainText(),
+            **({"dz_id": self.existing.dz_id} if self.existing else {}),
         )
-        if self.existing:
-            kwargs["dz_id"] = self.existing.dz_id
-        return DropZone(**kwargs)
 
 
 # ======================================================================
@@ -307,19 +366,15 @@ class DropZonesTab(QWidget):
     dropZoneRemoved = Signal(str)
     dropZoneUpdated = Signal(object)
 
-    def __init__(
-        self, logistics: LogisticsManager, coalition: str, game: Game
-    ) -> None:
+    def __init__(self, logistics: LogisticsManager, game: Game) -> None:
         super().__init__()
         self.logistics = logistics
-        self.coalition = coalition
         self.game = game
         self._build_ui()
         self.refresh()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-
         toolbar = QHBoxLayout()
         self.add_btn = QPushButton("+ Add Drop Zone")
         self.add_btn.clicked.connect(self._on_add)
@@ -336,56 +391,55 @@ class DropZonesTab(QWidget):
         layout.addLayout(toolbar)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(8)
-        self.table.setHorizontalHeaderLabels(
-            ["Name", "Type", "Base", "Latitude", "Longitude", "Radius (m)", "Active", "Notes"]
-        )
-        self.table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
+        self.table.setColumnCount(9)
+        self.table.setHorizontalHeaderLabels([
+            "Name", "Type", "Faction", "Base",
+            "Latitude", "Longitude", "Radius (m)", "Active", "Notes"
+        ])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
         layout.addWidget(self.table)
 
         info = QLabel(
-            "Drop zones appear as trigger zones in the generated .miz file. "
-            "Select a base when adding to associate the drop zone with that base's warehouse. "
-            "Use the Logistics button in the toolbar to add a drop zone at a specific map location."
+            "Drop zones can be placed at any base (blue, red, or neutral) or at a "
+            "custom map coordinate. Use 'Enter map coordinates' to place anywhere."
         )
         info.setWordWrap(True)
         info.setStyleSheet("color: grey; font-size: 11px;")
         layout.addWidget(info)
 
     def refresh(self) -> None:
-        dzs = self.logistics.active_drop_zones(self.coalition)
+        dzs = list(self.logistics._drop_zones.values())
         self.table.setRowCount(len(dzs))
         for row, dz in enumerate(dzs):
             self.table.setItem(row, 0, QTableWidgetItem(dz.name))
             type_item = QTableWidgetItem(dz.dz_type.value.capitalize())
             type_item.setForeground(
-                QColor("#e67e22")
-                if dz.dz_type == DropZoneType.TROOP
-                else QColor("#3498db")
+                QColor("#e67e22") if dz.dz_type == DropZoneType.TROOP else QColor("#3498db")
             )
             self.table.setItem(row, 1, type_item)
-            cp_name = getattr(dz, "cp_name", str(dz.cp_id))
-            self.table.setItem(row, 2, QTableWidgetItem(cp_name))
-            self.table.setItem(row, 3, QTableWidgetItem(f"{dz.lat:.6f}"))
-            self.table.setItem(row, 4, QTableWidgetItem(f"{dz.lon:.6f}"))
-            self.table.setItem(row, 5, QTableWidgetItem(f"{dz.radius_m:.0f}"))
+            faction = getattr(dz, "coalition", "blue")
+            faction_item = QTableWidgetItem(faction.upper())
+            faction_item.setForeground(
+                BLUE_COLOR if faction == "blue" else RED_COLOR if faction == "red" else NEUTRAL_COLOR
+            )
+            self.table.setItem(row, 2, faction_item)
+            self.table.setItem(row, 3, QTableWidgetItem(getattr(dz, "cp_name", "")))
+            self.table.setItem(row, 4, QTableWidgetItem(f"{dz.lat:.6f}"))
+            self.table.setItem(row, 5, QTableWidgetItem(f"{dz.lon:.6f}"))
+            self.table.setItem(row, 6, QTableWidgetItem(f"{dz.radius_m:.0f}"))
             active_item = QTableWidgetItem("Yes" if dz.active else "No")
             active_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 6, active_item)
-            self.table.setItem(row, 7, QTableWidgetItem(dz.notes))
+            self.table.setItem(row, 7, active_item)
+            self.table.setItem(row, 8, QTableWidgetItem(dz.notes))
             self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, dz.dz_id)
 
     def _selected_dz_id(self) -> Optional[str]:
         if not self.table.selectedItems():
             return None
-        return self.table.item(
-            self.table.currentRow(), 0
-        ).data(Qt.ItemDataRole.UserRole)
+        return self.table.item(self.table.currentRow(), 0).data(Qt.ItemDataRole.UserRole)
 
     def _on_selection_changed(self) -> None:
         has = bool(self.table.selectedItems())
@@ -393,7 +447,7 @@ class DropZonesTab(QWidget):
         self.delete_btn.setEnabled(has)
 
     def _on_add(self) -> None:
-        dlg = DropZoneDialog(game=self.game, coalition=self.coalition, parent=self)
+        dlg = DropZoneDialog(game=self.game, parent=self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             dz = dlg.get_drop_zone()
             self.logistics.add_drop_zone(dz)
@@ -407,9 +461,7 @@ class DropZonesTab(QWidget):
         existing = self.logistics.get_drop_zone(dz_id)
         if not existing:
             return
-        dlg = DropZoneDialog(
-            game=self.game, coalition=self.coalition, parent=self, existing=existing
-        )
+        dlg = DropZoneDialog(game=self.game, parent=self, existing=existing)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             updated = dlg.get_drop_zone()
             self.logistics._drop_zones[dz_id] = updated
@@ -423,8 +475,7 @@ class DropZonesTab(QWidget):
         dz = self.logistics.get_drop_zone(dz_id)
         reply = QMessageBox.question(
             self, "Delete Drop Zone",
-            f"Delete drop zone '{dz.name}'?\n"
-            "Any planned transfers to this zone will be cancelled.",
+            f"Delete drop zone '{dz.name}'?\nPlanned transfers will be cancelled.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
@@ -432,20 +483,10 @@ class DropZonesTab(QWidget):
             self.dropZoneRemoved.emit(dz_id)
             self.refresh()
 
-    def add_drop_zone_at(
-        self,
-        lat: float,
-        lon: float,
-        cp_id: Optional[int] = None,
-    ) -> None:
-        """Open the add dialog pre-filled with a specific map location."""
+    def add_drop_zone_at(self, lat: float, lon: float, cp_id: Optional[int] = None) -> None:
         dlg = DropZoneDialog(
-            game=self.game,
-            coalition=self.coalition,
-            parent=self,
-            preselect_cp_id=cp_id,
-            preset_lat=lat,
-            preset_lon=lon,
+            game=self.game, parent=self,
+            preselect_cp_id=cp_id, preset_lat=lat, preset_lon=lon,
         )
         if dlg.exec() == QDialog.DialogCode.Accepted:
             dz = dlg.get_drop_zone()
@@ -455,16 +496,13 @@ class DropZonesTab(QWidget):
 
 
 # ======================================================================
-# Tab 2 - Warehouses
+# Tab 2 - Warehouses (broad stock)
 # ======================================================================
 
 class WarehouseTab(QWidget):
-    def __init__(
-        self, logistics: LogisticsManager, coalition: str, game: Game
-    ) -> None:
+    def __init__(self, logistics: LogisticsManager, game: Game) -> None:
         super().__init__()
         self.logistics = logistics
-        self.coalition = coalition
         self.game = game
         self._build_ui()
         self.refresh()
@@ -472,37 +510,29 @@ class WarehouseTab(QWidget):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
 
-        # --- Base filter + sync ---
         base_row = QHBoxLayout()
         base_row.addWidget(QLabel("Filter by base:"))
         self.base_filter_combo = QComboBox()
         self.base_filter_combo.addItem("All bases", -1)
-        self.base_filter_combo.currentIndexChanged.connect(self._on_base_filter_changed)
+        self.base_filter_combo.currentIndexChanged.connect(self._on_filter_changed)
         base_row.addWidget(self.base_filter_combo)
         base_row.addStretch()
-        self.sync_btn = QPushButton("Sync bases from map")
-        self.sync_btn.setToolTip(
-            "Re-read blue bases from the current campaign and add any missing warehouses."
-        )
+        self.sync_btn = QPushButton("Sync bases from campaign")
         self.sync_btn.clicked.connect(self._on_sync)
         base_row.addWidget(self.sync_btn)
         layout.addLayout(base_row)
 
-        # --- Stock table ---
         self.table = QTableWidget()
         cats = list(WarehouseCategory)
         self.table.setColumnCount(1 + len(cats))
         self.table.setHorizontalHeaderLabels(
             ["Base"] + [c.value.replace("_", " ").title() for c in cats]
         )
-        self.table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(self.table)
 
-        # --- Direct transfer ---
         transfer_group = QGroupBox("Direct Stock Transfer (instant, no aircraft)")
         exp_layout = QFormLayout()
         self.from_combo = QComboBox()
@@ -527,8 +557,7 @@ class WarehouseTab(QWidget):
         self.status_label = QLabel("")
         layout.addWidget(self.status_label)
 
-        # --- CSV ---
-        csv_group = QGroupBox("Warehouse CSV - export / import stock")
+        csv_group = QGroupBox("Warehouse CSV")
         csv_layout = QHBoxLayout()
         self.export_csv_btn = QPushButton("Export to CSV")
         self.export_csv_btn.clicked.connect(self._on_export_csv)
@@ -542,12 +571,10 @@ class WarehouseTab(QWidget):
 
     def _current_warehouses(self):
         cp_id = self.base_filter_combo.currentData()
-        all_wh = self.logistics.warehouses_for_coalition(self.coalition)
-        if cp_id == -1:
-            return all_wh
-        return [w for w in all_wh if w.cp_id == cp_id]
+        all_wh = self.logistics.warehouses_for_coalition("blue")
+        return all_wh if cp_id == -1 else [w for w in all_wh if w.cp_id == cp_id]
 
-    def _on_base_filter_changed(self) -> None:
+    def _on_filter_changed(self) -> None:
         self._update_table(self._current_warehouses())
 
     def _on_sync(self) -> None:
@@ -558,21 +585,18 @@ class WarehouseTab(QWidget):
         )
 
     def refresh(self) -> None:
-        current_cp_id = self.base_filter_combo.currentData()
+        current = self.base_filter_combo.currentData()
         self.base_filter_combo.blockSignals(True)
         self.base_filter_combo.clear()
         self.base_filter_combo.addItem("All bases", -1)
-        for wh in self.logistics.warehouses_for_coalition(self.coalition):
+        for wh in self.logistics.warehouses_for_coalition("blue"):
             self.base_filter_combo.addItem(wh.cp_name, wh.cp_id)
-        idx = self.base_filter_combo.findData(current_cp_id)
+        idx = self.base_filter_combo.findData(current)
         if idx >= 0:
             self.base_filter_combo.setCurrentIndex(idx)
         self.base_filter_combo.blockSignals(False)
-
         self._update_table(self._current_warehouses())
-        self._update_transfer_combos(
-            self.logistics.warehouses_for_coalition(self.coalition)
-        )
+        self._update_transfer_combos()
 
     def _update_table(self, warehouses) -> None:
         cats = list(WarehouseCategory)
@@ -580,21 +604,18 @@ class WarehouseTab(QWidget):
         for row, wh in enumerate(warehouses):
             self.table.setItem(row, 0, QTableWidgetItem(wh.cp_name))
             for col, cat in enumerate(cats, start=1):
-                item_data = wh.stock[cat]
-                pct = (
-                    int(100 * item_data.quantity / item_data.capacity)
-                    if item_data.capacity else 0
-                )
+                sd = wh.stock[cat]
+                pct = int(100 * sd.quantity / sd.capacity) if sd.capacity else 0
                 cell = QTableWidgetItem(
-                    f"{item_data.quantity:.0f} / {item_data.capacity:.0f} ({pct}%)"
+                    f"{sd.quantity:.0f} / {sd.capacity:.0f} ({pct}%)"
                 )
-                cell.setForeground(stock_color(item_data.quantity, item_data.capacity))
+                cell.setForeground(stock_color(sd.quantity, sd.capacity))
                 self.table.setItem(row, col, cell)
 
-    def _update_transfer_combos(self, warehouses) -> None:
+    def _update_transfer_combos(self) -> None:
         self.from_combo.clear()
         self.to_combo.clear()
-        for wh in warehouses:
+        for wh in self.logistics.warehouses_for_coalition("blue"):
             self.from_combo.addItem(wh.cp_name, wh.cp_id)
             self.to_combo.addItem(wh.cp_name, wh.cp_id)
 
@@ -609,22 +630,20 @@ class WarehouseTab(QWidget):
         if amount <= 0:
             self.status_label.setText("Amount must be greater than zero.")
             return
-        src_wh = self.logistics.get_warehouse(from_cp_id)
-        dst_wh = self.logistics.get_warehouse(to_cp_id)
-        if src_wh is None or dst_wh is None:
+        src = self.logistics.get_warehouse(from_cp_id)
+        dst = self.logistics.get_warehouse(to_cp_id)
+        if src is None or dst is None:
             self.status_label.setText("Warehouse not found.")
             return
-        transferred = src_wh.export_to(dst_wh, category, amount)
+        transferred = src.export_to(dst, category, amount)
         self.status_label.setText(
             f"Transferred {transferred:.0f} {category.value} "
-            f"from {src_wh.cp_name} to {dst_wh.cp_name}"
+            f"from {src.cp_name} to {dst.cp_name}"
         )
         self.refresh()
 
     def _on_export_csv(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export Warehouse CSV", "", "CSV files (*.csv)"
-        )
+        path, _ = QFileDialog.getSaveFileName(self, "Export CSV", "", "CSV files (*.csv)")
         if not path:
             return
         try:
@@ -633,29 +652,22 @@ class WarehouseTab(QWidget):
             with open(path, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
                 writer.writerow(["base"] + [c.value for c in cats])
-                for wh in self.logistics.warehouses_for_coalition(self.coalition):
-                    writer.writerow(
-                        [wh.cp_name] + [wh.stock[c].quantity for c in cats]
-                    )
+                for wh in self.logistics.warehouses_for_coalition("blue"):
+                    writer.writerow([wh.cp_name] + [wh.stock[c].quantity for c in cats])
             self.status_label.setText(f"Exported to: {path}")
             QMessageBox.information(self, "Export successful", f"Exported to:\n{path}")
         except Exception as e:
-            self.status_label.setText("Export failed.")
             QMessageBox.critical(self, "Export failed", str(e))
 
     def _on_import_csv(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Import Warehouse CSV", "", "CSV files (*.csv);;All files (*)"
-        )
+        path, _ = QFileDialog.getOpenFileName(self, "Import CSV", "", "CSV files (*.csv)")
         if not path:
             return
         try:
             import csv
-            imported = 0
-            warnings = []
+            imported, warnings = 0, []
             with open(path, newline="", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
+                for row in csv.DictReader(f):
                     base = row.get("base", "").strip()
                     wh = next(
                         (w for w in self.logistics._warehouses.values()
@@ -671,44 +683,278 @@ class WarehouseTab(QWidget):
                                 wh.stock[cat].quantity = float(val)
                                 imported += 1
                             except ValueError:
-                                warnings.append(
-                                    f"Invalid value for {base}/{cat.value}: {val}"
-                                )
+                                warnings.append(f"Bad value {base}/{cat.value}: {val}")
             self.status_label.setText(f"Imported {imported} rows.")
             self.refresh()
             if warnings:
-                QMessageBox.warning(self, "Import warnings", "\n".join(warnings))
+                QMessageBox.warning(self, "Warnings", "\n".join(warnings))
             else:
-                QMessageBox.information(self, "Import successful", f"Imported {imported} rows.")
+                QMessageBox.information(self, "Done", f"Imported {imported} rows.")
         except Exception as e:
-            self.status_label.setText("Import failed.")
             QMessageBox.critical(self, "Import failed", str(e))
 
 
 # ======================================================================
-# Tab 3 - Transfers
+# Tab 3 - Detailed Weapon & Equipment Inventory
 # ======================================================================
 
-class TransfersTab(QWidget):
-    transferScheduled = Signal(object)
-
-    def __init__(
-        self,
-        logistics: LogisticsManager,
-        coalition: str,
-        current_turn: int = 0,
-    ) -> None:
+class InventoryTab(QWidget):
+    def __init__(self, logistics: LogisticsManager, game: Game) -> None:
         super().__init__()
         self.logistics = logistics
-        self.coalition = coalition
-        self.current_turn = current_turn
+        self.game = game
         self._build_ui()
         self.refresh()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
 
-        sched_group = QGroupBox("Schedule New Transfer (requires aircraft + drop zone)")
+        # Top bar
+        top_row = QHBoxLayout()
+        top_row.addWidget(QLabel("Base:"))
+        self.base_combo = QComboBox()
+        self.base_combo.currentIndexChanged.connect(self._on_base_changed)
+        top_row.addWidget(self.base_combo)
+        top_row.addStretch()
+        self.sync_btn = QPushButton("Sync inventory from campaign")
+        self.sync_btn.setToolTip(
+            "Re-read weapon and equipment data from all blue bases."
+        )
+        self.sync_btn.clicked.connect(self._on_sync)
+        top_row.addWidget(self.sync_btn)
+        layout.addLayout(top_row)
+
+        # Splitter: category tree on left, items table on right
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Category tree
+        self.category_tree = QTreeWidget()
+        self.category_tree.setHeaderLabel("Categories")
+        self.category_tree.setMaximumWidth(220)
+        self.category_tree.itemSelectionChanged.connect(self._on_category_selected)
+        splitter.addWidget(self.category_tree)
+
+        # Items table
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.items_table = QTableWidget()
+        self.items_table.setColumnCount(4)
+        self.items_table.setHorizontalHeaderLabels([
+            "Item", "Category", "Quantity", "Capacity"
+        ])
+        self.items_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        self.items_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.items_table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.items_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.items_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.items_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        right_layout.addWidget(self.items_table)
+
+        # Edit quantity controls
+        edit_group = QGroupBox("Edit selected item quantity")
+        edit_layout = QHBoxLayout()
+        edit_layout.addWidget(QLabel("New quantity:"))
+        self.qty_spin = QSpinBox()
+        self.qty_spin.setRange(0, 9999)
+        edit_layout.addWidget(self.qty_spin)
+        self.apply_qty_btn = QPushButton("Apply")
+        self.apply_qty_btn.clicked.connect(self._on_apply_qty)
+        edit_layout.addWidget(self.apply_qty_btn)
+        edit_layout.addStretch()
+        self.zero_all_btn = QPushButton("Zero all (simulate capture)")
+        self.zero_all_btn.setToolTip(
+            "Set all non-fuel quantities to zero for this base."
+        )
+        self.zero_all_btn.clicked.connect(self._on_zero_all)
+        edit_layout.addWidget(self.zero_all_btn)
+        edit_group.setLayout(edit_layout)
+        right_layout.addWidget(edit_group)
+
+        self.status_label = QLabel("")
+        right_layout.addWidget(self.status_label)
+
+        splitter.addWidget(right_widget)
+        splitter.setSizes([200, 600])
+        layout.addWidget(splitter)
+
+        hint = QLabel(
+            "Inventory is derived from squadrons based at each airfield and their "
+            "available weapon types. Sync to update after campaign changes."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: grey; font-size: 11px;")
+        layout.addWidget(hint)
+
+    def _on_sync(self) -> None:
+        self.logistics.sync_weapon_inventories(self.game)
+        self.refresh()
+        self.status_label.setText("Weapon inventories synced from campaign.")
+
+    def refresh(self) -> None:
+        current_cp_id = self.base_combo.currentData()
+        self.base_combo.blockSignals(True)
+        self.base_combo.clear()
+        self.base_combo.addItem("-- Select base --", -1)
+        for wh in self.logistics.warehouses_for_coalition("blue"):
+            self.base_combo.addItem(wh.cp_name, wh.cp_id)
+        idx = self.base_combo.findData(current_cp_id)
+        if idx >= 0:
+            self.base_combo.setCurrentIndex(idx)
+        self.base_combo.blockSignals(False)
+        self._refresh_view()
+
+    def _on_base_changed(self) -> None:
+        self._refresh_view()
+
+    def _refresh_view(self) -> None:
+        self.category_tree.clear()
+        self.items_table.setRowCount(0)
+        cp_id = self.base_combo.currentData()
+        if cp_id == -1:
+            return
+
+        inv = self.logistics.get_weapon_inventory(cp_id)
+        if inv is None:
+            # Try building it on demand
+            cp = next(
+                (cp for cp in blue_control_points(self.game) if cp.id == cp_id), None
+            )
+            if cp:
+                inv = build_weapon_inventory(cp, self.game)
+                self.logistics.set_weapon_inventory(inv)
+            else:
+                return
+
+        by_cat = inv.items_by_category()
+
+        # Populate category tree
+        total_items = QTreeWidgetItem(self.category_tree)
+        total_items.setText(0, f"All ({len(inv.items)})")
+        total_items.setData(0, Qt.ItemDataRole.UserRole, "__all__")
+        font = QFont()
+        font.setBold(True)
+        total_items.setFont(0, font)
+
+        for cat, items in by_cat.items():
+            node = QTreeWidgetItem(self.category_tree)
+            node.setText(0, f"{cat} ({len(items)})")
+            node.setData(0, Qt.ItemDataRole.UserRole, cat)
+            color = CATEGORY_COLORS.get(cat, NEUTRAL_COLOR)
+            node.setForeground(0, color)
+
+        self.category_tree.expandAll()
+
+        # Show all items by default
+        self._show_items(list(inv.items.values()))
+
+    def _on_category_selected(self) -> None:
+        items = self.category_tree.selectedItems()
+        if not items:
+            return
+        cp_id = self.base_combo.currentData()
+        if cp_id == -1:
+            return
+        inv = self.logistics.get_weapon_inventory(cp_id)
+        if inv is None:
+            return
+
+        cat_key = items[0].data(0, Qt.ItemDataRole.UserRole)
+        if cat_key == "__all__":
+            self._show_items(list(inv.items.values()))
+        else:
+            self._show_items([i for i in inv.items.values() if i.category == cat_key])
+
+    def _show_items(self, items: List[WeaponStockItem]) -> None:
+        self.items_table.setRowCount(len(items))
+        for row, item in enumerate(items):
+            name_cell = QTableWidgetItem(item.name)
+            self.items_table.setItem(row, 0, name_cell)
+
+            cat_cell = QTableWidgetItem(item.category)
+            cat_cell.setForeground(CATEGORY_COLORS.get(item.category, NEUTRAL_COLOR))
+            self.items_table.setItem(row, 1, cat_cell)
+
+            qty_cell = QTableWidgetItem(str(item.quantity))
+            qty_cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if item.quantity == 0:
+                qty_cell.setForeground(STOCK_CRITICAL_COLOR)
+            elif item.quantity < item.capacity * 0.3:
+                qty_cell.setForeground(STOCK_LOW_COLOR)
+            else:
+                qty_cell.setForeground(STOCK_OK_COLOR)
+            self.items_table.setItem(row, 2, qty_cell)
+
+            cap_cell = QTableWidgetItem(str(item.capacity))
+            cap_cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.items_table.setItem(row, 3, cap_cell)
+
+            # Store clsid for editing
+            name_cell.setData(Qt.ItemDataRole.UserRole, item.clsid)
+
+    def _on_apply_qty(self) -> None:
+        selected = self.items_table.selectedItems()
+        if not selected:
+            self.status_label.setText("Select an item first.")
+            return
+        cp_id = self.base_combo.currentData()
+        inv = self.logistics.get_weapon_inventory(cp_id)
+        if inv is None:
+            return
+        clsid = self.items_table.item(
+            self.items_table.currentRow(), 0
+        ).data(Qt.ItemDataRole.UserRole)
+        if clsid in inv.items:
+            inv.items[clsid].quantity = self.qty_spin.value()
+            self._refresh_view()
+            self.status_label.setText(
+                f"Updated {inv.items[clsid].name} → {self.qty_spin.value()}"
+            )
+
+    def _on_zero_all(self) -> None:
+        cp_id = self.base_combo.currentData()
+        if cp_id == -1:
+            return
+        inv = self.logistics.get_weapon_inventory(cp_id)
+        if inv is None:
+            return
+        reply = QMessageBox.question(
+            self, "Zero inventory",
+            "Set all weapon and equipment quantities to zero for this base?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            inv.zero_all()
+            self._refresh_view()
+            self.status_label.setText("All quantities set to zero.")
+
+
+# ======================================================================
+# Tab 4 - Transfers
+# ======================================================================
+
+class TransfersTab(QWidget):
+    transferScheduled = Signal(object)
+
+    def __init__(self, logistics: LogisticsManager, current_turn: int = 0) -> None:
+        super().__init__()
+        self.logistics = logistics
+        self.current_turn = current_turn
+        self._build_ui()
+        self.refresh()
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        sched_group = QGroupBox("Schedule New Transfer")
         sched_layout = QFormLayout()
         self.src_combo  = QComboBox()
         self.dst_combo  = QComboBox()
@@ -722,7 +968,7 @@ class TransfersTab(QWidget):
         self.tamt_spin.setDecimals(0)
         self.tamt_spin.setValue(200.0)
         self.aircraft_edit = QLineEdit("UH-1H")
-        self.tnotes_edit   = QLineEdit()
+        self.tnotes_edit = QLineEdit()
         self.tnotes_edit.setPlaceholderText("Optional notes...")
         self.dst_combo.currentIndexChanged.connect(self._on_dst_changed)
         self.schedule_btn = QPushButton("Schedule Transfer")
@@ -745,13 +991,10 @@ class TransfersTab(QWidget):
             "ID", "From", "To", "Category",
             "Planned", "Delivered", "Status", "Turn",
         ])
-        self.table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(self.table)
-
         self.cancel_btn = QPushButton("Cancel Selected Transfer")
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self._on_cancel)
@@ -761,30 +1004,23 @@ class TransfersTab(QWidget):
         layout.addWidget(self.sched_status)
 
     def refresh(self) -> None:
-        warehouses = self.logistics.warehouses_for_coalition(self.coalition)
+        warehouses = self.logistics.warehouses_for_coalition("blue")
         for combo in (self.src_combo, self.dst_combo):
             combo.clear()
             for wh in warehouses:
                 combo.addItem(wh.cp_name, wh.cp_id)
         self._on_dst_changed()
-
         all_transfers = list(self.logistics._transfers.values())
         self.table.setRowCount(len(all_transfers))
         for row, t in enumerate(all_transfers):
-            src_wh = self.logistics.get_warehouse(t.source_cp_id)
-            dst_wh = self.logistics.get_warehouse(t.dest_cp_id)
+            src = self.logistics.get_warehouse(t.source_cp_id)
+            dst = self.logistics.get_warehouse(t.dest_cp_id)
             self.table.setItem(row, 0, QTableWidgetItem(t.transfer_id[:8]))
-            self.table.setItem(row, 1, QTableWidgetItem(
-                src_wh.cp_name if src_wh else str(t.source_cp_id)
-            ))
-            self.table.setItem(row, 2, QTableWidgetItem(
-                dst_wh.cp_name if dst_wh else str(t.dest_cp_id)
-            ))
+            self.table.setItem(row, 1, QTableWidgetItem(src.cp_name if src else str(t.source_cp_id)))
+            self.table.setItem(row, 2, QTableWidgetItem(dst.cp_name if dst else str(t.dest_cp_id)))
             self.table.setItem(row, 3, QTableWidgetItem(t.category.value))
             self.table.setItem(row, 4, QTableWidgetItem(f"{t.quantity:.0f}"))
-            self.table.setItem(row, 5, QTableWidgetItem(
-                f"{t.delivered:.0f}" if t.delivered else "-"
-            ))
+            self.table.setItem(row, 5, QTableWidgetItem(f"{t.delivered:.0f}" if t.delivered else "-"))
             status_item = QTableWidgetItem(t.status.value.capitalize())
             status_item.setForeground(STATUS_COLORS.get(t.status, QColor("white")))
             self.table.setItem(row, 6, status_item)
@@ -811,22 +1047,15 @@ class TransfersTab(QWidget):
             self.sched_status.setText("Source and destination must differ.")
             return
         if not dz_id:
-            self.sched_status.setText(
-                "No active drop zone at destination. Add one in the Drop Zones tab."
-            )
+            self.sched_status.setText("No active drop zone at destination.")
             return
         transfer = self.logistics.schedule_transfer(
-            source_cp_id=src_cp_id,
-            dest_cp_id=dst_cp_id,
-            dz_id=dz_id,
-            category=category,
-            quantity=quantity,
-            aircraft_type=aircraft,
-            turn=self.current_turn,
-            notes=notes,
+            source_cp_id=src_cp_id, dest_cp_id=dst_cp_id, dz_id=dz_id,
+            category=category, quantity=quantity, aircraft_type=aircraft,
+            turn=self.current_turn, notes=notes,
         )
         if transfer is None:
-            self.sched_status.setText("Insufficient available stock at source warehouse.")
+            self.sched_status.setText("Insufficient stock at source.")
         else:
             self.sched_status.setText(f"Transfer {transfer.transfer_id[:8]} scheduled.")
             self.transferScheduled.emit(transfer)
@@ -836,20 +1065,14 @@ class TransfersTab(QWidget):
         if not self.table.selectedItems():
             self.cancel_btn.setEnabled(False)
             return
-        tid = self.table.item(
-            self.table.currentRow(), 0
-        ).data(Qt.ItemDataRole.UserRole)
+        tid = self.table.item(self.table.currentRow(), 0).data(Qt.ItemDataRole.UserRole)
         t = self.logistics._transfers.get(tid)
-        self.cancel_btn.setEnabled(
-            t is not None and t.status == TransferStatus.PLANNED
-        )
+        self.cancel_btn.setEnabled(t is not None and t.status == TransferStatus.PLANNED)
 
     def _on_cancel(self) -> None:
         if not self.table.selectedItems():
             return
-        tid = self.table.item(
-            self.table.currentRow(), 0
-        ).data(Qt.ItemDataRole.UserRole)
+        tid = self.table.item(self.table.currentRow(), 0).data(Qt.ItemDataRole.UserRole)
         if self.logistics.cancel_transfer(tid):
             self.sched_status.setText(f"Transfer {tid[:8]} cancelled.")
             self.refresh()
@@ -860,13 +1083,11 @@ class TransfersTab(QWidget):
 # ======================================================================
 
 class QLogisticsWindow(QDialog):
-    def __init__(
-        self, game: Optional[Game], parent: Optional[QWidget] = None
-    ) -> None:
+    def __init__(self, game: Optional[Game], parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.game = game
         self.setWindowTitle("Logistics & Supply Chain")
-        self.setMinimumSize(960, 680)
+        self.setMinimumSize(1060, 740)
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -893,25 +1114,25 @@ class QLogisticsWindow(QDialog):
             layout.addWidget(close_btn)
             return
 
-        # Ensure logistics manager exists
         if not hasattr(self.game, "logistics") or self.game.logistics is None:
             from game.logistics import LogisticsManager
             self.game.logistics = LogisticsManager()
 
-        # Auto-sync blue bases on open
         sync_warehouses_from_game(self.game.logistics, self.game)
 
-        logistics: LogisticsManager = self.game.logistics
-        coalition = "blue"
+        logistics = self.game.logistics
         turn = getattr(self.game, "turn", 0)
 
         self._tabs = QTabWidget()
-        self.dz_tab = DropZonesTab(logistics, coalition, self.game)
-        self._tabs.addTab(self.dz_tab, "Drop Zones")
-        self.wh_tab = WarehouseTab(logistics, coalition, self.game)
-        self._tabs.addTab(self.wh_tab, "Warehouses")
-        self.tr_tab = TransfersTab(logistics, coalition, current_turn=turn)
-        self._tabs.addTab(self.tr_tab, "Transfers")
+        self.dz_tab  = DropZonesTab(logistics, self.game)
+        self.wh_tab  = WarehouseTab(logistics, self.game)
+        self.inv_tab = InventoryTab(logistics, self.game)
+        self.tr_tab  = TransfersTab(logistics, current_turn=turn)
+
+        self._tabs.addTab(self.dz_tab,  "Drop Zones")
+        self._tabs.addTab(self.wh_tab,  "Warehouses")
+        self._tabs.addTab(self.inv_tab, "Inventory")
+        self._tabs.addTab(self.tr_tab,  "Transfers")
         layout.addWidget(self._tabs)
 
         btn_row = QHBoxLayout()
@@ -922,23 +1143,14 @@ class QLogisticsWindow(QDialog):
         layout.addLayout(btn_row)
 
     def open_add_drop_zone_at(
-        self,
-        lat: float,
-        lon: float,
-        cp_id: Optional[int] = None,
+        self, lat: float, lon: float, cp_id: Optional[int] = None
     ) -> None:
-        """
-        Called externally to open the drop zone creation dialog
-        pre-filled with a specific lat/lon (e.g. from a map click).
-        """
         if hasattr(self, "dz_tab"):
             self._tabs.setCurrentWidget(self.dz_tab)
             self.dz_tab.add_drop_zone_at(lat, lon, cp_id)
 
     def refresh(self) -> None:
-        if hasattr(self, "dz_tab"):
-            self.dz_tab.refresh()
-        if hasattr(self, "wh_tab"):
-            self.wh_tab.refresh()
-        if hasattr(self, "tr_tab"):
-            self.tr_tab.refresh()
+        for attr in ("dz_tab", "wh_tab", "inv_tab", "tr_tab"):
+            tab = getattr(self, attr, None)
+            if tab and hasattr(tab, "refresh"):
+                tab.refresh()
