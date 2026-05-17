@@ -15,10 +15,14 @@ from dcs.terrain import Airport
 from dcs.unit import Static
 
 from game.atcdata import AtcData
+from game.ato.flighttype import FlightType
 from game.dcs.beacons import Beacons
 from game.dcs.helpers import unit_type_from_name
 from game.missiongenerator.aircraft.aircraftgenerator import (
     AircraftGenerator,
+)
+from game.missiongenerator.logisticsmissiongenerator import (
+    LogisticsMissionGenerator,
 )
 from game.naming import namegen
 from game.radio.radios import RadioFrequency, RadioRegistry, MHz
@@ -113,6 +117,15 @@ class MissionGenerator:
         self.generate_ground_conflicts()
         self.generate_air_units(tgo_generator)
 
+        # ----------------------------------------------------------------
+        # Logistics hook — inject drop zone trigger zones and generate
+        # logistics flight groups for any IN_FLIGHT transfers.
+        # Must run AFTER generate_air_units so the airspace is set up,
+        # and BEFORE the Lua/trigger generators so the zones exist when
+        # scripts reference them.
+        # ----------------------------------------------------------------
+        self.generate_logistics(tgo_generator)
+
         RebellionGenerator(self.mission, self.game).generate()
         TriggerGenerator(self.mission, self.game).generate()
         ForcedOptionsGenerator(self.mission, self.game).generate()
@@ -130,6 +143,94 @@ class MissionGenerator:
         self.mission.save(output)
 
         return self.unit_map
+
+    def generate_logistics(self, tgo_generator: TgoGenerator) -> None:
+        """
+        Inject logistics content into the mission:
+          1. Drop zone trigger zones (orange = troop, blue = cargo)
+          2. LOGISTICS flight groups for IN_FLIGHT transfers planned
+             via the ATO logistics mission type
+
+        This is safe to call even if game.logistics does not exist —
+        the check is inside LogisticsManager.inject_into_mission().
+        """
+        if not hasattr(self.game, "logistics"):
+            return
+
+        try:
+            # Inject drop zone trigger zones into the .miz
+            self.game.logistics.inject_into_mission(self.mission)
+            logging.info("MissionGenerator: logistics drop zones injected")
+        except Exception:
+            logging.exception(
+                "MissionGenerator: logistics drop zone injection failed — "
+                "continuing mission generation without drop zones"
+            )
+
+        # Generate LOGISTICS flight groups from the blue ATO
+        self._generate_logistics_flights()
+
+    def _generate_logistics_flights(self) -> None:
+        """
+        Find all LOGISTICS-typed flights in the blue ATO and generate
+        their pydcs flight groups via LogisticsMissionGenerator.
+
+        Concept — why we handle this separately from generate_air_units():
+          The AircraftGenerator handles all standard flight types through
+          its generate_flights() dispatch. LOGISTICS flights are special
+          because they need to read from game.logistics to get transfer
+          details, and they need the drop zone trigger zones to already
+          exist in the mission (which inject_into_mission() just created).
+          Separating this into its own pass keeps the AircraftGenerator
+          clean and avoids coupling it to the logistics module.
+        """
+        logistics_flights_generated = 0
+        logistics_flights_skipped   = 0
+
+        for package in self.game.blue.ato.packages:
+            for flight in package.flights:
+                if flight.flight_type is not FlightType.LOGISTICS:
+                    continue
+
+                transfer_id = getattr(flight, "transfer_id", None)
+                if not transfer_id:
+                    logging.warning(
+                        "MissionGenerator: LOGISTICS flight in package '%s' "
+                        "has no transfer_id — skipped. "
+                        "Was schedule_transfer() called when planning?",
+                        package.target.name if package.target else "unknown",
+                    )
+                    logistics_flights_skipped += 1
+                    continue
+
+                try:
+                    gen = LogisticsMissionGenerator(
+                        flight, self.game, self.mission
+                    )
+                    success = gen.generate()
+                    if success:
+                        logistics_flights_generated += 1
+                        logging.info(
+                            "MissionGenerator: LOGISTICS flight generated "
+                            "(transfer %s)", transfer_id[:8],
+                        )
+                    else:
+                        logistics_flights_skipped += 1
+                except Exception:
+                    logging.exception(
+                        "MissionGenerator: LOGISTICS flight generation failed "
+                        "for transfer %s — skipping this flight",
+                        transfer_id[:8] if transfer_id else "unknown",
+                    )
+                    logistics_flights_skipped += 1
+
+        if logistics_flights_generated or logistics_flights_skipped:
+            logging.info(
+                "MissionGenerator: logistics flights — "
+                "generated=%d skipped=%d",
+                logistics_flights_generated,
+                logistics_flights_skipped,
+            )
 
     @staticmethod
     def _configure_react_to_threat_for_ew_jamming_packages(
