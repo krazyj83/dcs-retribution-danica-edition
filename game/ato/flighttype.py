@@ -61,6 +61,16 @@ class FlightType(Enum):
     PRETENSE_CARGO = "Cargo Transport"  # For Pretense campaign AI cargo planes
     ARMED_RECON = "Armed Recon"
     RECOVERY = "Recovery"
+    # ---------------------------------------------------------------
+    # Logistics resupply mission.
+    # Delivers warehouse stock (fuel, ammo, troops, spare parts,
+    # vehicles) from a source base to a destination drop zone.
+    # Requires a cargo-capable aircraft (helicopter or transport).
+    # Ties into the LogisticsManager transfer system — the flight
+    # must have a transfer_id set on the Flight object so the
+    # mission generator and Lua delivery script can track it.
+    # ---------------------------------------------------------------
+    LOGISTICS = "Logistics"
 
     def __str__(self) -> str:
         return self.value
@@ -104,6 +114,11 @@ class FlightType(Enum):
         return self in {FlightType.ESCORT, FlightType.SEAD_ESCORT}
 
     @property
+    def is_logistics(self) -> bool:
+        """True for the LOGISTICS mission type only."""
+        return self is FlightType.LOGISTICS
+
+    @property
     def entity_type(self) -> AirEntity:
         return {
             FlightType.AEWC: AirEntity.AIRBORNE_EARLY_WARNING,
@@ -116,6 +131,7 @@ class FlightType(Enum):
             FlightType.ESCORT: AirEntity.ESCORT,
             FlightType.FERRY: AirEntity.UNSPECIFIED,
             FlightType.INTERCEPTION: AirEntity.FIGHTER,
+            FlightType.LOGISTICS: AirEntity.UTILITY,      # logistics = utility role
             FlightType.OCA_AIRCRAFT: AirEntity.ATTACK_STRIKE,
             FlightType.OCA_RUNWAY: AirEntity.ATTACK_STRIKE,
             FlightType.RECOVERY: AirEntity.TANKER,
