@@ -23,7 +23,6 @@ T = TypeVar("T")
 class LossGrid(QGridLayout):
     def __init__(self, debriefing: Debriefing, player: Player) -> None:
         super().__init__()
-
         self.add_loss_rows(
             debriefing.air_losses.by_type(player), lambda u: u.display_name
         )
@@ -42,8 +41,6 @@ class LossGrid(QGridLayout):
         )
         self.add_loss_rows(debriefing.ground_object_losses_by_type(player), lambda u: u)
         self.add_loss_rows(debriefing.scenery_losses_by_type(player), lambda u: u)
-
-        # TODO: Display dead ground object units and runways.
 
     def add_loss_rows(self, losses: Dict[T, int], make_name: Callable[[T], str]):
         for unit_type, count in losses.items():
@@ -76,7 +73,6 @@ class QDebriefingWindow(QDialog):
     def __init__(self, debriefing: Debriefing):
         super(QDebriefingWindow, self).__init__()
         self.debriefing = debriefing
-
         self.setModal(True)
         self.setWindowTitle("Debriefing")
         self.setMinimumSize(300, 200)
@@ -104,9 +100,42 @@ class QDebriefingWindow(QDialog):
         )
         layout.addWidget(enemy_lost_units, 1)
 
+        # Logistics summary section — shown if any warehouse changes occurred
+        self._logistics_log: list[str] = []
+        self._add_logistics_summary(layout)
+
         okay = QPushButton("Okay")
         okay.clicked.connect(self.close)
         layout.addWidget(okay)
+
+    def _add_logistics_summary(self, layout: QVBoxLayout) -> None:
+        """Run the logistics debrief hook and display a summary if anything changed."""
+        try:
+            from game.logistics.debrief_hook import update_logistics_from_debriefing
+            self._logistics_log = update_logistics_from_debriefing(self.debriefing)
+        except Exception as e:
+            logging.warning(f"Logistics debrief hook failed: {e}")
+            self._logistics_log = []
+
+        if not self._logistics_log:
+            return
+
+        group = QGroupBox("Logistics & Warehouse changes:")
+        scroll_content = QWidget()
+        log_layout = QVBoxLayout(scroll_content)
+
+        for line in self._logistics_log:
+            log_layout.addWidget(QLabel(line))
+        log_layout.addStretch()
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(scroll_content)
+        scroll_area.setMaximumHeight(120)
+
+        group_layout = QVBoxLayout()
+        group_layout.addWidget(scroll_area)
+        group.setLayout(group_layout)
+        layout.addWidget(group)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         super().closeEvent(event)
