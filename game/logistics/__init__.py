@@ -63,7 +63,7 @@ class WeaponStockItem:
     clsid: str          # DCS CLSID or unit variant_id for ground equipment
     category: str       # "Air-to-Air", "Air-to-Ground", "Bomb", "Ground Unit", etc.
     quantity: int = 0
-    capacity: int = 50
+    capacity: int = 250
 
 
 @dataclass
