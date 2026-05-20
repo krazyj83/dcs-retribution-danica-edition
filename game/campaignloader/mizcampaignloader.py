@@ -503,6 +503,16 @@ class MizCampaignLoader:
                 origin, list(reversed(waypoints)), d_spawns
             )
 
+    def add_supply_routes(self) -> None:
+        for group in self.front_line_path_groups:
+            # ... existing code unchanged ...
+            self.control_points[destination.id].create_convoy_route(
+                origin, list(reversed(waypoints)), d_spawns
+            )
+        # ── Auto red supply routes ──────────────────────────────────────────
+        from game.logistics.red_supply_routes import auto_generate_red_supply_routes
+        auto_generate_red_supply_routes(self.theater)
+
     def add_shipping_lanes(self) -> None:
         for group in self.shipping_lane_groups:
             # The unit will have its first waypoint at the source CP and the final
