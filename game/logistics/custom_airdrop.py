@@ -21,10 +21,10 @@ class CustomAirdropTarget(MissionTarget):
     def mission_types(self, for_player: bool = True):
         try:
             from game.ato.flighttype import FlightType
-
             return [
                 FlightType.AIR_ASSAULT,
                 FlightType.TRANSPORT,
+                FlightType.LOGISTIC,  # ← added: warehouse resupply flights
             ]
         except Exception:
             return []
