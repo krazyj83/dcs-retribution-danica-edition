@@ -36,7 +36,7 @@ class DropZone:
 
 
 # ======================================================================
-# Warehouses — broad supply categories
+# Warehouses - broad supply categories
 # ======================================================================
 
 class WarehouseCategory(Enum):
@@ -53,7 +53,7 @@ class StockItem:
 
 
 # ======================================================================
-# Weapon / equipment inventory — detailed per-base weapon stocks
+# Weapon / equipment inventory - detailed per-base weapon stocks
 # ======================================================================
 
 @dataclass
@@ -102,8 +102,8 @@ class WeaponInventory:
 def build_weapon_inventory(cp, game: "Game") -> WeaponInventory:
     """
     Build a WeaponInventory for a control point by inspecting:
-    1. Squadrons based there — their aircraft pylons/allowed weapons
-    2. Ground units at the base — from cp.base.armor
+    1. Squadrons based there - their aircraft pylons/allowed weapons
+    2. Ground units at the base - from cp.base.armor
     """
     inv = WeaponInventory(cp_id=cp.id, cp_name=cp.name)
 
@@ -118,14 +118,12 @@ def build_weapon_inventory(cp, game: "Game") -> WeaponInventory:
                             continue
                         if sq.location.id != cp.id:
                             continue
-                        # Get all weapons this aircraft can carry
                         try:
                             for pylon in Pylon.iter_pylons(aircraft_type):
                                 for weapon in pylon.allowed:
                                     try:
                                         w_name = weapon.name
                                         w_clsid = weapon.clsid
-                                        # Categorise by name heuristics
                                         cat = _weapon_category(w_name)
                                         inv.add_item(w_clsid, w_name, cat, quantity=5)
                                     except Exception:
@@ -166,7 +164,7 @@ def _weapon_category(name: str) -> str:
     if any(x in n for x in ["AGM-", "KH-", "Kh-", "AS-", "MAVERICK", "HARM",
                               "HELLFIRE", "PENGUIN", "EXOCET", "HARPOON"]):
         return "Air-to-Ground Missile"
-    if any(x in n for x in ["GBU-", "JDAM", "PAVEWAY", "LGB", "MK-8", "MK-8",
+    if any(x in n for x in ["GBU-", "JDAM", "PAVEWAY", "LGB", "MK-8",
                               "FAB-", "KAB-", "BETAB", "OFAB"]):
         return "Bomb"
     if any(x in n for x in ["ROCKET", "S-5", "S-8", "S-13", "S-24", "ZUNI",
@@ -208,7 +206,7 @@ def _ground_unit_category(name: str) -> str:
 
 
 # ======================================================================
-# Warehouse — broad supply categories
+# Warehouse - broad supply categories
 # ======================================================================
 
 @dataclass
@@ -236,10 +234,10 @@ class Warehouse:
 # ======================================================================
 
 class TransferStatus(Enum):
-    PLANNED = "planned"
+    PLANNED   = "planned"
     IN_FLIGHT = "in_flight"
     DELIVERED = "delivered"
-    FAILED = "failed"
+    FAILED    = "failed"
 
 
 @dataclass
@@ -262,13 +260,14 @@ class LogisticsTransfer:
 # ======================================================================
 
 class LogisticsManager:
-    def __init__(self):
+    def __init__(self) -> None:
         self._drop_zones: Dict[str, DropZone] = {}
         self._warehouses: Dict[int, Warehouse] = {}
         self._weapon_inventories: Dict[int, WeaponInventory] = {}
         self._transfers: Dict[str, LogisticsTransfer] = {}
+        self._main_base_cp_id: Optional[int] = None  # designated main supply base
 
-    # --- Drop zones ---
+    # ── Drop zones ─────────────────────────────────────────────────────
 
     def add_drop_zone(self, dz: DropZone) -> None:
         self._drop_zones[dz.dz_id] = dz
@@ -288,7 +287,7 @@ class LogisticsManager:
     def drop_zones_for_cp(self, cp_id: int) -> List[DropZone]:
         return [dz for dz in self._drop_zones.values() if dz.cp_id == cp_id]
 
-    # --- Warehouses ---
+    # ── Warehouses ─────────────────────────────────────────────────────
 
     def get_warehouse(self, cp_id: int) -> Optional[Warehouse]:
         return self._warehouses.get(cp_id)
@@ -299,7 +298,7 @@ class LogisticsManager:
     def warehouses_for_coalition(self, coalition: str) -> List[Warehouse]:
         return list(self._warehouses.values())
 
-    # --- Weapon inventories ---
+    # ── Weapon inventories ─────────────────────────────────────────────
 
     def get_weapon_inventory(self, cp_id: int) -> Optional[WeaponInventory]:
         return self._weapon_inventories.get(cp_id)
@@ -319,7 +318,85 @@ class LogisticsManager:
                 f"Failed to sync weapon inventories: {e}"
             )
 
-    # --- Transfers ---
+    # ── Main Base ──────────────────────────────────────────────────────
+
+    @property
+    def main_base_cp_id(self) -> Optional[int]:
+        """The cp_id of the designated main supply base, or None."""
+        return self._main_base_cp_id
+
+    def set_main_base(self, cp_id: Optional[int]) -> None:
+        """Designate a base as the main supply hub (or clear with None)."""
+        self._main_base_cp_id = cp_id
+
+    def is_main_base(self, cp_id: int) -> bool:
+        return self._main_base_cp_id == cp_id
+
+    # ── Restock helpers ────────────────────────────────────────────────
+
+    def restock_warehouse_cost(self, cp_id: int) -> float:
+        """
+        Cost ($M) to fully restock a warehouse to capacity.
+        Rate: $0.05M per unit of stock deficit.
+        """
+        COST_PER_UNIT = 0.05
+        wh = self.get_warehouse(cp_id)
+        if wh is None:
+            return 0.0
+        total = sum(
+            max(0.0, wh.stock[cat].capacity - wh.stock[cat].quantity) * COST_PER_UNIT
+            for cat in WarehouseCategory
+        )
+        return round(total, 1)
+
+    def restock_warehouse(self, cp_id: int) -> None:
+        """Fill warehouse stock to capacity for all categories."""
+        wh = self.get_warehouse(cp_id)
+        if wh is None:
+            return
+        for cat in WarehouseCategory:
+            wh.stock[cat].quantity = wh.stock[cat].capacity
+
+    def restock_inventory_cost(self, cp_id: int) -> float:
+        """
+        Cost ($M) to refill weapon/equipment inventory to capacity.
+        Weapons cost $0.1M per unit deficit.
+        Ground units use their in-game price per unit deficit.
+        """
+        WEAPON_COST = 0.1
+        inv = self.get_weapon_inventory(cp_id)
+        if inv is None:
+            return 0.0
+        total = 0.0
+        for item in inv.items.values():
+            deficit = item.capacity - item.quantity
+            if deficit <= 0:
+                continue
+            if item.category in ("Armour", "Air Defence",
+                                  "Infantry Fighting Vehicle", "Artillery", "Support"):
+                try:
+                    from game.dcs.groundunittype import GroundUnitType
+                    for gut in GroundUnitType.each_unit_type():
+                        if getattr(gut, "variant_id", None) == item.clsid:
+                            total += deficit * gut.price
+                            break
+                    else:
+                        total += deficit * WEAPON_COST
+                except Exception:
+                    total += deficit * WEAPON_COST
+            else:
+                total += deficit * WEAPON_COST
+        return round(total, 1)
+
+    def restock_inventory(self, cp_id: int) -> None:
+        """Fill all weapon/equipment inventory items to capacity."""
+        inv = self.get_weapon_inventory(cp_id)
+        if inv is None:
+            return
+        for item in inv.items.values():
+            item.quantity = item.capacity
+
+    # ── Transfers ──────────────────────────────────────────────────────
 
     def schedule_transfer(
         self,
