@@ -18,24 +18,31 @@ class FlightType(Enum):
 
     * flightplan.py: Add waypoint population in generate_flight_plan. Add a new flight
       plan type if necessary, though most are a subclass of StrikeFlightPlan.
-    * aircraftgenerator.py: Add a configuration method and call it in setup_flight_group. This is
-      responsible for configuring waypoint 0 actions like setting ROE, threat reaction,
-      and mission abort parameters (winchester, bingo, etc).
-    * Implementations of MissionTarget.mission_types: A mission type can only be planned
-      against compatible targets. The mission_types method of each target class defines
-      which missions may target it.
-    * resources/units/aircraft/*.yaml: Assign aircraft weight for the new task type in
-      the `tasks` dict for all capable aircraft.
+
+    * aircraftgenerator.py: Add a configuration method and call it in
+      setup_flight_group. This is responsible for configuring waypoint 0 actions
+      like setting ROE, threat reaction, and mission abort parameters (winchester,
+      bingo, etc).
+
+    * Implementations of MissionTarget.mission_types: A mission type can only be
+      planned against compatible targets. The mission_types method of each target
+      class defines which missions may target it.
+
+    * resources/units/aircraft/*.yaml: Assign aircraft weight for the new task type
+      in the `tasks` dict for all capable aircraft.
 
     You may also need to update:
 
     * flightwaypointtype.py: Add a new waypoint type if necessary. Most mission types
-      will need these, as aircraftgenerator.py uses the ingress point type to specialize AI
-      tasks, and non-strike-like missions will need more specialized control.
-    * ai_flight_planner.py: Use the new mission type in propose_missions so the AI will
-      plan the new mission type.
-    * FlightType.is_air_to_air and FlightType.is_air_to_ground: If the new mission type
-      fits either of these categories, update those methods accordingly.
+      will need these, as aircraftgenerator.py uses the ingress point type to
+      specialize AI tasks, and non-strike-like missions will need more specialized
+      control.
+
+    * ai_flight_planner.py: Use the new mission type in propose_missions so the AI
+      will plan the new mission type.
+
+    * FlightType.is_air_to_air and FlightType.is_air_to_ground: If the new mission
+      type fits either of these categories, update those methods accordingly.
     """
 
     TARCAP = "TARCAP"
@@ -57,20 +64,15 @@ class FlightType(Enum):
     REFUELING = "Refueling"
     FERRY = "Ferry"
     AIR_ASSAULT = "Air Assault"
-    SEAD_SWEEP = "SEAD Sweep"  # Reintroduce legacy "engage-whatever-you-can-find" SEAD
-    PRETENSE_CARGO = "Cargo Transport"  # For Pretense campaign AI cargo planes
-    ARMED_RECON = "Armed Recon"
-    RECOVERY = "Recovery"
-    # ---------------------------------------------------------------
-    # Logistics resupply mission.
-    # Delivers warehouse stock (fuel, ammo, troops, spare parts,
-    # vehicles) from a source base to a destination drop zone.
-    # Requires a cargo-capable aircraft (helicopter or transport).
-    # Ties into the LogisticsManager transfer system — the flight
-    # must have a transfer_id set on the Flight object so the
-    # mission generator and Lua delivery script can track it.
-    # ---------------------------------------------------------------
-    LOGISTICS = "Logistics"
+    # ── NEW ──────────────────────────────────────────────────────────────────
+    # LOGISTIC: warehouse-based supply resupply mission.
+    # Aircraft fly from a source base to a destination base, and the Lua plugin
+    # (resources/plugins/logistic_supply.lua) transfers fuel/ammo between DCS
+    # warehouses when the aircraft lands at each stop.
+    # Works for player AND AI, both BLUEFOR and REDFOR.
+    LOGISTIC = "Logistic"
+    # ─────────────────────────────────────────────────────────────────────────
+    IDLE = "Idle"
 
     def __str__(self) -> str:
         return self.value
@@ -105,25 +107,13 @@ class FlightType(Enum):
             FlightType.OCA_AIRCRAFT,
             FlightType.SEAD_ESCORT,
             FlightType.AIR_ASSAULT,
-            FlightType.SEAD_SWEEP,
-            FlightType.ARMED_RECON,
         }
-
-    @property
-    def is_escort_type(self) -> bool:
-        return self in {FlightType.ESCORT, FlightType.SEAD_ESCORT}
-
-    @property
-    def is_logistics(self) -> bool:
-        """True for the LOGISTICS mission type only."""
-        return self is FlightType.LOGISTICS
 
     @property
     def entity_type(self) -> AirEntity:
         return {
             FlightType.AEWC: AirEntity.AIRBORNE_EARLY_WARNING,
             FlightType.ANTISHIP: AirEntity.ANTISURFACE_WARFARE,
-            FlightType.ARMED_RECON: AirEntity.ATTACK_STRIKE,
             FlightType.BAI: AirEntity.ATTACK_STRIKE,
             FlightType.BARCAP: AirEntity.FIGHTER,
             FlightType.CAS: AirEntity.ATTACK_STRIKE,
@@ -131,18 +121,15 @@ class FlightType(Enum):
             FlightType.ESCORT: AirEntity.ESCORT,
             FlightType.FERRY: AirEntity.UNSPECIFIED,
             FlightType.INTERCEPTION: AirEntity.FIGHTER,
-            FlightType.LOGISTICS: AirEntity.UTILITY,      # logistics = utility role
+            FlightType.LOGISTIC: AirEntity.UTILITY,       # ← NEW
             FlightType.OCA_AIRCRAFT: AirEntity.ATTACK_STRIKE,
             FlightType.OCA_RUNWAY: AirEntity.ATTACK_STRIKE,
-            FlightType.RECOVERY: AirEntity.TANKER,
             FlightType.REFUELING: AirEntity.TANKER,
             FlightType.SEAD: AirEntity.SUPPRESSION_OF_ENEMY_AIR_DEFENCE,
             FlightType.SEAD_ESCORT: AirEntity.SUPPRESSION_OF_ENEMY_AIR_DEFENCE,
-            FlightType.SEAD_SWEEP: AirEntity.SUPPRESSION_OF_ENEMY_AIR_DEFENCE,
             FlightType.STRIKE: AirEntity.ATTACK_STRIKE,
             FlightType.SWEEP: AirEntity.FIGHTER,
             FlightType.TARCAP: AirEntity.FIGHTER,
             FlightType.TRANSPORT: AirEntity.UTILITY,
-            FlightType.PRETENSE_CARGO: AirEntity.UTILITY,
             FlightType.AIR_ASSAULT: AirEntity.ROTARY_WING,
         }.get(self, AirEntity.UNSPECIFIED)
