@@ -2,11 +2,12 @@
 qt_ui/windows/logistics/QLogisticsWindow.py
 
 Logistics & Supply Chain window for DCS Retribution.
-Four tabs:
+Five tabs:
   1. Drop Zones  - create/edit/delete drop zones for any faction base or map point
-  2. Warehouses  - broad supply stock levels with base filter, sync, and CSV
-  3. Inventory   - detailed per-base weapon, equipment and ground unit breakdown with CSV
+  2. Warehouses  - broad supply stock levels with base filter, sync, CSV and restock
+  3. Inventory   - detailed per-base weapon, equipment and ground unit breakdown
   4. Transfers   - schedule, monitor, and cancel logistics deliveries
+  5. Main Base   - designate one blue base as the primary supply hub (50% restock discount)
 
 CSV formats:
   Warehouse CSV:  base, fuel, ammunition, supplies, troops
@@ -160,51 +161,53 @@ def sync_warehouses_from_game(logistics: LogisticsManager, game: Game) -> None:
 
 
 # ======================================================================
-# CSV helpers
+# CSV helpers  (column-aligned export, whitespace-tolerant import)
 # ======================================================================
 
 WAREHOUSE_CSV_COLUMNS = ["base"] + [c.value for c in WarehouseCategory]
 INVENTORY_CSV_COLUMNS = ["base", "clsid", "name", "category", "quantity", "capacity"]
 
 
+def _aligned_write(f, columns, rows_data):
+    col_widths = {col: len(col) for col in columns}
+    for row in rows_data:
+        for col in columns:
+            col_widths[col] = max(col_widths[col], len(str(row.get(col, ""))))
+    f.write(",".join(col.ljust(col_widths[col]) for col in columns) + "\n")
+    for row in rows_data:
+        f.write(",".join(str(row.get(col, "")).ljust(col_widths[col]) for col in columns) + "\n")
+
+
 def export_warehouse_csv(logistics: LogisticsManager, path: str) -> int:
-    """Export broad warehouse stock. Returns number of rows written."""
-    rows = 0
+    rows_data = []
+    for wh in sorted(logistics.warehouses_for_coalition("blue"), key=lambda w: w.cp_name):
+        row = {"base": wh.cp_name}
+        for cat in WarehouseCategory:
+            row[cat.value] = f"{wh.stock[cat].quantity:.1f}"
+        rows_data.append(row)
     with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=WAREHOUSE_CSV_COLUMNS)
-        writer.writeheader()
-        for wh in logistics.warehouses_for_coalition("blue"):
-            row = {"base": wh.cp_name}
-            for cat in WarehouseCategory:
-                row[cat.value] = f"{wh.stock[cat].quantity:.1f}"
-            writer.writerow(row)
-            rows += 1
-    return rows
+        if not rows_data:
+            f.write(",".join(WAREHOUSE_CSV_COLUMNS) + "\n")
+        else:
+            _aligned_write(f, WAREHOUSE_CSV_COLUMNS, rows_data)
+    return len(rows_data)
 
 
 def import_warehouse_csv(logistics: LogisticsManager, path: str) -> Tuple[int, List[str]]:
-    """
-    Import broad warehouse stock from CSV.
-    Returns (rows_imported, warnings).
-    """
     imported = 0
     warnings: List[str] = []
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        # Validate columns
+        if reader.fieldnames:
+            reader.fieldnames = [n.strip() for n in reader.fieldnames]
         if reader.fieldnames and "base" not in reader.fieldnames:
-            raise ValueError(
-                "CSV missing 'base' column. "
-                "Expected columns: " + ", ".join(WAREHOUSE_CSV_COLUMNS)
-            )
+            raise ValueError("CSV missing 'base' column. Expected: " + ", ".join(WAREHOUSE_CSV_COLUMNS))
         for row in reader:
+            row = {k.strip(): v.strip() for k, v in row.items() if k}
             base = row.get("base", "").strip()
-            wh = next(
-                (w for w in logistics._warehouses.values() if w.cp_name == base),
-                None,
-            )
+            wh = next((w for w in logistics._warehouses.values() if w.cp_name == base), None)
             if wh is None:
-                warnings.append(f"Unknown base '{base}' — skipped")
+                warnings.append(f"Unknown base '{base}' - skipped")
                 continue
             for cat in WarehouseCategory:
                 val = row.get(cat.value, "").strip()
@@ -214,99 +217,88 @@ def import_warehouse_csv(logistics: LogisticsManager, path: str) -> Tuple[int, L
                     wh.stock[cat].quantity = float(val)
                     imported += 1
                 except ValueError:
-                    warnings.append(
-                        f"Invalid value for {base}/{cat.value}: '{val}' — skipped"
-                    )
+                    warnings.append(f"Invalid value for {base}/{cat.value}: '{val}' - skipped")
     return imported, warnings
 
 
 def export_inventory_csv(logistics: LogisticsManager, path: str) -> int:
-    """
-    Export detailed weapon/equipment inventory.
-    One row per weapon/item per base.
-    Returns number of rows written.
-    """
-    rows = 0
+    rows_data = []
+    for inv in sorted(logistics._weapon_inventories.values(), key=lambda i: i.cp_name):
+        for item in sorted(inv.items.values(), key=lambda i: (i.category, i.name)):
+            rows_data.append({
+                "base": inv.cp_name, "clsid": item.clsid, "name": item.name,
+                "category": item.category, "quantity": str(item.quantity),
+                "capacity": str(item.capacity),
+            })
     with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=INVENTORY_CSV_COLUMNS)
-        writer.writeheader()
-        for inv in logistics._weapon_inventories.values():
-            for item in sorted(inv.items.values(), key=lambda i: (i.category, i.name)):
-                writer.writerow({
-                    "base":     inv.cp_name,
-                    "clsid":    item.clsid,
-                    "name":     item.name,
-                    "category": item.category,
-                    "quantity": item.quantity,
-                    "capacity": item.capacity,
-                })
-                rows += 1
-    return rows
+        if not rows_data:
+            f.write(",".join(INVENTORY_CSV_COLUMNS) + "\n")
+        else:
+            _aligned_write(f, INVENTORY_CSV_COLUMNS, rows_data)
+    return len(rows_data)
 
 
 def import_inventory_csv(logistics: LogisticsManager, path: str) -> Tuple[int, List[str]]:
-    """
-    Import detailed weapon/equipment inventory from CSV.
-    Matches rows by base name + clsid. Creates new items if not found.
-    Returns (rows_imported, warnings).
-    """
     imported = 0
     warnings: List[str] = []
-
-    # Build a lookup: cp_name → WeaponInventory
     inv_by_name = {inv.cp_name: inv for inv in logistics._weapon_inventories.values()}
-
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
+        if reader.fieldnames:
+            reader.fieldnames = [n.strip() for n in reader.fieldnames]
         if reader.fieldnames and "base" not in reader.fieldnames:
-            raise ValueError(
-                "CSV missing 'base' column. "
-                "Expected columns: " + ", ".join(INVENTORY_CSV_COLUMNS)
-            )
+            raise ValueError("CSV missing 'base' column. Expected: " + ", ".join(INVENTORY_CSV_COLUMNS))
         for row in reader:
+            row = {k.strip(): v.strip() for k, v in row.items() if k}
             base     = row.get("base", "").strip()
             clsid    = row.get("clsid", "").strip()
             name     = row.get("name", "").strip()
             category = row.get("category", "Other").strip()
             qty_str  = row.get("quantity", "").strip()
             cap_str  = row.get("capacity", "").strip()
-
             if not base or not clsid:
-                warnings.append(f"Row missing base or clsid — skipped: {row}")
+                warnings.append(f"Row missing base or clsid - skipped: {row}")
                 continue
-
             inv = inv_by_name.get(base)
             if inv is None:
-                warnings.append(f"Unknown base '{base}' — skipped")
+                warnings.append(f"Unknown base '{base}' - skipped")
                 continue
-
             try:
                 qty = int(float(qty_str)) if qty_str else 0
             except ValueError:
-                warnings.append(f"Invalid quantity for {base}/{name}: '{qty_str}' — skipped")
+                warnings.append(f"Invalid quantity for {base}/{name}: '{qty_str}' - skipped")
                 continue
-
             try:
-                cap = int(float(cap_str)) if cap_str else 50
+                cap = int(float(cap_str)) if cap_str else qty
             except ValueError:
-                cap = 50
-
+                cap = qty
             if clsid in inv.items:
                 inv.items[clsid].quantity = qty
                 inv.items[clsid].capacity = cap
             else:
-                # Create new item from CSV data
-                from game.logistics import WeaponStockItem
                 inv.items[clsid] = WeaponStockItem(
-                    name=name or clsid,
-                    clsid=clsid,
-                    category=category,
-                    quantity=qty,
-                    capacity=cap,
+                    name=name or clsid, clsid=clsid, category=category,
+                    quantity=qty, capacity=cap,
                 )
             imported += 1
-
     return imported, warnings
+
+
+# ======================================================================
+# Restock button style
+# ======================================================================
+
+RESTOCK_STYLE = (
+    "QPushButton { background: #2e7d32; color: white; font-weight: bold;"
+    " padding: 4px 12px; border-radius: 3px; }"
+    "QPushButton:hover { background: #388e3c; }"
+)
+
+MAIN_BASE_STYLE = (
+    "QPushButton { background: #1565c0; color: white; font-weight: bold;"
+    " padding: 6px 16px; border-radius: 4px; }"
+    "QPushButton:hover { background: #1976d2; }"
+)
 
 
 # ======================================================================
@@ -659,7 +651,7 @@ class DropZonesTab(QWidget):
 
 
 # ======================================================================
-# Tab 2 - Warehouses (broad stock) with corrected CSV
+# Tab 2 - Warehouses
 # ======================================================================
 
 class WarehouseTab(QWidget):
@@ -720,7 +712,6 @@ class WarehouseTab(QWidget):
         self.status_label = QLabel("")
         layout.addWidget(self.status_label)
 
-        # CSV — uses WAREHOUSE_CSV_COLUMNS format
         csv_group = QGroupBox(
             f"Warehouse CSV  (columns: {', '.join(WAREHOUSE_CSV_COLUMNS)})"
         )
@@ -729,8 +720,16 @@ class WarehouseTab(QWidget):
         self.export_csv_btn.clicked.connect(self._on_export_csv)
         self.import_csv_btn = QPushButton("Import from CSV")
         self.import_csv_btn.clicked.connect(self._on_import_csv)
+        self.restock_wh_btn = QPushButton("Restock to Full")
+        self.restock_wh_btn.setToolTip(
+            "Refill selected base warehouse to capacity. Cost deducted from budget.\n"
+            "Main base receives a 50% discount."
+        )
+        self.restock_wh_btn.setStyleSheet(RESTOCK_STYLE)
+        self.restock_wh_btn.clicked.connect(self._on_restock)
         csv_layout.addWidget(self.export_csv_btn)
         csv_layout.addWidget(self.import_csv_btn)
+        csv_layout.addWidget(self.restock_wh_btn)
         csv_layout.addStretch()
         csv_group.setLayout(csv_layout)
         layout.addWidget(csv_group)
@@ -747,7 +746,7 @@ class WarehouseTab(QWidget):
         sync_warehouses_from_game(self.logistics, self.game)
         self.refresh()
         self.status_label.setText(
-            f"Synced — {len(self.logistics._warehouses)} blue bases loaded."
+            f"Synced - {len(self.logistics._warehouses)} blue bases loaded."
         )
 
     def refresh(self) -> None:
@@ -756,7 +755,10 @@ class WarehouseTab(QWidget):
         self.base_filter_combo.clear()
         self.base_filter_combo.addItem("All bases", -1)
         for wh in self.logistics.warehouses_for_coalition("blue"):
-            self.base_filter_combo.addItem(wh.cp_name, wh.cp_id)
+            label = wh.cp_name
+            if self.logistics.is_main_base(wh.cp_id):
+                label = f"[MAIN] {wh.cp_name}"
+            self.base_filter_combo.addItem(label, wh.cp_id)
         idx = self.base_filter_combo.findData(current)
         if idx >= 0:
             self.base_filter_combo.setCurrentIndex(idx)
@@ -768,7 +770,10 @@ class WarehouseTab(QWidget):
         cats = list(WarehouseCategory)
         self.table.setRowCount(len(warehouses))
         for row, wh in enumerate(warehouses):
-            self.table.setItem(row, 0, QTableWidgetItem(wh.cp_name))
+            name = wh.cp_name
+            if self.logistics.is_main_base(wh.cp_id):
+                name = f"[MAIN] {name}"
+            self.table.setItem(row, 0, QTableWidgetItem(name))
             for col, cat in enumerate(cats, start=1):
                 sd = wh.stock[cat]
                 pct = int(100 * sd.quantity / sd.capacity) if sd.capacity else 0
@@ -808,6 +813,46 @@ class WarehouseTab(QWidget):
         )
         self.refresh()
 
+    def _on_restock(self) -> None:
+        cp_id = self.base_filter_combo.currentData()
+        if cp_id == -1:
+            QMessageBox.warning(self, "No base selected",
+                "Select a specific base in the filter dropdown first.")
+            return
+        cost = self.logistics.restock_warehouse_cost(cp_id)
+        if cost <= 0:
+            QMessageBox.information(self, "Already full",
+                "This warehouse is already at capacity.")
+            return
+        is_main = self.logistics.is_main_base(cp_id)
+        if is_main:
+            cost = round(cost * 0.5, 1)
+            discount = " (50% main base discount)"
+        else:
+            discount = ""
+        budget = self.game.blue.budget if self.game else 0
+        base_name = self.base_filter_combo.currentText()
+        reply = QMessageBox.question(
+            self, "Confirm Restock",
+            f"Restock {base_name} to full capacity?\n\n"
+            f"Cost: ${cost:.1f}M{discount}\n"
+            f"Current budget: ${budget:.1f}M",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        if budget < cost:
+            QMessageBox.warning(self, "Insufficient funds",
+                f"Cannot afford restock.\nCost: ${cost:.1f}M  Budget: ${budget:.1f}M")
+            return
+        self.logistics.restock_warehouse(cp_id)
+        self.game.blue.adjust_budget(-cost)
+        self.refresh()
+        self.status_label.setText(
+            f"Restocked {base_name} - cost ${cost:.1f}M. "
+            f"Remaining budget: ${self.game.blue.budget:.1f}M"
+        )
+
     def _on_export_csv(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
             self, "Export Warehouse Stock CSV", "", "CSV files (*.csv)"
@@ -817,10 +862,8 @@ class WarehouseTab(QWidget):
         try:
             rows = export_warehouse_csv(self.logistics, path)
             self.status_label.setText(f"Exported {rows} bases to: {path}")
-            QMessageBox.information(
-                self, "Export successful",
-                f"Exported {rows} bases.\n\nColumns: {', '.join(WAREHOUSE_CSV_COLUMNS)}"
-            )
+            QMessageBox.information(self, "Export successful",
+                f"Exported {rows} bases.\n\nColumns: {', '.join(WAREHOUSE_CSV_COLUMNS)}")
         except Exception as e:
             logger.exception("Warehouse CSV export failed")
             QMessageBox.critical(self, "Export failed", str(e))
@@ -842,14 +885,14 @@ class WarehouseTab(QWidget):
             else:
                 QMessageBox.information(self, "Import successful", msg)
         except ValueError as e:
-            QMessageBox.critical(self, "Import failed — wrong format", str(e))
+            QMessageBox.critical(self, "Import failed - wrong format", str(e))
         except Exception as e:
             logger.exception("Warehouse CSV import failed")
             QMessageBox.critical(self, "Import failed", str(e))
 
 
 # ======================================================================
-# Tab 3 - Detailed Weapon & Equipment Inventory with CSV
+# Tab 3 - Detailed Weapon & Equipment Inventory
 # ======================================================================
 
 class InventoryTab(QWidget):
@@ -888,9 +931,9 @@ class InventoryTab(QWidget):
 
         self.items_table = QTableWidget()
         self.items_table.setColumnCount(4)
-        self.items_table.setHorizontalHeaderLabels([
-            "Item", "Category", "Quantity", "Capacity"
-        ])
+        self.items_table.setHorizontalHeaderLabels(
+            ["Item", "Category", "Quantity", "Capacity"]
+        )
         self.items_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
         )
@@ -918,7 +961,6 @@ class InventoryTab(QWidget):
         edit_group.setLayout(edit_layout)
         right_layout.addWidget(edit_group)
 
-        # CSV — uses INVENTORY_CSV_COLUMNS format
         csv_group = QGroupBox(
             f"Inventory CSV  (columns: {', '.join(INVENTORY_CSV_COLUMNS)})"
         )
@@ -928,16 +970,22 @@ class InventoryTab(QWidget):
             "Export the full weapon/equipment inventory for all bases to a CSV file."
         )
         self.export_inv_btn.clicked.connect(self._on_export_csv)
-
         self.import_inv_btn = QPushButton("Import from CSV")
         self.import_inv_btn.setToolTip(
             "Import weapon/equipment quantities from a CSV file. "
-            "Matches by base name and CLSID. New items are created if not found."
+            "Matches by base name and CLSID."
         )
         self.import_inv_btn.clicked.connect(self._on_import_csv)
-
+        self.restock_inv_btn = QPushButton("Restock Inventory")
+        self.restock_inv_btn.setToolTip(
+            "Refill weapon/equipment to capacity. Cost deducted from budget.\n"
+            "Main base receives a 50% discount."
+        )
+        self.restock_inv_btn.setStyleSheet(RESTOCK_STYLE)
+        self.restock_inv_btn.clicked.connect(self._on_restock_inventory)
         csv_layout.addWidget(self.export_inv_btn)
         csv_layout.addWidget(self.import_inv_btn)
+        csv_layout.addWidget(self.restock_inv_btn)
         csv_layout.addStretch()
         csv_group.setLayout(csv_layout)
         right_layout.addWidget(csv_group)
@@ -969,7 +1017,10 @@ class InventoryTab(QWidget):
         self.base_combo.clear()
         self.base_combo.addItem("-- Select base --", -1)
         for wh in self.logistics.warehouses_for_coalition("blue"):
-            self.base_combo.addItem(wh.cp_name, wh.cp_id)
+            label = wh.cp_name
+            if self.logistics.is_main_base(wh.cp_id):
+                label = f"[MAIN] {wh.cp_name}"
+            self.base_combo.addItem(label, wh.cp_id)
         idx = self.base_combo.findData(current_cp_id)
         if idx >= 0:
             self.base_combo.setCurrentIndex(idx)
@@ -985,7 +1036,6 @@ class InventoryTab(QWidget):
         cp_id = self.base_combo.currentData()
         if cp_id == -1:
             return
-
         inv = self.logistics.get_weapon_inventory(cp_id)
         if inv is None:
             cp = next(
@@ -996,22 +1046,18 @@ class InventoryTab(QWidget):
                 self.logistics.set_weapon_inventory(inv)
             else:
                 return
-
         by_cat = inv.items_by_category()
-
         total_node = QTreeWidgetItem(self.category_tree)
         total_node.setText(0, f"All ({len(inv.items)})")
         total_node.setData(0, Qt.ItemDataRole.UserRole, "__all__")
         font = QFont()
         font.setBold(True)
         total_node.setFont(0, font)
-
         for cat, items in by_cat.items():
             node = QTreeWidgetItem(self.category_tree)
             node.setText(0, f"{cat} ({len(items)})")
             node.setData(0, Qt.ItemDataRole.UserRole, cat)
             node.setForeground(0, CATEGORY_COLORS.get(cat, NEUTRAL_COLOR))
-
         self.category_tree.expandAll()
         self._show_items(list(inv.items.values()))
 
@@ -1038,11 +1084,9 @@ class InventoryTab(QWidget):
             name_cell = QTableWidgetItem(item.name)
             name_cell.setData(Qt.ItemDataRole.UserRole, item.clsid)
             self.items_table.setItem(row, 0, name_cell)
-
             cat_cell = QTableWidgetItem(item.category)
             cat_cell.setForeground(CATEGORY_COLORS.get(item.category, NEUTRAL_COLOR))
             self.items_table.setItem(row, 1, cat_cell)
-
             qty_cell = QTableWidgetItem(str(item.quantity))
             qty_cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             qty_cell.setForeground(
@@ -1051,7 +1095,6 @@ class InventoryTab(QWidget):
                 else STOCK_OK_COLOR
             )
             self.items_table.setItem(row, 2, qty_cell)
-
             cap_cell = QTableWidgetItem(str(item.capacity))
             cap_cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.items_table.setItem(row, 3, cap_cell)
@@ -1072,7 +1115,7 @@ class InventoryTab(QWidget):
             inv.items[clsid].quantity = self.qty_spin.value()
             self._refresh_view()
             self.status_label.setText(
-                f"Updated {inv.items[clsid].name} → {self.qty_spin.value()}"
+                f"Updated {inv.items[clsid].name} to {self.qty_spin.value()}"
             )
 
     def _on_zero_all(self) -> None:
@@ -1092,6 +1135,46 @@ class InventoryTab(QWidget):
             self._refresh_view()
             self.status_label.setText("All quantities set to zero.")
 
+    def _on_restock_inventory(self) -> None:
+        cp_id = self.base_combo.currentData()
+        if cp_id is None or cp_id == -1:
+            QMessageBox.warning(self, "No base selected",
+                "Select a base in the dropdown first.")
+            return
+        cost = self.logistics.restock_inventory_cost(cp_id)
+        if cost <= 0:
+            QMessageBox.information(self, "Already full",
+                "This inventory is already at capacity.")
+            return
+        is_main = self.logistics.is_main_base(cp_id)
+        if is_main:
+            cost = round(cost * 0.5, 1)
+            discount = " (50% main base discount)"
+        else:
+            discount = ""
+        budget = self.game.blue.budget if self.game else 0
+        base_name = self.base_combo.currentText()
+        reply = QMessageBox.question(
+            self, "Confirm Restock",
+            f"Restock {base_name} inventory to full capacity?\n\n"
+            f"Cost: ${cost:.1f}M{discount}\n"
+            f"Current budget: ${budget:.1f}M",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        if budget < cost:
+            QMessageBox.warning(self, "Insufficient funds",
+                f"Cannot afford restock.\nCost: ${cost:.1f}M  Budget: ${budget:.1f}M")
+            return
+        self.logistics.restock_inventory(cp_id)
+        self.game.blue.adjust_budget(-cost)
+        self._refresh_view()
+        self.status_label.setText(
+            f"Inventory restocked for {base_name} - cost ${cost:.1f}M. "
+            f"Remaining budget: ${self.game.blue.budget:.1f}M"
+        )
+
     def _on_export_csv(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
             self, "Export Inventory CSV", "", "CSV files (*.csv)"
@@ -1101,12 +1184,10 @@ class InventoryTab(QWidget):
         try:
             rows = export_inventory_csv(self.logistics, path)
             self.status_label.setText(f"Exported {rows} items to: {path}")
-            QMessageBox.information(
-                self, "Export successful",
+            QMessageBox.information(self, "Export successful",
                 f"Exported {rows} weapon/equipment items.\n\n"
                 f"Columns: {', '.join(INVENTORY_CSV_COLUMNS)}\n\n"
-                f"Edit quantities in the 'quantity' column, then import back."
-            )
+                "Edit quantities in the 'quantity' column, then import back.")
         except Exception as e:
             logger.exception("Inventory CSV export failed")
             QMessageBox.critical(self, "Export failed", str(e))
@@ -1128,7 +1209,7 @@ class InventoryTab(QWidget):
             else:
                 QMessageBox.information(self, "Import successful", msg)
         except ValueError as e:
-            QMessageBox.critical(self, "Import failed — wrong format", str(e))
+            QMessageBox.critical(self, "Import failed - wrong format", str(e))
         except Exception as e:
             logger.exception("Inventory CSV import failed")
             QMessageBox.critical(self, "Import failed", str(e))
@@ -1235,9 +1316,7 @@ class TransfersTab(QWidget):
         if dst_cp_id is not None:
             for dz in self.logistics.drop_zones_for_cp(dst_cp_id):
                 if dz.active:
-                    self.dz_combo.addItem(
-                        f"{dz.name} ({dz.dz_type.value})", dz.dz_id
-                    )
+                    self.dz_combo.addItem(f"{dz.name} ({dz.dz_type.value})", dz.dz_id)
 
     def _on_schedule(self) -> None:
         src_cp_id = self.src_combo.currentData()
@@ -1261,9 +1340,7 @@ class TransfersTab(QWidget):
         if transfer is None:
             self.sched_status.setText("Insufficient stock at source.")
         else:
-            self.sched_status.setText(
-                f"Transfer {transfer.transfer_id[:8]} scheduled."
-            )
+            self.sched_status.setText(f"Transfer {transfer.transfer_id[:8]} scheduled.")
             self.transferScheduled.emit(transfer)
             self.refresh()
 
@@ -1288,6 +1365,96 @@ class TransfersTab(QWidget):
         if self.logistics.cancel_transfer(tid):
             self.sched_status.setText(f"Transfer {tid[:8]} cancelled.")
             self.refresh()
+
+
+# ======================================================================
+# Tab 5 - Main Base designation
+# ======================================================================
+
+class MainBaseTab(QWidget):
+    def __init__(self, logistics: LogisticsManager, game: Game) -> None:
+        super().__init__()
+        self.logistics = logistics
+        self.game = game
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+
+        info = QLabel(
+            "<b>Main Supply Base</b><br>"
+            "Designate one blue base as the primary logistics hub.<br>"
+            "The main base receives a <b>50% discount</b> on all restock costs "
+            "and is marked with [MAIN] throughout the Logistics window."
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+        layout.addSpacing(8)
+
+        self.current_label = QLabel()
+        self.current_label.setStyleSheet("font-weight: bold; color: #4fc3f7;")
+        layout.addWidget(self.current_label)
+        layout.addSpacing(4)
+
+        sel_layout = QHBoxLayout()
+        sel_layout.addWidget(QLabel("Select main base:"))
+        self.base_combo = QComboBox()
+        self.base_combo.setMinimumWidth(240)
+        sel_layout.addWidget(self.base_combo)
+        layout.addLayout(sel_layout)
+        layout.addSpacing(8)
+
+        btn_layout = QHBoxLayout()
+        self.set_btn = QPushButton("Set as Main Base")
+        self.set_btn.setStyleSheet(MAIN_BASE_STYLE)
+        self.set_btn.clicked.connect(self._on_set)
+        btn_layout.addWidget(self.set_btn)
+        self.clear_btn = QPushButton("Clear")
+        self.clear_btn.clicked.connect(self._on_clear)
+        btn_layout.addWidget(self.clear_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+        layout.addSpacing(16)
+
+        benefits = QGroupBox("Main Base Benefits")
+        b_layout = QVBoxLayout()
+        b_layout.addWidget(QLabel("  50% discount on warehouse restock cost"))
+        b_layout.addWidget(QLabel("  50% discount on inventory restock cost"))
+        b_layout.addWidget(QLabel("  Marked [MAIN] in all dropdowns and tables"))
+        b_layout.addWidget(QLabel("  Only one base can be designated at a time"))
+        benefits.setLayout(b_layout)
+        layout.addWidget(benefits)
+        layout.addStretch()
+        self.refresh()
+
+    def refresh(self) -> None:
+        self.base_combo.clear()
+        main_id = self.logistics.main_base_cp_id
+        current_name = "None"
+        if self.game:
+            for cp in sorted(self.game.theater.controlpoints, key=lambda c: c.name):
+                if not cp.captured.is_blue:
+                    continue
+                label = f"[MAIN] {cp.name}" if cp.id == main_id else cp.name
+                self.base_combo.addItem(label, cp.id)
+                if cp.id == main_id:
+                    current_name = cp.name
+        self.current_label.setText(f"Current main base: {current_name}")
+
+    def _on_set(self) -> None:
+        cp_id = self.base_combo.currentData()
+        if cp_id is None:
+            return
+        cp_name = self.base_combo.currentText().replace("[MAIN] ", "")
+        self.logistics.set_main_base(cp_id)
+        self.refresh()
+        QMessageBox.information(self, "Main Base Set",
+            f"{cp_name} is now the main supply base.\n"
+            "Restock costs at this base are reduced by 50%.")
+
+    def _on_clear(self) -> None:
+        self.logistics.set_main_base(None)
+        self.refresh()
 
 
 # ======================================================================
@@ -1342,11 +1509,13 @@ class QLogisticsWindow(QDialog):
         self.wh_tab  = WarehouseTab(logistics, self.game)
         self.inv_tab = InventoryTab(logistics, self.game)
         self.tr_tab  = TransfersTab(logistics, current_turn=turn)
+        self.mb_tab  = MainBaseTab(logistics, self.game)
 
         self._tabs.addTab(self.dz_tab,  "Drop Zones")
         self._tabs.addTab(self.wh_tab,  "Warehouses")
         self._tabs.addTab(self.inv_tab, "Inventory")
         self._tabs.addTab(self.tr_tab,  "Transfers")
+        self._tabs.addTab(self.mb_tab,  "Main Base")
         layout.addWidget(self._tabs)
 
         btn_row = QHBoxLayout()
@@ -1364,7 +1533,7 @@ class QLogisticsWindow(QDialog):
             self.dz_tab.add_drop_zone_at(lat, lon, cp_id)
 
     def refresh(self) -> None:
-        for attr in ("dz_tab", "wh_tab", "inv_tab", "tr_tab"):
+        for attr in ("dz_tab", "wh_tab", "inv_tab", "tr_tab", "mb_tab"):
             tab = getattr(self, attr, None)
             if tab and hasattr(tab, "refresh"):
                 tab.refresh()
