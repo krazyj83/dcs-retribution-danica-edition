@@ -50,6 +50,32 @@ class WarehouseCategory(Enum):
 class StockItem:
     quantity: float = 0.0
     capacity: float = 1000.0
+ @property
+    def level(self) -> float:
+        """Supply level as a fraction 0.0–1.0.
+        
+        CONCEPT — property:
+            A @property lets you call item.level like an attribute
+            (no parentheses) even though it runs a calculation.
+            This keeps call sites clean: `if stock.level < 0.4`
+            instead of `if stock.level() < 0.4`.
+        """
+        if self.capacity <= 0:
+            return 0.0
+        return min(1.0, self.quantity / self.capacity)
+
+    @property
+    def needs_resupply(self) -> bool:
+        """True when stock has dropped below the 40% resupply threshold."""
+        return self.level < 0.40
+
+    def apply_delivery(self, amount: float) -> None:
+        """Add stock from a completed logistic flight. Clamps to capacity."""
+        self.quantity = min(self.capacity, self.quantity + amount)
+
+    def apply_consumption(self, amount: float) -> None:
+        """Subtract turn consumption. Clamps to zero, never negative."""
+        self.quantity = max(0.0, self.quantity - amount)
 
 
 # ======================================================================
@@ -59,9 +85,9 @@ class StockItem:
 @dataclass
 class WeaponStockItem:
     """Tracks quantity of a specific weapon or piece of equipment at a base."""
-    name: str           # Human-readable name e.g. "AIM-120C"
-    clsid: str          # DCS CLSID or unit variant_id for ground equipment
-    category: str       # "Air-to-Air", "Air-to-Ground", "Bomb", "Ground Unit", etc.
+    name: str
+    clsid: str
+    category: str
     quantity: int = 0
     capacity: int = 250
 
@@ -71,7 +97,6 @@ class WeaponInventory:
     """Full weapon and equipment inventory for one base."""
     cp_id: int
     cp_name: str
-    # keyed by clsid/variant_id
     items: Dict[str, WeaponStockItem] = field(default_factory=dict)
 
     def add_item(self, clsid: str, name: str, category: str, quantity: int = 10) -> None:
@@ -79,14 +104,10 @@ class WeaponInventory:
             self.items[clsid].quantity += quantity
         else:
             self.items[clsid] = WeaponStockItem(
-                name=name,
-                clsid=clsid,
-                category=category,
-                quantity=quantity,
+                name=name, clsid=clsid, category=category, quantity=quantity,
             )
 
     def zero_all(self) -> None:
-        """Set all quantities to zero (used on base capture)."""
         for item in self.items.values():
             item.quantity = 0
 
@@ -100,14 +121,8 @@ class WeaponInventory:
 
 
 def build_weapon_inventory(cp, game: "Game") -> WeaponInventory:
-    """
-    Build a WeaponInventory for a control point by inspecting:
-    1. Squadrons based there - their aircraft pylons/allowed weapons
-    2. Ground units at the base - from cp.base.armor
-    """
     inv = WeaponInventory(cp_id=cp.id, cp_name=cp.name)
 
-    # --- Aircraft weapons from squadrons ---
     try:
         from game.data.weapons import Pylon
         for coalition in [game.blue, game.red]:
@@ -122,10 +137,10 @@ def build_weapon_inventory(cp, game: "Game") -> WeaponInventory:
                             for pylon in Pylon.iter_pylons(aircraft_type):
                                 for weapon in pylon.allowed:
                                     try:
-                                        w_name = weapon.name
-                                        w_clsid = weapon.clsid
-                                        cat = _weapon_category(w_name)
-                                        inv.add_item(w_clsid, w_name, cat, quantity=5)
+                                        inv.add_item(
+                                            weapon.clsid, weapon.name,
+                                            _weapon_category(weapon.name), quantity=5,
+                                        )
                                     except Exception:
                                         pass
                         except Exception:
@@ -135,18 +150,16 @@ def build_weapon_inventory(cp, game: "Game") -> WeaponInventory:
     except Exception:
         pass
 
-    # --- Ground units from base.armor ---
     try:
         if hasattr(cp, "base") and hasattr(cp.base, "armor"):
             for unit_type, count in cp.base.armor.items():
                 if count <= 0:
                     continue
                 try:
-                    name = getattr(unit_type, "name", str(unit_type))
-                    vid  = getattr(unit_type, "variant_id", str(unit_type))
+                    name  = getattr(unit_type, "name", str(unit_type))
+                    vid   = getattr(unit_type, "variant_id", str(unit_type))
                     price = getattr(unit_type, "price", 0)
-                    cat = _ground_unit_category(name)
-                    inv.add_item(vid, f"{name} (${price}M)", cat, quantity=count)
+                    inv.add_item(vid, f"{name} (${price}M)", _ground_unit_category(name), quantity=count)
                 except Exception:
                     pass
     except Exception:
@@ -156,7 +169,6 @@ def build_weapon_inventory(cp, game: "Game") -> WeaponInventory:
 
 
 def _weapon_category(name: str) -> str:
-    """Heuristic categorisation of a weapon by name."""
     n = name.upper()
     if any(x in n for x in ["AIM-", "R-", "AA-", "MICA", "AMRAAM", "SIDEWINDER",
                               "SPARROW", "ARCHER", "ATOLL", "APHID", "ALAMO"]):
@@ -206,7 +218,7 @@ def _ground_unit_category(name: str) -> str:
 
 
 # ======================================================================
-# Warehouse - broad supply categories
+# Warehouse
 # ======================================================================
 
 @dataclass
@@ -265,7 +277,7 @@ class LogisticsManager:
         self._warehouses: Dict[int, Warehouse] = {}
         self._weapon_inventories: Dict[int, WeaponInventory] = {}
         self._transfers: Dict[str, LogisticsTransfer] = {}
-        self._main_base_cp_id: Optional[int] = None  # designated main supply base
+        self._main_base_cp_id: Optional[int] = None
 
     # ── Drop zones ─────────────────────────────────────────────────────
 
@@ -307,44 +319,41 @@ class LogisticsManager:
         self._weapon_inventories[inv.cp_id] = inv
 
     def sync_weapon_inventories(self, game: "Game") -> None:
-        """Rebuild weapon inventories for all blue bases from current game state."""
         try:
             for cp in game.theater.player_points():
                 inv = build_weapon_inventory(cp, game)
                 self._weapon_inventories[cp.id] = inv
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning(
-                f"Failed to sync weapon inventories: {e}"
-            )
+            logging.getLogger(__name__).warning(f"Failed to sync weapon inventories: {e}")
 
     # ── Main Base ──────────────────────────────────────────────────────
 
     @property
     def main_base_cp_id(self) -> Optional[int]:
-        """The cp_id of the designated main supply base, or None."""
         return self._main_base_cp_id
 
     def set_main_base(self, cp_id: Optional[int]) -> None:
-        """Designate a base as the main supply hub (or clear with None)."""
         self._main_base_cp_id = cp_id
 
     def is_main_base(self, cp_id: int) -> bool:
         return self._main_base_cp_id == cp_id
 
-    # ── Restock helpers ────────────────────────────────────────────────
+    # ── Restock (main base only) ───────────────────────────────────────
+    #
+    # Pricing:
+    #   Warehouse stock:  $0.01M per unit deficit (fuel/ammo/supplies/troops)
+    #   Weapons/rounds:   $0.01M per unit deficit
+    #   Ground units:     exact in-game procurement price per unit deficit
+    #                     (same cost as buying them through HQ)
 
     def restock_warehouse_cost(self, cp_id: int) -> float:
-        """
-        Cost ($M) to fully restock a warehouse to capacity.
-        Rate: $0.05M per unit of stock deficit.
-        """
-        COST_PER_UNIT = 0.05
+        """Cost ($M) to fully restock a warehouse. $0.01M per unit deficit."""
         wh = self.get_warehouse(cp_id)
         if wh is None:
             return 0.0
         total = sum(
-            max(0.0, wh.stock[cat].capacity - wh.stock[cat].quantity) * COST_PER_UNIT
+            max(0.0, wh.stock[cat].capacity - wh.stock[cat].quantity) * 0.01
             for cat in WarehouseCategory
         )
         return round(total, 1)
@@ -360,10 +369,9 @@ class LogisticsManager:
     def restock_inventory_cost(self, cp_id: int) -> float:
         """
         Cost ($M) to refill weapon/equipment inventory to capacity.
-        Weapons cost $0.1M per unit deficit.
-        Ground units use their in-game price per unit deficit.
+        Weapons: $0.01M per unit deficit.
+        Ground units: in-game procurement price per unit deficit.
         """
-        WEAPON_COST = 0.1
         inv = self.get_weapon_inventory(cp_id)
         if inv is None:
             return 0.0
@@ -381,11 +389,11 @@ class LogisticsManager:
                             total += deficit * gut.price
                             break
                     else:
-                        total += deficit * WEAPON_COST
+                        total += deficit * 0.01
                 except Exception:
-                    total += deficit * WEAPON_COST
+                    total += deficit * 0.01
             else:
-                total += deficit * WEAPON_COST
+                total += deficit * 0.01
         return round(total, 1)
 
     def restock_inventory(self, cp_id: int) -> None:
