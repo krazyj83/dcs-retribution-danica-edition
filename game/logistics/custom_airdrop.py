@@ -19,15 +19,16 @@ class CustomAirdropTarget(MissionTarget):
     requires_helicopter: bool = True
 
     def mission_types(self, for_player: bool = True):
-        try:
-            from game.ato.flighttype import FlightType
-            return [
-                FlightType.AIR_ASSAULT,
-                FlightType.TRANSPORT,
-                FlightType.LOGISTIC,  # ← added: warehouse resupply flights
-            ]
-        except Exception:
-            return []
+#       try:
+#           from game.ato.flighttype import FlightType
+#           return [
+#               FlightType.AIR_ASSAULT,
+#               FlightType.TRANSPORT,
+#               FlightType.LOGISTIC,    # ← ADD THIS LINE
+#           ]
+#       except Exception:
+#           return []
+
 
 
 def create_custom_airdrop_target(name, position, coalition="blue"):
