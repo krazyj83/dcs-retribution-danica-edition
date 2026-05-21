@@ -64,6 +64,7 @@ class FlightType(Enum):
     REFUELING = "Refueling"
     FERRY = "Ferry"
     AIR_ASSAULT = "Air Assault"
+    LOGISTIC = "Logistic"
     # ── NEW ──────────────────────────────────────────────────────────────────
     # LOGISTIC: warehouse-based supply resupply mission.
     # Aircraft fly from a source base to a destination base, and the Lua plugin
@@ -132,4 +133,5 @@ class FlightType(Enum):
             FlightType.TARCAP: AirEntity.FIGHTER,
             FlightType.TRANSPORT: AirEntity.UTILITY,
             FlightType.AIR_ASSAULT: AirEntity.ROTARY_WING,
+            FlightType.LOGISTIC: AirEntity.UTILITY,
         }.get(self, AirEntity.UNSPECIFIED)
