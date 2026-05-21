@@ -4,21 +4,27 @@ qt_ui/windows/logistics/QLogisticsWindow.py
 Logistics & Supply Chain window for DCS Retribution.
 Five tabs:
   1. Drop Zones  - create/edit/delete drop zones for any faction base or map point
-  2. Warehouses  - broad supply stock levels with base filter, sync, CSV and restock
+  2. Warehouses  - broad supply stock levels with base filter, sync, CSV
+                   Restock button only shown when the main base is selected
   3. Inventory   - detailed per-base weapon, equipment and ground unit breakdown
+                   Restock button only shown when the main base is selected
   4. Transfers   - schedule, monitor, and cancel logistics deliveries
-  5. Main Base   - designate one blue base as the primary supply hub (50% restock discount)
+  5. Main Base   - designate one blue base as the primary supply hub
 
 CSV formats:
   Warehouse CSV:  base, fuel, ammunition, supplies, troops
   Inventory CSV:  base, clsid, name, category, quantity, capacity
+
+Restock pricing (main base only):
+  Warehouse stock:  $0.01M per unit deficit
+  Weapons/rounds:   $0.01M per unit deficit
+  Ground units:     in-game procurement price per unit deficit
 """
 
 from __future__ import annotations
 
 import csv
 import logging
-from pathlib import Path
 from typing import Optional, List, Tuple
 
 from PySide6.QtCore import Qt, Signal
@@ -103,6 +109,19 @@ CATEGORY_COLORS = {
     "Other":                     QColor("#7f8c8d"),
 }
 
+RESTOCK_STYLE = (
+    "QPushButton { background: #2e7d32; color: white; font-weight: bold;"
+    " padding: 4px 12px; border-radius: 3px; }"
+    "QPushButton:hover { background: #388e3c; }"
+    "QPushButton:disabled { background: #555; color: #999; }"
+)
+
+MAIN_BASE_STYLE = (
+    "QPushButton { background: #1565c0; color: white; font-weight: bold;"
+    " padding: 6px 16px; border-radius: 4px; }"
+    "QPushButton:hover { background: #1976d2; }"
+)
+
 
 def stock_color(quantity: float, capacity: float) -> QColor:
     if capacity == 0:
@@ -161,7 +180,7 @@ def sync_warehouses_from_game(logistics: LogisticsManager, game: Game) -> None:
 
 
 # ======================================================================
-# CSV helpers  (column-aligned export, whitespace-tolerant import)
+# CSV helpers
 # ======================================================================
 
 WAREHOUSE_CSV_COLUMNS = ["base"] + [c.value for c in WarehouseCategory]
@@ -285,23 +304,6 @@ def import_inventory_csv(logistics: LogisticsManager, path: str) -> Tuple[int, L
 
 
 # ======================================================================
-# Restock button style
-# ======================================================================
-
-RESTOCK_STYLE = (
-    "QPushButton { background: #2e7d32; color: white; font-weight: bold;"
-    " padding: 4px 12px; border-radius: 3px; }"
-    "QPushButton:hover { background: #388e3c; }"
-)
-
-MAIN_BASE_STYLE = (
-    "QPushButton { background: #1565c0; color: white; font-weight: bold;"
-    " padding: 6px 16px; border-radius: 4px; }"
-    "QPushButton:hover { background: #1976d2; }"
-)
-
-
-# ======================================================================
 # Map point picker
 # ======================================================================
 
@@ -368,23 +370,19 @@ class DropZoneDialog(QDialog):
     def _build_ui(self, preselect_cp_id, preset_lat, preset_lon) -> None:
         layout = QVBoxLayout(self)
         form = QFormLayout()
-
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("e.g. LZ ALPHA")
         form.addRow("Zone name:", self.name_edit)
-
         self.type_combo = QComboBox()
         self.type_combo.addItem("Troop drop zone", DropZoneType.TROOP)
         self.type_combo.addItem("Cargo drop zone", DropZoneType.CARGO)
         form.addRow("Type:", self.type_combo)
-
         self.base_combo = QComboBox()
         self.base_combo.addItem("-- Custom map point --", -1)
         for cp in self._all_cps:
             faction = cp_faction(cp)
             self.base_combo.addItem(f"[{faction.upper()}] {cp.name}", cp.id)
         form.addRow("Associated base:", self.base_combo)
-
         loc_group = QGroupBox("Location")
         loc_layout = QVBoxLayout(loc_group)
         coord_row = QHBoxLayout()
@@ -414,23 +412,19 @@ class DropZoneDialog(QDialog):
         loc_hint.setStyleSheet("color: grey; font-size: 11px;")
         loc_layout.addWidget(loc_hint)
         form.addRow(loc_group)
-
         self.radius_spin = QDoubleSpinBox()
         self.radius_spin.setRange(100.0, 5000.0)
         self.radius_spin.setSingleStep(100.0)
         self.radius_spin.setValue(500.0)
         self.radius_spin.setSuffix(" m")
         form.addRow("Radius:", self.radius_spin)
-
         self.active_check = QCheckBox("Active (include in next mission)")
         self.active_check.setChecked(True)
         form.addRow("", self.active_check)
-
         self.notes_edit = QTextEdit()
         self.notes_edit.setMaximumHeight(70)
         self.notes_edit.setPlaceholderText("Optional notes...")
         form.addRow("Notes:", self.notes_edit)
-
         layout.addLayout(form)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -438,7 +432,6 @@ class DropZoneDialog(QDialog):
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-
         if preselect_cp_id is not None:
             idx = self.base_combo.findData(preselect_cp_id)
             if idx >= 0:
@@ -539,7 +532,6 @@ class DropZonesTab(QWidget):
         toolbar.addWidget(self.delete_btn)
         toolbar.addStretch()
         layout.addLayout(toolbar)
-
         self.table = QTableWidget()
         self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels([
@@ -551,7 +543,6 @@ class DropZonesTab(QWidget):
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
         layout.addWidget(self.table)
-
         info = QLabel(
             "Drop zones can be placed at any base (blue, red, or neutral) "
             "or at a custom map coordinate."
@@ -636,9 +627,7 @@ class DropZonesTab(QWidget):
             self.dropZoneRemoved.emit(dz_id)
             self.refresh()
 
-    def add_drop_zone_at(
-        self, lat: float, lon: float, cp_id: Optional[int] = None
-    ) -> None:
+    def add_drop_zone_at(self, lat: float, lon: float, cp_id: Optional[int] = None) -> None:
         dlg = DropZoneDialog(
             game=self.game, parent=self,
             preselect_cp_id=cp_id, preset_lat=lat, preset_lon=lon,
@@ -720,17 +709,22 @@ class WarehouseTab(QWidget):
         self.export_csv_btn.clicked.connect(self._on_export_csv)
         self.import_csv_btn = QPushButton("Import from CSV")
         self.import_csv_btn.clicked.connect(self._on_import_csv)
-        self.restock_wh_btn = QPushButton("Restock to Full")
-        self.restock_wh_btn.setToolTip(
-            "Refill selected base warehouse to capacity. Cost deducted from budget.\n"
-            "Main base receives a 50% discount."
-        )
-        self.restock_wh_btn.setStyleSheet(RESTOCK_STYLE)
-        self.restock_wh_btn.clicked.connect(self._on_restock)
         csv_layout.addWidget(self.export_csv_btn)
         csv_layout.addWidget(self.import_csv_btn)
-        csv_layout.addWidget(self.restock_wh_btn)
         csv_layout.addStretch()
+
+        # Restock button — only enabled when main base is selected
+        self.restock_wh_btn = QPushButton("Restock to Full (Main Base only)")
+        self.restock_wh_btn.setToolTip(
+            "Refill the main base warehouse to full capacity.\n"
+            "Cost: $0.01M per unit deficit. Deducted from budget.\n"
+            "Only available when the main base is selected in the filter."
+        )
+        self.restock_wh_btn.setStyleSheet(RESTOCK_STYLE)
+        self.restock_wh_btn.setEnabled(False)
+        self.restock_wh_btn.clicked.connect(self._on_restock)
+        csv_layout.addWidget(self.restock_wh_btn)
+
         csv_group.setLayout(csv_layout)
         layout.addWidget(csv_group)
 
@@ -741,6 +735,18 @@ class WarehouseTab(QWidget):
 
     def _on_filter_changed(self) -> None:
         self._update_table(self._current_warehouses())
+        # Enable restock only if the selected base is the main base
+        cp_id = self.base_filter_combo.currentData()
+        is_main = cp_id != -1 and self.logistics.is_main_base(cp_id)
+        self.restock_wh_btn.setEnabled(is_main)
+        if is_main:
+            cost = self.logistics.restock_warehouse_cost(cp_id)
+            budget = self.game.blue.budget if self.game else 0
+            self.restock_wh_btn.setToolTip(
+                f"Restock main base warehouse to full capacity.\n"
+                f"Cost: ${cost:.1f}M  |  Budget: ${budget:.1f}M\n"
+                f"Rate: $0.01M per unit deficit."
+            )
 
     def _on_sync(self) -> None:
         sync_warehouses_from_game(self.logistics, self.game)
@@ -755,9 +761,7 @@ class WarehouseTab(QWidget):
         self.base_filter_combo.clear()
         self.base_filter_combo.addItem("All bases", -1)
         for wh in self.logistics.warehouses_for_coalition("blue"):
-            label = wh.cp_name
-            if self.logistics.is_main_base(wh.cp_id):
-                label = f"[MAIN] {wh.cp_name}"
+            label = f"[MAIN] {wh.cp_name}" if self.logistics.is_main_base(wh.cp_id) else wh.cp_name
             self.base_filter_combo.addItem(label, wh.cp_id)
         idx = self.base_filter_combo.findData(current)
         if idx >= 0:
@@ -765,21 +769,20 @@ class WarehouseTab(QWidget):
         self.base_filter_combo.blockSignals(False)
         self._update_table(self._current_warehouses())
         self._update_transfer_combos()
+        # Refresh restock button state
+        cp_id = self.base_filter_combo.currentData()
+        self.restock_wh_btn.setEnabled(cp_id != -1 and self.logistics.is_main_base(cp_id))
 
     def _update_table(self, warehouses) -> None:
         cats = list(WarehouseCategory)
         self.table.setRowCount(len(warehouses))
         for row, wh in enumerate(warehouses):
-            name = wh.cp_name
-            if self.logistics.is_main_base(wh.cp_id):
-                name = f"[MAIN] {name}"
+            name = f"[MAIN] {wh.cp_name}" if self.logistics.is_main_base(wh.cp_id) else wh.cp_name
             self.table.setItem(row, 0, QTableWidgetItem(name))
             for col, cat in enumerate(cats, start=1):
                 sd = wh.stock[cat]
                 pct = int(100 * sd.quantity / sd.capacity) if sd.capacity else 0
-                cell = QTableWidgetItem(
-                    f"{sd.quantity:.0f} / {sd.capacity:.0f} ({pct}%)"
-                )
+                cell = QTableWidgetItem(f"{sd.quantity:.0f} / {sd.capacity:.0f} ({pct}%)")
                 cell.setForeground(stock_color(sd.quantity, sd.capacity))
                 self.table.setItem(row, col, cell)
 
@@ -815,27 +818,22 @@ class WarehouseTab(QWidget):
 
     def _on_restock(self) -> None:
         cp_id = self.base_filter_combo.currentData()
-        if cp_id == -1:
-            QMessageBox.warning(self, "No base selected",
-                "Select a specific base in the filter dropdown first.")
+        if cp_id == -1 or not self.logistics.is_main_base(cp_id):
+            QMessageBox.warning(self, "Main base only",
+                "Restock is only available at the designated main base.\n"
+                "Set a main base in the Main Base tab first.")
             return
         cost = self.logistics.restock_warehouse_cost(cp_id)
         if cost <= 0:
             QMessageBox.information(self, "Already full",
                 "This warehouse is already at capacity.")
             return
-        is_main = self.logistics.is_main_base(cp_id)
-        if is_main:
-            cost = round(cost * 0.5, 1)
-            discount = " (50% main base discount)"
-        else:
-            discount = ""
         budget = self.game.blue.budget if self.game else 0
         base_name = self.base_filter_combo.currentText()
         reply = QMessageBox.question(
             self, "Confirm Restock",
-            f"Restock {base_name} to full capacity?\n\n"
-            f"Cost: ${cost:.1f}M{discount}\n"
+            f"Restock {base_name} warehouse to full capacity?\n\n"
+            f"Cost: ${cost:.1f}M  (rate: $0.01M per unit deficit)\n"
             f"Current budget: ${budget:.1f}M",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
@@ -892,7 +890,7 @@ class WarehouseTab(QWidget):
 
 
 # ======================================================================
-# Tab 3 - Detailed Weapon & Equipment Inventory
+# Tab 3 - Inventory
 # ======================================================================
 
 class InventoryTab(QWidget):
@@ -931,12 +929,8 @@ class InventoryTab(QWidget):
 
         self.items_table = QTableWidget()
         self.items_table.setColumnCount(4)
-        self.items_table.setHorizontalHeaderLabels(
-            ["Item", "Category", "Quantity", "Capacity"]
-        )
-        self.items_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch
-        )
+        self.items_table.setHorizontalHeaderLabels(["Item", "Category", "Quantity", "Capacity"])
+        self.items_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for col in (1, 2, 3):
             self.items_table.horizontalHeader().setSectionResizeMode(
                 col, QHeaderView.ResizeMode.ResizeToContents
@@ -966,27 +960,26 @@ class InventoryTab(QWidget):
         )
         csv_layout = QHBoxLayout()
         self.export_inv_btn = QPushButton("Export all bases to CSV")
-        self.export_inv_btn.setToolTip(
-            "Export the full weapon/equipment inventory for all bases to a CSV file."
-        )
         self.export_inv_btn.clicked.connect(self._on_export_csv)
         self.import_inv_btn = QPushButton("Import from CSV")
-        self.import_inv_btn.setToolTip(
-            "Import weapon/equipment quantities from a CSV file. "
-            "Matches by base name and CLSID."
-        )
         self.import_inv_btn.clicked.connect(self._on_import_csv)
-        self.restock_inv_btn = QPushButton("Restock Inventory")
-        self.restock_inv_btn.setToolTip(
-            "Refill weapon/equipment to capacity. Cost deducted from budget.\n"
-            "Main base receives a 50% discount."
-        )
-        self.restock_inv_btn.setStyleSheet(RESTOCK_STYLE)
-        self.restock_inv_btn.clicked.connect(self._on_restock_inventory)
         csv_layout.addWidget(self.export_inv_btn)
         csv_layout.addWidget(self.import_inv_btn)
-        csv_layout.addWidget(self.restock_inv_btn)
         csv_layout.addStretch()
+
+        # Restock button — only enabled when main base is selected
+        self.restock_inv_btn = QPushButton("Restock Inventory (Main Base only)")
+        self.restock_inv_btn.setToolTip(
+            "Refill the main base weapon/equipment inventory to capacity.\n"
+            "Weapons: $0.01M per unit deficit.\n"
+            "Ground units: in-game procurement price per unit deficit.\n"
+            "Only available when the main base is selected."
+        )
+        self.restock_inv_btn.setStyleSheet(RESTOCK_STYLE)
+        self.restock_inv_btn.setEnabled(False)
+        self.restock_inv_btn.clicked.connect(self._on_restock_inventory)
+        csv_layout.addWidget(self.restock_inv_btn)
+
         csv_group.setLayout(csv_layout)
         right_layout.addWidget(csv_group)
 
@@ -999,8 +992,7 @@ class InventoryTab(QWidget):
 
         hint = QLabel(
             "Inventory is derived from squadrons at each base and their available "
-            "weapon types, plus ground units from the base garrison. "
-            "Export to CSV to edit quantities in a spreadsheet, then import back."
+            "weapon types, plus ground units from the base garrison."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: grey; font-size: 11px;")
@@ -1017,9 +1009,7 @@ class InventoryTab(QWidget):
         self.base_combo.clear()
         self.base_combo.addItem("-- Select base --", -1)
         for wh in self.logistics.warehouses_for_coalition("blue"):
-            label = wh.cp_name
-            if self.logistics.is_main_base(wh.cp_id):
-                label = f"[MAIN] {wh.cp_name}"
+            label = f"[MAIN] {wh.cp_name}" if self.logistics.is_main_base(wh.cp_id) else wh.cp_name
             self.base_combo.addItem(label, wh.cp_id)
         idx = self.base_combo.findData(current_cp_id)
         if idx >= 0:
@@ -1029,6 +1019,17 @@ class InventoryTab(QWidget):
 
     def _on_base_changed(self) -> None:
         self._refresh_view()
+        cp_id = self.base_combo.currentData()
+        is_main = cp_id != -1 and self.logistics.is_main_base(cp_id)
+        self.restock_inv_btn.setEnabled(is_main)
+        if is_main:
+            cost = self.logistics.restock_inventory_cost(cp_id)
+            budget = self.game.blue.budget if self.game else 0
+            self.restock_inv_btn.setToolTip(
+                f"Restock main base inventory to full capacity.\n"
+                f"Cost: ${cost:.1f}M  |  Budget: ${budget:.1f}M\n"
+                f"Weapons: $0.01M/unit  |  Ground units: procurement price/unit"
+            )
 
     def _refresh_view(self) -> None:
         self.category_tree.clear()
@@ -1038,9 +1039,7 @@ class InventoryTab(QWidget):
             return
         inv = self.logistics.get_weapon_inventory(cp_id)
         if inv is None:
-            cp = next(
-                (cp for cp in blue_control_points(self.game) if cp.id == cp_id), None
-            )
+            cp = next((cp for cp in blue_control_points(self.game) if cp.id == cp_id), None)
             if cp:
                 inv = build_weapon_inventory(cp, self.game)
                 self.logistics.set_weapon_inventory(inv)
@@ -1137,27 +1136,24 @@ class InventoryTab(QWidget):
 
     def _on_restock_inventory(self) -> None:
         cp_id = self.base_combo.currentData()
-        if cp_id is None or cp_id == -1:
-            QMessageBox.warning(self, "No base selected",
-                "Select a base in the dropdown first.")
+        if cp_id is None or cp_id == -1 or not self.logistics.is_main_base(cp_id):
+            QMessageBox.warning(self, "Main base only",
+                "Restock is only available at the designated main base.\n"
+                "Set a main base in the Main Base tab first.")
             return
         cost = self.logistics.restock_inventory_cost(cp_id)
         if cost <= 0:
             QMessageBox.information(self, "Already full",
                 "This inventory is already at capacity.")
             return
-        is_main = self.logistics.is_main_base(cp_id)
-        if is_main:
-            cost = round(cost * 0.5, 1)
-            discount = " (50% main base discount)"
-        else:
-            discount = ""
         budget = self.game.blue.budget if self.game else 0
         base_name = self.base_combo.currentText()
         reply = QMessageBox.question(
             self, "Confirm Restock",
             f"Restock {base_name} inventory to full capacity?\n\n"
-            f"Cost: ${cost:.1f}M{discount}\n"
+            f"Cost: ${cost:.1f}M\n"
+            f"  Weapons/rounds: $0.01M per unit deficit\n"
+            f"  Ground units: procurement price per unit deficit\n\n"
             f"Current budget: ${budget:.1f}M",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
@@ -1186,8 +1182,7 @@ class InventoryTab(QWidget):
             self.status_label.setText(f"Exported {rows} items to: {path}")
             QMessageBox.information(self, "Export successful",
                 f"Exported {rows} weapon/equipment items.\n\n"
-                f"Columns: {', '.join(INVENTORY_CSV_COLUMNS)}\n\n"
-                "Edit quantities in the 'quantity' column, then import back.")
+                f"Columns: {', '.join(INVENTORY_CSV_COLUMNS)}")
         except Exception as e:
             logger.exception("Inventory CSV export failed")
             QMessageBox.critical(self, "Export failed", str(e))
@@ -1260,13 +1255,11 @@ class TransfersTab(QWidget):
         sched_layout.addRow("",               self.schedule_btn)
         sched_group.setLayout(sched_layout)
         layout.addWidget(sched_group)
-
         layout.addWidget(QLabel("Transfer log:"))
         self.table = QTableWidget()
         self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels([
-            "ID", "From", "To", "Category",
-            "Planned", "Delivered", "Status", "Turn",
+            "ID", "From", "To", "Category", "Planned", "Delivered", "Status", "Turn",
         ])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -1293,17 +1286,11 @@ class TransfersTab(QWidget):
             src = self.logistics.get_warehouse(t.source_cp_id)
             dst = self.logistics.get_warehouse(t.dest_cp_id)
             self.table.setItem(row, 0, QTableWidgetItem(t.transfer_id[:8]))
-            self.table.setItem(row, 1, QTableWidgetItem(
-                src.cp_name if src else str(t.source_cp_id)
-            ))
-            self.table.setItem(row, 2, QTableWidgetItem(
-                dst.cp_name if dst else str(t.dest_cp_id)
-            ))
+            self.table.setItem(row, 1, QTableWidgetItem(src.cp_name if src else str(t.source_cp_id)))
+            self.table.setItem(row, 2, QTableWidgetItem(dst.cp_name if dst else str(t.dest_cp_id)))
             self.table.setItem(row, 3, QTableWidgetItem(t.category.value))
             self.table.setItem(row, 4, QTableWidgetItem(f"{t.quantity:.0f}"))
-            self.table.setItem(row, 5, QTableWidgetItem(
-                f"{t.delivered:.0f}" if t.delivered else "-"
-            ))
+            self.table.setItem(row, 5, QTableWidgetItem(f"{t.delivered:.0f}" if t.delivered else "-"))
             status_item = QTableWidgetItem(t.status.value.capitalize())
             status_item.setForeground(STATUS_COLORS.get(t.status, QColor("white")))
             self.table.setItem(row, 6, status_item)
@@ -1348,20 +1335,14 @@ class TransfersTab(QWidget):
         if not self.table.selectedItems():
             self.cancel_btn.setEnabled(False)
             return
-        tid = self.table.item(
-            self.table.currentRow(), 0
-        ).data(Qt.ItemDataRole.UserRole)
+        tid = self.table.item(self.table.currentRow(), 0).data(Qt.ItemDataRole.UserRole)
         t = self.logistics._transfers.get(tid)
-        self.cancel_btn.setEnabled(
-            t is not None and t.status == TransferStatus.PLANNED
-        )
+        self.cancel_btn.setEnabled(t is not None and t.status == TransferStatus.PLANNED)
 
     def _on_cancel(self) -> None:
         if not self.table.selectedItems():
             return
-        tid = self.table.item(
-            self.table.currentRow(), 0
-        ).data(Qt.ItemDataRole.UserRole)
+        tid = self.table.item(self.table.currentRow(), 0).data(Qt.ItemDataRole.UserRole)
         if self.logistics.cancel_transfer(tid):
             self.sched_status.setText(f"Transfer {tid[:8]} cancelled.")
             self.refresh()
@@ -1383,26 +1364,29 @@ class MainBaseTab(QWidget):
 
         info = QLabel(
             "<b>Main Supply Base</b><br>"
-            "Designate one blue base as the primary logistics hub.<br>"
-            "The main base receives a <b>50% discount</b> on all restock costs "
-            "and is marked with [MAIN] throughout the Logistics window."
+            "Designate one blue base as the primary logistics hub.<br><br>"
+            "The main base is the <b>only base that can be restocked</b>. "
+            "Restock costs are deducted from your budget:<br>"
+            "&nbsp;&nbsp;Warehouse stock: <b>$0.01M per unit deficit</b><br>"
+            "&nbsp;&nbsp;Weapons/rounds: <b>$0.01M per unit deficit</b><br>"
+            "&nbsp;&nbsp;Ground units: <b>in-game procurement price per unit deficit</b>"
         )
         info.setWordWrap(True)
         layout.addWidget(info)
-        layout.addSpacing(8)
+        layout.addSpacing(12)
 
         self.current_label = QLabel()
-        self.current_label.setStyleSheet("font-weight: bold; color: #4fc3f7;")
+        self.current_label.setStyleSheet("font-weight: bold; color: #4fc3f7; font-size: 13px;")
         layout.addWidget(self.current_label)
-        layout.addSpacing(4)
+        layout.addSpacing(8)
 
         sel_layout = QHBoxLayout()
         sel_layout.addWidget(QLabel("Select main base:"))
         self.base_combo = QComboBox()
-        self.base_combo.setMinimumWidth(240)
+        self.base_combo.setMinimumWidth(260)
         sel_layout.addWidget(self.base_combo)
         layout.addLayout(sel_layout)
-        layout.addSpacing(8)
+        layout.addSpacing(10)
 
         btn_layout = QHBoxLayout()
         self.set_btn = QPushButton("Set as Main Base")
@@ -1414,23 +1398,13 @@ class MainBaseTab(QWidget):
         btn_layout.addWidget(self.clear_btn)
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
-        layout.addSpacing(16)
-
-        benefits = QGroupBox("Main Base Benefits")
-        b_layout = QVBoxLayout()
-        b_layout.addWidget(QLabel("  50% discount on warehouse restock cost"))
-        b_layout.addWidget(QLabel("  50% discount on inventory restock cost"))
-        b_layout.addWidget(QLabel("  Marked [MAIN] in all dropdowns and tables"))
-        b_layout.addWidget(QLabel("  Only one base can be designated at a time"))
-        benefits.setLayout(b_layout)
-        layout.addWidget(benefits)
         layout.addStretch()
         self.refresh()
 
     def refresh(self) -> None:
         self.base_combo.clear()
         main_id = self.logistics.main_base_cp_id
-        current_name = "None"
+        current_name = "None designated"
         if self.game:
             for cp in sorted(self.game.theater.controlpoints, key=lambda c: c.name):
                 if not cp.captured.is_blue:
@@ -1449,8 +1423,9 @@ class MainBaseTab(QWidget):
         self.logistics.set_main_base(cp_id)
         self.refresh()
         QMessageBox.information(self, "Main Base Set",
-            f"{cp_name} is now the main supply base.\n"
-            "Restock costs at this base are reduced by 50%.")
+            f"{cp_name} is now the main supply base.\n\n"
+            "You can now restock its warehouse and inventory\n"
+            "from the Warehouses and Inventory tabs.")
 
     def _on_clear(self) -> None:
         self.logistics.set_main_base(None)
