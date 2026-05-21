@@ -1,20 +1,17 @@
 """
 game/ato/logistic_planner.py  — NEW FILE
-=========================================
-Auto-plans logistic resupply flights each turn for both coalitions.
 
-Imports from game.logistics (your existing __init__.py) rather than
-the supply_state.py we previously described — that file is not needed.
-StockItem, WarehouseCategory, and LogisticsManager all already exist.
+Auto-plans warehouse resupply flights for one coalition each turn.
+Works identically for BLUEFOR and REDFOR — pass the correct coalition
+and it handles the right side automatically.
 
-CONCEPT — where this fits in the turn sequence:
-    1. Turn starts → ai_flight_planner.py runs for each coalition
-    2. It calls LogisticPlanner.plan() here (one call per coalition)
-    3. plan() reads the current StockItem levels from game.logistics
-    4. For each base below threshold, it creates a Package + Flight
-    5. Those packages go into the ATO alongside combat missions
-    6. After the mission, debrief_hook.py credits the deliveries back
-       into StockItem.quantity using apply_delivery()
+Wire it into the AI planner by adding to ai_flight_planner.py:
+
+    from game.ato.logistic_planner import LogisticPlanner
+
+    logistic_planner = LogisticPlanner(game=self.game, coalition=self)
+    for pkg in logistic_planner.plan():
+        self.ato.add_package(pkg)
 """
 
 from __future__ import annotations
@@ -23,129 +20,112 @@ import logging
 from typing import TYPE_CHECKING, Optional
 
 from game.ato.flighttype import FlightType
+from game.logistics import WarehouseCategory
 
 if TYPE_CHECKING:
-    from game.game import Game
     from game.coalition import Coalition
+    from game.game import Game
+    from game.logistics import LogisticsManager, Warehouse
     from game.ato.package import Package
-    from game.theater.controlpoint import ControlPoint
-    from game.squadrons.squadron import Squadron
 
 logger = logging.getLogger(__name__)
 
+# How much stock one logistic flight delivers (in StockItem units).
+# These feed into StockItem.apply_delivery() via debrief_hook.py.
+FUEL_DELIVERY_UNITS  = 200.0
+AMMO_DELIVERY_UNITS  = 150.0
 
-# ── Delivery amounts per flight (must match debrief_hook.py constants) ────────
-# Keep these in sync with LOGISTIC_FUEL_DELIVERY / LOGISTIC_AMMO_DELIVERY
-# in debrief_hook.py so the planner and hook agree on what one flight delivers.
-FUEL_DELIVERY_PER_FLIGHT = 200.0
-AMMO_DELIVERY_PER_FLIGHT = 150.0
-
-# Turn consumption rates — subtracted from StockItem.quantity each turn
-FUEL_CONSUMPTION_PER_TURN = 50.0   # tune: how fast bases burn fuel
-AMMO_CONSUMPTION_PER_TURN = 80.0   # tune: ammo expended per turn of ops
-
-# Max logistic flights per coalition per turn (prevent ATO flooding)
+# Maximum logistic flights auto-planned per coalition per turn.
+# Prevents the AI flooding the ATO with transport missions.
 MAX_LOGISTIC_FLIGHTS = 3
-# ─────────────────────────────────────────────────────────────────────────────
+
+# Per-turn consumption as a fraction of each StockItem's capacity.
+# Simulates fuel and ammo usage by stationed units each turn.
+FUEL_CONSUMPTION_RATE = 0.05   # 5% of capacity per turn
+AMMO_CONSUMPTION_RATE = 0.08   # 8% of capacity per turn
 
 
 class LogisticPlanner:
     """
-    Generates logistic resupply flights for one coalition per turn.
+    Auto-plans warehouse resupply flights for one coalition each turn.
 
-    Works identically for BLUEFOR and REDFOR — the coalition parameter
-    scopes all CP lookups and squadron searches to the correct side.
-
-    Usage (add to ai_flight_planner.py after the transport block):
-
-        from game.ato.logistic_planner import LogisticPlanner
-
-        planner = LogisticPlanner(game=self.game, coalition=self.coalition)
-        for pkg in planner.plan():
-            self.ato.add_package(pkg)
+    Reads supply levels from the LogisticsManager's Warehouse objects
+    (game.logistics.__init__) and creates Package + Flight objects for
+    the ATO when bases drop below the 40% threshold defined in
+    StockItem.needs_resupply.
     """
 
-    def __init__(self, game: "Game", coalition: "Coalition") -> None:
+    def __init__(self, game: Game, coalition: Coalition) -> None:
         self.game      = game
         self.coalition = coalition
+        # Use the existing LogisticsManager attached to the game object
+        self.logistics: Optional[LogisticsManager] = getattr(game, "logistics", None)
 
-        # game.logistics is the LogisticsManager from game/logistics/__init__.py
-        self.logistics = getattr(game, "logistics", None)
-
-    def plan(self) -> list["Package"]:
+    def plan(self) -> list[Package]:
         """
-        Main entry point. Returns new Package objects to add to the ATO.
+        Returns a list of new logistic Packages to add to the ATO.
 
         Steps:
-          1. Apply turn consumption to all friendly CPs
-          2. Find warehouses below resupply threshold (StockItem.needs_resupply)
-          3. For each, find a transport squadron and create a Package + Flight
+          1. Apply per-turn consumption to all warehouses this coalition owns
+          2. Find warehouses below resupply threshold, most urgent first
+          3. For each needy base, find a transport-capable squadron and
+             create a Package with a LOGISTIC Flight
         """
         if self.logistics is None:
-            logger.debug(
-                f"[LogisticPlanner] {self._coalition_name}: "
-                f"no logistics manager found, skipping."
-            )
+            logger.debug("LogisticPlanner: no LogisticsManager on game, skipping.")
             return []
 
-        self._apply_consumption()
+        self._apply_turn_consumption()
 
-        needy_cps = self._find_needy_cps()
-        if not needy_cps:
+        needy = self._warehouses_needing_resupply()
+        if not needy:
             return []
 
         packages: list[Package] = []
-        for dest_cp in needy_cps:
+        for cp_id, wh in needy:
             if len(packages) >= MAX_LOGISTIC_FLIGHTS:
                 break
-            pkg = self._plan_resupply_to(dest_cp)
+            pkg = self._plan_resupply(cp_id, wh)
             if pkg is not None:
                 packages.append(pkg)
 
-        logger.info(
-            f"[LogisticPlanner] {self._coalition_name}: "
-            f"planned {len(packages)} logistic flight(s)."
-        )
+        if packages:
+            side = "blue" if self.coalition.player else "red"
+            logger.info(
+                "LogisticPlanner [%s]: planned %d logistic flight(s) this turn.",
+                side, len(packages),
+            )
         return packages
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
-    @property
-    def _coalition_name(self) -> str:
-        try:
-            return self.coalition.faction.name
-        except Exception:
-            return "Unknown"
-
-    def _apply_consumption(self) -> None:
+    def _apply_turn_consumption(self) -> None:
         """
-        Subtract turn consumption from every friendly CP's warehouse.
+        Reduce stock at all friendly warehouses by the per-turn consumption rate.
 
-        CONCEPT — why consume each turn:
-            Without consumption the supply level never drops, so logistic
-            flights are never triggered. Consumption simulates aircraft
-            burning fuel on sorties and expending ammo each turn.
+        Without consumption the planner would never trigger because warehouses
+        would stay at their starting value. Tune FUEL_CONSUMPTION_RATE and
+        AMMO_CONSUMPTION_RATE at the top of this file to adjust frequency.
         """
-        from game.logistics import WarehouseCategory
-
         for cp in self._friendly_cps():
             wh = self.logistics.get_warehouse(cp.id)
             if wh is None:
                 continue
-            wh.stock[WarehouseCategory.FUEL].apply_consumption(
-                FUEL_CONSUMPTION_PER_TURN
-            )
-            wh.stock[WarehouseCategory.AMMUNITION].apply_consumption(
-                AMMO_CONSUMPTION_PER_TURN
-            )
+            fuel_item = wh.stock.get(WarehouseCategory.FUEL)
+            ammo_item = wh.stock.get(WarehouseCategory.AMMUNITION)
+            if fuel_item:
+                # apply_consumption() is the new method we added to StockItem
+                fuel_item.apply_consumption(fuel_item.capacity * FUEL_CONSUMPTION_RATE)
+            if ammo_item:
+                ammo_item.apply_consumption(ammo_item.capacity * AMMO_CONSUMPTION_RATE)
 
-    def _find_needy_cps(self) -> list["ControlPoint"]:
+    def _warehouses_needing_resupply(self) -> list[tuple[int, Warehouse]]:
         """
-        Returns friendly CPs whose fuel OR ammo StockItem is below threshold,
-        sorted most-depleted first (lowest combined level = highest priority).
-        """
-        from game.logistics import WarehouseCategory
+        Returns (cp_id, Warehouse) pairs for all friendly bases below threshold,
+        sorted so the most depleted base (lowest combined stock level) is first.
 
+        StockItem.needs_resupply uses StockItem.level which we added to __init__.py.
+        """
         needy = []
         for cp in self._friendly_cps():
             wh = self.logistics.get_warehouse(cp.id)
@@ -153,59 +133,111 @@ class LogisticPlanner:
                 continue
             fuel_item = wh.stock.get(WarehouseCategory.FUEL)
             ammo_item = wh.stock.get(WarehouseCategory.AMMUNITION)
-            if fuel_item is None or ammo_item is None:
-                continue
-            if fuel_item.needs_resupply or ammo_item.needs_resupply:
-                needy.append((cp, fuel_item.level + ammo_item.level))
+            fuel_low  = fuel_item is not None and fuel_item.needs_resupply
+            ammo_low  = ammo_item is not None and ammo_item.needs_resupply
+            if fuel_low or ammo_low:
+                combined = (
+                    (fuel_item.level if fuel_item else 1.0) +
+                    (ammo_item.level if ammo_item else 1.0)
+                )
+                needy.append((cp.id, wh, combined))
 
-        # Sort: lowest combined level first = most urgent
-        needy.sort(key=lambda pair: pair[1])
-        return [cp for cp, _ in needy]
+        # Sort: lowest combined level = most urgent = first
+        needy.sort(key=lambda t: t[2])
+        return [(cp_id, wh) for cp_id, wh, _ in needy]
 
-    def _plan_resupply_to(self, dest_cp: "ControlPoint") -> Optional["Package"]:
-        """Create one Package targeting dest_cp with a LOGISTIC flight."""
-        # Avoid importing at module level to prevent circular imports
+    def _plan_resupply(self, dest_cp_id: int, dest_wh: Warehouse) -> Optional[Package]:
+        """
+        Creates a Package containing one LOGISTIC Flight targeting dest_cp_id.
+        Returns None if no transport-capable squadron is available.
+        """
+        # Lazy imports avoid circular import errors — standard pattern here
         from game.ato.package import Package
         from game.ato.flight import Flight
+
+        dest_cp = self._find_cp_by_id(dest_cp_id)
+        if dest_cp is None:
+            return None
 
         origin_cp, squadron = self._find_transport_squadron(exclude_cp=dest_cp)
         if origin_cp is None or squadron is None:
             logger.debug(
-                f"[LogisticPlanner] No transport squadron available "
-                f"for resupply to {dest_cp.name}"
+                "LogisticPlanner: no transport squadron found for %s",
+                getattr(dest_cp, "name", dest_cp_id),
             )
             return None
+
+        dest_fuel = dest_wh.stock.get(WarehouseCategory.FUEL)
+        dest_ammo = dest_wh.stock.get(WarehouseCategory.AMMUNITION)
+
+        fuel_to_deliver = FUEL_DELIVERY_UNITS if (dest_fuel and dest_fuel.needs_resupply) else 0.0
+        ammo_to_deliver = AMMO_DELIVERY_UNITS if (dest_ammo and dest_ammo.needs_resupply) else 0.0
 
         package = Package(target=dest_cp, auto_asap=True)
 
         flight = Flight(
-            package=package,
-            country=self.coalition.country,
-            squadron=squadron,
-            count=1,
-            flight_type=FlightType.LOGISTIC,
-            start_type="Warm",
+            package    = package,
+            country    = self.coalition.country,
+            squadron   = squadron,
+            count      = 1,
+            flight_type = FlightType.LOGISTIC,
+            start_type = "Warm",
         )
 
-        # Attach payload so logistic_plugin_injector.py can read it
-        # and build the Lua RETRIBUTION_LOGISTIC_MISSIONS table
+        # logistic_payload is read by:
+        #   - logistic_plugin_injector.py  → builds the Lua data table for in-mission
+        #   - debrief_hook.py              → records delivery after mission ends
         flight.logistic_payload = {
-            "fuel_kg":          int(FUEL_DELIVERY_PER_FLIGHT * 250),  # kg equivalent
-            "ammo_items":       self._ammo_items_for(dest_cp),
+            # For the Lua plugin (converts stock units → kg for DCS warehouse API)
+            "fuel_kg":          fuel_to_deliver * 250.0,
+            "ammo_items":       self._build_ammo_items(dest_ammo),
             "origin_base_name": getattr(origin_cp, "dcs_identifier", origin_cp.name),
             "dest_base_name":   getattr(dest_cp,   "dcs_identifier", dest_cp.name),
+            # For debrief_hook.py (Python stock units)
+            "dest_cp_id":       dest_cp_id,
+            "dest_cp_name":     getattr(dest_cp, "name", str(dest_cp_id)),
+            "fuel_delivered":   fuel_to_deliver,
+            "ammo_delivered":   ammo_to_deliver,
         }
 
         package.add_flight(flight)
         return package
 
-    def _find_transport_squadron(
-        self, exclude_cp: "ControlPoint"
-    ) -> tuple[Optional["ControlPoint"], Optional["Squadron"]]:
+    def _build_ammo_items(self, ammo_item) -> list[dict]:
         """
-        Search all friendly CPs (except destination) for a squadron
-        with FlightType.LOGISTIC in its allowed mission types.
-        Returns (cp, squadron) or (None, None) if nothing is available.
+        Returns the ammo_items list for the Lua plugin when ammo is low.
+        Each entry is {"item": DCS_clsid_string, "count": int}.
+        Returns an empty list when ammo does not need resupply.
+        """
+        if ammo_item is None or not ammo_item.needs_resupply:
+            return []
+        # Generic mixed load — adapt per faction later if needed
+        return [
+            {"item": "weapons.missiles.AIM_120C", "count": 8},
+            {"item": "weapons.missiles.AIM_9X",   "count": 8},
+            {"item": "weapons.bombs.Mk_82",        "count": 20},
+            {"item": "weapons.bombs.GBU_12",       "count": 8},
+        ]
+
+    def _friendly_cps(self):
+        """Yields control points owned by this coalition."""
+        is_player = self.coalition.player
+        for cp in self.game.theater.controlpoints:
+            # cp.captured is True when blue owns it
+            if bool(cp.captured) == bool(is_player):
+                yield cp
+
+    def _find_cp_by_id(self, cp_id: int):
+        for cp in self.game.theater.controlpoints:
+            if cp.id == cp_id:
+                return cp
+        return None
+
+    def _find_transport_squadron(self, exclude_cp):
+        """
+        Finds the nearest friendly CP (other than the destination) with
+        a squadron capable of LOGISTIC missions that has aircraft available.
+        Returns (ControlPoint, Squadron) or (None, None).
         """
         for cp in self._friendly_cps():
             if cp is exclude_cp:
@@ -215,44 +247,3 @@ class LogisticPlanner:
                     if getattr(squadron, "has_available_aircraft", False):
                         return cp, squadron
         return None, None
-
-    def _friendly_cps(self) -> list["ControlPoint"]:
-        """All control points owned by this coalition."""
-        is_blue = self.coalition == self.game.blue
-        return [
-            cp for cp in self.game.theater.controlpoints
-            if cp.captured == is_blue
-        ]
-
-    def _ammo_items_for(self, dest_cp: "ControlPoint") -> list[dict]:
-        """
-        Generic ammo load — enough to meaningfully resupply a base.
-        Returns a list of {"item": str, "count": int} dicts for the Lua table.
-        A future improvement could read the destination faction's preferred
-        weapons and tailor the load accordingly.
-        """
-        wh = self.logistics.get_warehouse(dest_cp.id)
-        if wh is None:
-            return []
-
-        from game.logistics import WarehouseCategory
-        ammo_item = wh.stock.get(WarehouseCategory.AMMUNITION)
-        if ammo_item is None or not ammo_item.needs_resupply:
-            return []
-
-        # Determine side to pick appropriate weapons
-        is_blue = self.coalition == self.game.blue
-        if is_blue:
-            return [
-                {"item": "weapons.missiles.AIM_120C", "count": 8},
-                {"item": "weapons.missiles.AIM_9X",   "count": 8},
-                {"item": "weapons.bombs.Mk_82",        "count": 20},
-                {"item": "weapons.bombs.GBU_12",       "count": 8},
-            ]
-        else:
-            return [
-                {"item": "weapons.missiles.R_77",      "count": 8},
-                {"item": "weapons.missiles.R_73",      "count": 8},
-                {"item": "weapons.bombs.FAB_500M62",   "count": 20},
-                {"item": "weapons.bombs.KAB_500Kr",    "count": 8},
-            ]
