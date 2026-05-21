@@ -50,6 +50,32 @@ class WarehouseCategory(Enum):
 class StockItem:
     quantity: float = 0.0
     capacity: float = 1000.0
+ @property
+    def level(self) -> float:
+        """Supply level as a fraction 0.0–1.0.
+        
+        CONCEPT — property:
+            A @property lets you call item.level like an attribute
+            (no parentheses) even though it runs a calculation.
+            This keeps call sites clean: `if stock.level < 0.4`
+            instead of `if stock.level() < 0.4`.
+        """
+        if self.capacity <= 0:
+            return 0.0
+        return min(1.0, self.quantity / self.capacity)
+
+    @property
+    def needs_resupply(self) -> bool:
+        """True when stock has dropped below the 40% resupply threshold."""
+        return self.level < 0.40
+
+    def apply_delivery(self, amount: float) -> None:
+        """Add stock from a completed logistic flight. Clamps to capacity."""
+        self.quantity = min(self.capacity, self.quantity + amount)
+
+    def apply_consumption(self, amount: float) -> None:
+        """Subtract turn consumption. Clamps to zero, never negative."""
+        self.quantity = max(0.0, self.quantity - amount)
 
 
 # ======================================================================
