@@ -64,15 +64,18 @@ class FlightType(Enum):
     REFUELING = "Refueling"
     FERRY = "Ferry"
     AIR_ASSAULT = "Air Assault"
-    LOGISTIC = "Logistic"
-    # ── NEW ──────────────────────────────────────────────────────────────────
     # LOGISTIC: warehouse-based supply resupply mission.
     # Aircraft fly from a source base to a destination base, and the Lua plugin
     # (resources/plugins/logistic_supply.lua) transfers fuel/ammo between DCS
     # warehouses when the aircraft lands at each stop.
     # Works for player AND AI, both BLUEFOR and REDFOR.
     LOGISTIC = "Logistic"
-    # ─────────────────────────────────────────────────────────────────────────
+    # These were referenced in flightplanbuildertypes.py, aircraftbehavior.py,
+    # package.py, and other modules but were missing from the enum entirely.
+    SEAD_SWEEP = "SEAD Sweep"
+    ARMED_RECON = "Armed Recon"
+    RECOVERY = "Recovery"
+    PRETENSE_CARGO = "Pretense Cargo"
     IDLE = "Idle"
 
     def __str__(self) -> str:
@@ -108,6 +111,8 @@ class FlightType(Enum):
             FlightType.OCA_AIRCRAFT,
             FlightType.SEAD_ESCORT,
             FlightType.AIR_ASSAULT,
+            FlightType.SEAD_SWEEP,
+            FlightType.ARMED_RECON,
         }
 
     @property
@@ -122,16 +127,19 @@ class FlightType(Enum):
             FlightType.ESCORT: AirEntity.ESCORT,
             FlightType.FERRY: AirEntity.UNSPECIFIED,
             FlightType.INTERCEPTION: AirEntity.FIGHTER,
-            FlightType.LOGISTIC: AirEntity.UTILITY,       # ← NEW
+            FlightType.LOGISTIC: AirEntity.UTILITY,
             FlightType.OCA_AIRCRAFT: AirEntity.ATTACK_STRIKE,
             FlightType.OCA_RUNWAY: AirEntity.ATTACK_STRIKE,
             FlightType.REFUELING: AirEntity.TANKER,
             FlightType.SEAD: AirEntity.SUPPRESSION_OF_ENEMY_AIR_DEFENCE,
             FlightType.SEAD_ESCORT: AirEntity.SUPPRESSION_OF_ENEMY_AIR_DEFENCE,
+            FlightType.SEAD_SWEEP: AirEntity.SUPPRESSION_OF_ENEMY_AIR_DEFENCE,
             FlightType.STRIKE: AirEntity.ATTACK_STRIKE,
             FlightType.SWEEP: AirEntity.FIGHTER,
             FlightType.TARCAP: AirEntity.FIGHTER,
             FlightType.TRANSPORT: AirEntity.UTILITY,
             FlightType.AIR_ASSAULT: AirEntity.ROTARY_WING,
-            FlightType.LOGISTIC: AirEntity.UTILITY,
+            FlightType.ARMED_RECON: AirEntity.ATTACK_STRIKE,
+            FlightType.RECOVERY: AirEntity.TANKER,
+            FlightType.PRETENSE_CARGO: AirEntity.UTILITY,
         }.get(self, AirEntity.UNSPECIFIED)
