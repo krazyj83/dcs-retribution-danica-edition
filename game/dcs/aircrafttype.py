@@ -222,7 +222,7 @@ class AircraftType(UnitType[Type[FlyingType]]):
     channel_allocator: Optional[RadioChannelAllocator]
     channel_namer: Type[ChannelNamer]
 
-    # Logisitcs info
+    # Logistics info
     # cabin_size defines how many troops can be loaded. 0 means the aircraft can not
     # transport any troops. Default for helos is 10, non helos will have 0.
     cabin_size: int
@@ -264,6 +264,7 @@ class AircraftType(UnitType[Type[FlyingType]]):
 
     def __post_init__(self) -> None:
         enrich = {}
+
         if FlightType.SEAD_SWEEP not in self.task_priorities:
             if (value := self.task_priorities.get(FlightType.SEAD)) or (
                 value := self.task_priorities.get(FlightType.SEAD_ESCORT)
@@ -281,6 +282,13 @@ class AircraftType(UnitType[Type[FlyingType]]):
                 value := self.task_priorities.get(FlightType.REFUELING)
             ) and self.carrier_capable is True:
                 enrich[FlightType.RECOVERY] = value
+
+        # Any aircraft capable of TRANSPORT is automatically capable of LOGISTIC at the
+        # same priority. This means C-130s, Mi-8s, UH-1Hs, etc. can be assigned to
+        # LOGISTIC missions without needing an explicit "Logistic" entry in their yaml.
+        if FlightType.LOGISTIC not in self.task_priorities:
+            if value := self.task_priorities.get(FlightType.TRANSPORT):
+                enrich[FlightType.LOGISTIC] = value
 
         self.task_priorities.update(enrich)
 
@@ -321,24 +329,20 @@ class AircraftType(UnitType[Type[FlyingType]]):
         if self.patrol_speed is not None:
             return self.patrol_speed
         else:
-            # Estimate based on max speed.
             max_speed = self.max_speed
             if max_speed > SPEED_OF_SOUND_AT_SEA_LEVEL * 1.6:
-                # Fast airplanes, should manage pretty high patrol speed
                 return (
                     Speed.from_mach(0.85, altitude)
                     if altitude.feet > 20000
                     else Speed.from_mach(0.7, altitude)
                 )
             elif max_speed > SPEED_OF_SOUND_AT_SEA_LEVEL * 1.2:
-                # Medium-fast like F/A-18C
                 return (
                     Speed.from_mach(0.8, altitude)
                     if altitude.feet > 20000
                     else Speed.from_mach(0.65, altitude)
                 )
             elif max_speed > SPEED_OF_SOUND_AT_SEA_LEVEL * 0.7:
-                # Semi-fast like airliners or similar
                 return (
                     Speed.from_mach(0.6, altitude)
                     if altitude.feet > 20000
@@ -347,8 +351,6 @@ class AircraftType(UnitType[Type[FlyingType]]):
             elif self.helicopter:
                 return max_speed * 0.4
             else:
-                # Slow like warbirds or attack planes
-                # return 50% of max speed + 5% per 2k above 10k to maintain momentum
                 return max_speed * min(
                     1.0,
                     0.5
@@ -376,9 +378,6 @@ class AircraftType(UnitType[Type[FlyingType]]):
             return self.preferred_altitude(20, 20, "combat")
 
     def preferred_altitude(self, low: int, high: int, type: str) -> Distance:
-        # Estimate based on max speed.
-        # Aircraft with max speed 600 kph will prefer low
-        # Aircraft with max speed 2800 kph will prefer high
         altitude_for_lowest_speed = feet(low * 1000)
         altitude_for_highest_speed = feet(high * 1000)
         lowest_speed = kph(600)
@@ -405,9 +404,6 @@ class AircraftType(UnitType[Type[FlyingType]]):
         if self.intra_flight_radio is not None:
             return radio_registry.alloc_for_radio(self.intra_flight_radio)
 
-        # The default radio frequency is set in megahertz. For some aircraft, it is a
-        # floating point value. For all current aircraft, adjusting to kilohertz will be
-        # sufficient to convert to an integer.
         in_khz = float(self.dcs_unit_type.radio_frequency) * 1000
         if not in_khz.is_integer():
             logging.warning(
@@ -635,6 +631,14 @@ class AircraftType(UnitType[Type[FlyingType]]):
             elif FlightType.BAI in task_priorities:
                 task_priorities[FlightType.ARMED_RECON] = task_priorities[
                     FlightType.BAI
+                ]
+        # Any aircraft with a Transport task in its yaml automatically gets LOGISTIC at
+        # the same priority. This mirrors the SEAD_SWEEP pattern above — derived tasks
+        # should not require explicit yaml entries on every aircraft.
+        if FlightType.LOGISTIC not in task_priorities:
+            if FlightType.TRANSPORT in task_priorities:
+                task_priorities[FlightType.LOGISTIC] = task_priorities[
+                    FlightType.TRANSPORT
                 ]
         return task_priorities
 
