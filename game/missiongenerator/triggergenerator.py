@@ -74,6 +74,8 @@ class TriggerGenerator:
             cp for cp in self.game.theater.controlpoints if isinstance(cp, Airfield)
         ]
         airport_ids = {cp.airport.id for cp in airfields}
+
+        # First pass: zero out all non-campaign airports
         for airport in self.mission.terrain.airport_list():
             if airport.id not in airport_ids:
                 airport.unlimited_fuel = False
@@ -87,10 +89,13 @@ class TriggerGenerator:
                 airport.operating_level_equipment = 0
                 airport.operating_level_fuel = 0
 
+        # Second pass: restore fuel and aircraft for non-campaign airports, but
+        # always keep unlimited_munitions = False so the DCS warehouse system
+        # controls supply. Dynamic cargo must remain active for logistics to work.
         for airport in self.mission.terrain.airport_list():
             if airport.id not in airport_ids:
                 airport.unlimited_fuel = True
-                airport.unlimited_munitions = True
+                airport.unlimited_munitions = False  # hardcoded OFF — managed by warehouse system
                 airport.unlimited_aircrafts = True
 
         for airfield in airfields:
@@ -177,7 +182,6 @@ class TriggerGenerator:
             enable_clear_trigger.add_condition(TimeAfter(30))
             enable_clear_trigger.add_action(ClearFlag(clear_flag))
             enable_clear_trigger.add_action(SetFlag(clear_flag))
-            # clear_trigger.add_action(MessageToAll(text=String("Enable clear trigger"),))
             self.mission.triggerrules.triggers.append(enable_clear_trigger)
 
     def _create_capture_trigger(
