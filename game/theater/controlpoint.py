@@ -1284,7 +1284,7 @@ class Airfield(ControlPoint, CTLD):
                 FlightType.AEWC,
                 FlightType.ESCORT,
                 # TODO: FlightType.INTERCEPTION
-                # TODO: FlightType.LOGISTICS
+                FlightType.LOGISTIC,
             ]
 
         yield FlightType.REFUELING
