@@ -41,7 +41,6 @@ class Loadout:
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         """Handle loading from old save files that don't have pylon_settings."""
-        # Ensure pylon_settings exists for backwards compatibility
         if "pylon_settings" not in state:
             state["pylon_settings"] = {}
         self.__dict__.update(state)
@@ -137,7 +136,6 @@ class Loadout:
         if not loadout.is_custom:
             loadout.replace_lgbs_if_no_tgp(unit_type, date, faction)
 
-        # Apply target-based weapon settings to the degraded loadout if a target is provided
         if target is not None:
             loadout.apply_target_overrides(target)
 
@@ -168,22 +166,13 @@ class Loadout:
         self.pylons = new_pylons
 
     def apply_target_overrides(self, target: "MissionTarget") -> None:
-        """Apply target-based weapon setting overrides to this loadout.
-
-        This applies weapon-specific settings defined in the weapon YAML files
-        for the given target type to all weapons in this loadout.
-        """
-        # Convert loadout to pydcs payload format for reuse of adjust_payload_for_target
+        """Apply target-based weapon setting overrides to this loadout."""
         payload = [
             (pylon_num, {"clsid": weapon.clsid, "settings": {}})
             for pylon_num, weapon in self.pylons.items()
             if weapon is not None
         ]
-
-        # Use the existing method to apply target-based settings
         adjusted_payload = self.adjust_payload_for_target(payload, target)
-
-        # Extract the updated settings and apply them to our loadout
         for pylon_number, pylon_data in adjusted_payload:
             if "settings" in pylon_data and pylon_data["settings"]:
                 self.pylon_settings[pylon_number] = pylon_data["settings"]
@@ -194,14 +183,6 @@ class Loadout:
 
     @classmethod
     def iter_for_aircraft(cls, aircraft: AircraftType) -> Iterator[Loadout]:
-        # Dict of payload ID (numeric) to:
-        #
-        # {
-        #   "name": The name the user set in the ME
-        #   "pylons": List (as a dict) of dicts of:
-        #       {"CLSID": class ID, "num": pylon number}
-        #   "tasks": List (as a dict) of task IDs the payload is used by.
-        # }
         payloads = aircraft.dcs_unit_type.load_payloads()
         for payload in payloads.values():
             if not cls.valid_payload(payload["pylons"]):
@@ -220,7 +201,6 @@ class Loadout:
                     },
                 )
             except KeyError:
-                # invalid loadout
                 continue
 
     @staticmethod
@@ -273,6 +253,7 @@ class Loadout:
         }
         for flight_type, names in legacy_names.items():
             loadout_names[flight_type].extend(names)
+
         # A SEAD escort typically does not need a different loadout than a regular
         # SEAD flight, so fall back to SEAD if needed.
         loadout_names[FlightType.SEAD_ESCORT].extend(loadout_names[FlightType.SEAD])
@@ -290,8 +271,13 @@ class Loadout:
         loadout_names[FlightType.OCA_AIRCRAFT].extend(loadout_names[FlightType.BAI])
         # DEAD also falls back to BAI.
         loadout_names[FlightType.DEAD].extend(loadout_names[FlightType.BAI])
-        # OCA/Runway falls back to Strike
+        # OCA/Runway falls back to Strike.
         loadout_names[FlightType.OCA_RUNWAY].extend(loadout_names[FlightType.STRIKE])
+        # LOGISTIC falls back to TRANSPORT — both missions use the same aircraft and
+        # cargo configuration, so if no dedicated "Retribution Logistic" payload exists
+        # in the aircraft yaml, the Transport loadout is the correct choice.
+        loadout_names[FlightType.LOGISTIC].extend(loadout_names[FlightType.TRANSPORT])
+
         yield from loadout_names[task]
 
     @classmethod
@@ -308,7 +294,7 @@ class Loadout:
         target: Optional[MissionTarget] = None,
     ) -> Loadout:
         # Iterate through each possible payload type for a given aircraft.
-        # Some aircraft have custom loadouts that in aren't the standard set.
+        # Some aircraft have custom loadouts that aren't in the standard set.
         for name in cls.default_loadout_names_for(task):
             # This operation is cached, but must be called before load_by_name will
             # work.
@@ -374,17 +360,13 @@ class Loadout:
 
         adjusted_payload = copy.deepcopy(payload)
 
-        # payload is a list of (pylon_number, pylon_data) tuples
         for pylon_number, pylon_data in adjusted_payload:
             clsid = pylon_data.get("clsid")
             if not clsid:
                 continue
-
             weapon = Weapon.with_clsid(clsid)
             if weapon is None:
                 continue
-
-            # Get target-based overrides from the weapon definition
             target_overrides = weapon.get_target_overrides(targets)
             if target_overrides:
                 pylon_data["settings"] = target_overrides
