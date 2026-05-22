@@ -16,6 +16,7 @@ from .dead import DeadFlightPlan
 from .escort import EscortFlightPlan
 from .ferry import FerryFlightPlan
 from .ibuilder import IBuilder
+from .logistic import LogisticFlightPlan
 from .ocaaircraft import OcaAircraftFlightPlan
 from .ocarunway import OcaRunwayFlightPlan
 from .packagerefueling import PackageRefuelingFlightPlan
@@ -64,6 +65,7 @@ class FlightPlanBuilderTypes:
             FlightType.TRANSPORT: AirliftFlightPlan.builder_type(),
             FlightType.FERRY: FerryFlightPlan.builder_type(),
             FlightType.AIR_ASSAULT: AirAssaultFlightPlan.builder_type(),
+            FlightType.LOGISTIC: LogisticFlightPlan.builder_type(),
             FlightType.PRETENSE_CARGO: PretenseCargoFlightPlan.builder_type(),
             FlightType.ARMED_RECON: ArmedReconFlightPlan.builder_type(),
             FlightType.RECOVERY: RecoveryTankerFlightPlan.builder_type(),
