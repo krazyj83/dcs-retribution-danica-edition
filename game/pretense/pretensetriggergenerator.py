@@ -86,6 +86,8 @@ class PretenseTriggerGenerator:
             cp for cp in self.game.theater.controlpoints if isinstance(cp, Airfield)
         ]
         airport_ids = {cp.airport.id for cp in airfields}
+
+        # First pass: zero out all non-campaign airports
         for airport in self.mission.terrain.airport_list():
             if airport.id not in airport_ids:
                 airport.unlimited_fuel = False
@@ -99,10 +101,13 @@ class PretenseTriggerGenerator:
                 airport.operating_level_equipment = 0
                 airport.operating_level_fuel = 0
 
+        # Second pass: restore fuel and aircraft for non-campaign airports, but
+        # always keep unlimited_munitions = False so the DCS warehouse system
+        # controls supply. Dynamic cargo must remain active for logistics to work.
         for airport in self.mission.terrain.airport_list():
             if airport.id not in airport_ids:
                 airport.unlimited_fuel = True
-                airport.unlimited_munitions = True
+                airport.unlimited_munitions = False  # hardcoded OFF — managed by warehouse system
                 airport.unlimited_aircrafts = True
 
         for airfield in airfields:
@@ -224,7 +229,7 @@ class PretenseTriggerGenerator:
                 self.mission.triggerrules.triggers.append(recapture_trigger)
 
     def _generate_pretense_zone_triggers(self) -> None:
-        """Creates triggger zones for the Pretense campaign. These include:
+        """Creates trigger zones for the Pretense campaign. These include:
         - Carrier zones for friendly forces, generated from the navmesh / sea zone intersection
         - Carrier zones for opposing forces
         - Airfield and FARP zones
@@ -248,13 +253,11 @@ class PretenseTriggerGenerator:
             ).nav_mesh.polys:
                 navmesh_number += 1
                 if sea_zones_landmap.sea_zones.intersects(navmesh_poly.poly):
-                    # Get the intersection between the navmesh zone and the sea zone
                     navmesh_sea_intersection = sea_zones_landmap.sea_zones.intersection(
                         navmesh_poly.poly
                     )
                     navmesh_zone_verticies = navmesh_sea_intersection
 
-                    # Simplify it to get a quadrangle
                     for simplify_run in range(SIMPLIFY_RUNS_PRETENSE_CARRIER):
                         navmesh_zone_verticies = navmesh_sea_intersection.simplify(
                             float(simplify_run * 10), preserve_topology=False
@@ -269,7 +272,6 @@ class PretenseTriggerGenerator:
                     terrain = self.game.theater.terrain
                     alpha = random.choice(ALPHA_MILITARY)
 
-                    # Generate the quadrangle zone and four points inside it for carrier navigation
                     if len(navmesh_zone_verticies.exterior.coords) == 4:
                         zone_color = {1: 1.0, 2: 1.0, 3: 1.0, 4: 0.15}
                         corner_point_num = 0
@@ -320,7 +322,6 @@ class PretenseTriggerGenerator:
                 and self.game.settings.pretense_controllable_carrier
                 and cp.captured.is_blue
             ):
-                # Friendly carrier zones are generated above
                 continue
             elif cp.is_fleet:
                 trigger_radius = float(TRIGGER_RADIUS_PRETENSE_CARRIER)
@@ -343,8 +344,6 @@ class PretenseTriggerGenerator:
                     or isinstance(cp.dcs_airport, Khalkhalah)
                     or isinstance(cp.dcs_airport, Krasnodar_Pashkovsky)
                 ):
-                    # Increase the size of Pretense zones at Damascus, Khalkhalah and Krasnodar-Pashkovsky
-                    # (which are quite spread out) so the zone would encompass the entire airfield.
                     trigger_radius = int(TRIGGER_RADIUS_CAPTURE * 1.8)
                 else:
                     trigger_radius = TRIGGER_RADIUS_CAPTURE
