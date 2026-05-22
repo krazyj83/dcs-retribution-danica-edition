@@ -498,7 +498,7 @@ class MissionGenerator:
                     warehouse["coalition"] = "blue"
                 else:
                     warehouse["coalition"] = "red"
-                warehouse["dynamicCargo"] = settings.dynamic_cargo
+                warehouse["dynamicCargo"] = True  # always on — required by logistics system
                 if tmu.theater_unit.is_ship or tmu.dcs_unit.category == "Heliports":  # type: ignore
                     warehouse["dynamicSpawn"] = settings.dynamic_slots
                     warehouse["allowHotStart"] = settings.dynamic_slots_hot
@@ -508,4 +508,4 @@ class MissionGenerator:
         for ap in self.mission.terrain.airports.values():
             ap.dynamic_spawn = settings.dynamic_slots
             ap.allow_hot_start = settings.dynamic_slots_hot
-            ap.dynamic_cargo = settings.dynamic_cargo
+             ap.dynamic_cargo = True  # always on — required by logistics system
