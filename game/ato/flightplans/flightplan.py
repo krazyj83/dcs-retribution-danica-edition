@@ -21,7 +21,6 @@ from .planningerror import PlanningError
 from ..flightwaypointtype import FlightWaypointType
 from ..starttype import StartType
 from ..traveltime import GroundSpeed
-from game.ato.flightplans.logistic import LogisticFlightPlan
 
 if TYPE_CHECKING:
     from game.theater import ControlPoint
