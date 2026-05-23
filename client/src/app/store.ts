@@ -1,6 +1,7 @@
 import { baseApi } from "../api/baseApi";
 import combatReducer from "../api/combatSlice";
 import controlPointsReducer from "../api/controlPointsSlice";
+import dropZonesReducer from "../api/dropZonesSlice";
 import flightsReducer from "../api/flightsSlice";
 import frontLinesReducer from "../api/frontLinesSlice";
 import iadsNetworkReducer from "../api/iadsNetworkSlice";
@@ -18,10 +19,10 @@ import {
   combineReducers,
   configureStore,
 } from "@reduxjs/toolkit";
-
 const rootReducer = combineReducers({
   combat: combatReducer,
   controlPoints: controlPointsReducer,
+  dropZones: dropZonesReducer,
   flights: flightsReducer,
   frontLines: frontLinesReducer,
   map: mapReducer,
@@ -34,7 +35,6 @@ const rootReducer = combineReducers({
   unculledZones: unculledZonesReducer,
   mapZones: mapZonesReducer,
 });
-
 export function setupStore(preloadedState?: PreloadedState<RootState>) {
   return configureStore({
     reducer: rootReducer,
@@ -43,7 +43,6 @@ export function setupStore(preloadedState?: PreloadedState<RootState>) {
     preloadedState: preloadedState,
   });
 }
-
 export type AppStore = ReturnType<typeof setupStore>;
 export type AppDispatch = AppStore["dispatch"];
 export type RootState = ReturnType<typeof rootReducer>;
