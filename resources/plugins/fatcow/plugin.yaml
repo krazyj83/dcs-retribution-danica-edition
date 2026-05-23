@@ -5,3 +5,4 @@ defaultValue: false
 scriptsWorkOrders:
   - file: CG_FATCOW_1_0_5_2.lua
     mnemonic: fatcow
+ 
