@@ -1,0 +1,21 @@
+{
+    "nameInUI": "Ship Weapons Management",
+    "defaultValue": true,
+    "skipUI": false,
+    "specificOptions": [
+        {
+            "nameInUI": "Persist ammo depletion across turns",
+            "mnemonic": "persistentDepletion",
+            "defaultValue": true
+        }
+    ],
+    "scriptsWorkOrders": [
+        {
+            "file": "ship_weapons.lua",
+            "mnemonic": "ship-weapons-script",
+            "disable": false
+        }
+    ],
+    "configurationWorkOrders": [],
+    "otherResourceFiles": []
+}
