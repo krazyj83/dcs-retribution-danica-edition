@@ -165,6 +165,17 @@ class PresetLocations:
     #: Locations of stationary armor groups.
     armor_groups: List[PresetLocation] = field(default_factory=list)
 
+    #: Custom vehicle groups placed in the campaign miz with any unit type and any
+    #: group name that does not match a known placeholder type or name prefix.
+    #: These are spawned as BASE_DEFENSE ground objects using the faction's force
+    #: groups, and each unit is registered in the UnitMap so kills are tracked
+    #: normally in the debrief and counted toward mission results.
+    #: To use: place any vehicle group in the miz under CJTF Blue or CJTF Red
+    #: with a group name that does NOT start with a known prefix (SAM-LR-, ARMOR-,
+    #: etc.) and does NOT use a known placeholder unit type. The group will be
+    #: detected automatically and spawned in every generated mission.
+    custom_groups: List[PresetLocation] = field(default_factory=list)
+
     #: Locations of skynet specific groups
     iads_connection_node: List[PresetLocation] = field(default_factory=list)
     iads_power_source: List[PresetLocation] = field(default_factory=list)
