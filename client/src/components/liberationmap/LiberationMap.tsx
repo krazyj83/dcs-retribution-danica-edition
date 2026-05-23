@@ -5,6 +5,7 @@ import AirDefenseRangeLayer from "../airdefenserangelayer";
 import CombatLayer from "../combatlayer";
 import ControlPointsLayer from "../controlpointslayer";
 import CullingExclusionZones from "../cullingexclusionzones/CullingExclusionZones";
+import DropZoneLayer from "../dropzonelayer";
 import FlightPlansLayer from "../flightplanslayer";
 import FrontLinesLayer from "../frontlineslayer";
 import Iadsnetworklayer from "../iadsnetworklayer";
@@ -20,7 +21,6 @@ import { Map } from "leaflet";
 import { useEffect, useRef } from "react";
 import { BasemapLayer } from "react-esri-leaflet";
 import { LayersControl, MapContainer, ScaleControl } from "react-leaflet";
-
 export default function LiberationMap() {
   const map = useRef<Map>(null);
   const mapCenter = useAppSelector(selectMapCenter);
@@ -120,6 +120,9 @@ export default function LiberationMap() {
         <TerrainZonesLayers />
         <CullingExclusionZones />
         <WaypointDebugZonesControls />
+        <LayersControl.Overlay name="Drop zones" checked>
+          <DropZoneLayer />
+        </LayersControl.Overlay>
       </LayersControl>
     </MapContainer>
   );
