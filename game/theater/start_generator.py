@@ -434,6 +434,9 @@ class AirbaseGroundObjectGenerator(ControlPointGroundObjectGenerator):
         self.generate_ammunition_depots()
         self.generate_missile_sites()
         self.generate_coastal_sites()
+        # Spawn any vehicle group placed freely in the miz that was not matched
+        # by a known unit type or name prefix during campaign loading.
+        self.generate_custom_groups()
 
     def get_unit_group_for_task(
         self, position: PresetLocation, task: GroupTask
@@ -471,6 +474,46 @@ class AirbaseGroundObjectGenerator(ControlPointGroundObjectGenerator):
                 return
             self.generate_ground_object_from_group(
                 unit_group, position, GroupTask.BASE_DEFENSE
+            )
+
+    def generate_custom_groups(self) -> None:
+        """Spawn vehicle groups placed freely in the campaign miz that were not
+        matched by any known unit type or name prefix during campaign loading.
+
+        Each group in preset_locations.custom_groups is spawned as a BASE_DEFENSE
+        ground object using the faction's random force group for that task.  This
+        means:
+
+        - The group appears in every generated mission at the position it was placed
+          in the campaign miz.
+        - Each unit is registered in the UnitMap as a TheaterUnit.
+        - Kills are tracked normally in the debrief and counted toward the mission
+          result, exactly the same as any armor_groups or SAM site.
+
+        The group is treated as BASE_DEFENSE so it shows on the map, is visible to
+        players in the mission planner, and can be targeted by BAI/CAS missions.
+
+        Note: the faction's random force group is used for the actual units spawned,
+        not the literal unit types from the miz file.  This is consistent with how
+        all other preset locations work — the miz unit is only a position marker.
+        """
+        for position in self.control_point.preset_locations.custom_groups:
+            unit_group = self.armed_forces.random_group_for_task(
+                GroupTask.BASE_DEFENSE
+            )
+            if not unit_group:
+                logging.warning(
+                    f"{self.faction_name} has no BASE_DEFENSE ForceGroup — "
+                    f"custom group '{position.original_name}' at "
+                    f"{self.control_point.name} will not be spawned."
+                )
+                continue
+            self.generate_ground_object_from_group(
+                unit_group, position, GroupTask.BASE_DEFENSE
+            )
+            logging.info(
+                f"Spawned custom group '{position.original_name}' "
+                f"at {self.control_point.name} as BASE_DEFENSE."
             )
 
     def generate_aa(self) -> None:
@@ -531,7 +574,8 @@ class AirbaseGroundObjectGenerator(ControlPointGroundObjectGenerator):
                 return
 
         logging.error(
-            f"{self.faction_name} has no access to SAM {', '.join([task.description for task in tasks])}"
+            f"{self.faction_name} has no access to SAM "
+            f"{', '.join([task.description for task in tasks])}"
         )
 
     def generate_iads(self) -> None:
