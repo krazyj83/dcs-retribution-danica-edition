@@ -1,20 +1,3 @@
-/**
- * dropZonesSlice.ts
- *
- * Redux state for player-placed campaign drop zones.
- *
- * Initial data: included in the GameJs payload via the Python GameJs.from_game()
- * call (added by the patch script).
- *
- * Mutations:
- *   createDropZone  – POST /drop-zones/  → adds marker to map
- *   deleteDropZone  – DELETE /drop-zones/{id}  → removes marker
- *
- * "Create Mission" is NOT a Redux action — it's a fire-and-forget POST to
- * /qt/create-package/drop-zone/{id} which opens the Retribution package
- * dialog on the Python side. No state change needed in Redux for that.
- */
-
 import { createAsyncThunk, createSlice, PayloadAction } from "@reduxjs/toolkit";
 import { RootState } from "../app/store";
 import { gameLoaded, gameUnloaded } from "./actions";
