@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import itertools
+import logging
 from functools import cached_property
 from pathlib import Path
-from typing import Iterator, List, TYPE_CHECKING, Tuple, Optional
+from typing import Iterator, List, Optional, TYPE_CHECKING, Tuple
 from uuid import UUID
 
 from dcs import Mission
@@ -107,6 +108,38 @@ class MizCampaignLoader:
 
     STRIKE_TARGET_UNIT_TYPE = Fortification.Tech_combine.id
 
+    # ── Name-prefix routing ────────────────────────────────────────────────────
+    # Vehicle group names starting with these prefixes are routed to the matching
+    # preset list regardless of what unit type is placed in the group.
+    # This lets campaign designers use ANY unit as a placeholder — the actual
+    # units spawned in the mission come from the faction's force groups.
+    #
+    # Prefix matching is case-insensitive and is checked BEFORE unit-type matching,
+    # so a named prefix always wins. All existing campaigns remain fully compatible
+    # because their placeholder unit types are still matched in the second pass.
+    #
+    # Example usage in the mission editor:
+    #   Group name "SAM-LR-NorthKorea" with a T-72 inside → routes to long_range_sams
+    #   Group name "ARMOR-Checkpoint1" with a BMP-2 inside → routes to armor_groups
+    #   Group name "EWR-Valley" with any unit → routes to ewrs
+    NAME_PREFIX_ROUTES: dict[str, str] = {
+        "SAM-LR-":  "long_range_sams",
+        "SAM-MR-":  "medium_range_sams",
+        "SAM-SR-":  "short_range_sams",
+        "AAA-":     "aaa",
+        "EWR-":     "ewrs",
+        "ARMOR-":   "armor_groups",
+        "MISSILE-": "missile_sites",
+        "COASTAL-": "coastal_defenses",
+        "SHIP-":    "ships",
+        "STRIKE-":  "strike_locations",
+    }
+
+    # Unit types used internally that must never be treated as custom ground objects.
+    # Any vehicle group whose first unit matches one of these is silently skipped
+    # during the custom_groups catch-all pass.
+    _INTERNAL_UNIT_TYPES: frozenset[str] = frozenset()  # populated in __init_subclass__
+
     GROUND_SPAWN_WAYPOINT_DISTANCE = 1000
 
     def __init__(self, miz: Path, theater: ConflictTheater) -> None:
@@ -121,6 +154,17 @@ class MizCampaignLoader:
             self.mission.coalition["blue"].add_country(self.BLUE_COUNTRY)
         if self.mission.country(self.RED_COUNTRY.name) is None:
             self.mission.coalition["red"].add_country(self.RED_COUNTRY)
+
+        # Build the set of internal unit type IDs that must never become custom
+        # ground objects. We do this here so subclasses can override the class-level
+        # constants before __init__ runs.
+        self._skip_unit_types: frozenset[str] = frozenset({
+            self.FRONT_LINE_UNIT_TYPE,
+            self.CP_CONVOY_SPAWN_TYPE,
+            self.FOB_UNIT_TYPE,
+            self.INVISIBLE_FOB_UNIT_TYPE,
+            self.NEUTRAL_FOB_UNIT_TYPE,
+        })
 
     def control_point_from_airport(
         self, airport: Airport, ctld_zones: List[Tuple[Point, float]]
@@ -476,11 +520,20 @@ class MizCampaignLoader:
             )
         )
 
+    def _route_by_name_prefix(self, group: VehicleGroup) -> Optional[str]:
+        """Return the PresetLocations field name if the group name starts with a
+        known prefix, otherwise return None.  Comparison is case-insensitive."""
+        name_upper = str(group.name).upper()
+        for prefix, list_name in self.NAME_PREFIX_ROUTES.items():
+            if name_upper.startswith(prefix.upper()):
+                return list_name
+        return None
+
     def add_supply_routes(self) -> None:
         for group in self.front_line_path_groups:
             # The unit will have its first waypoint at the source CP and the final
             # waypoint at the destination CP. Each waypoint defines the path of the
-            # cargo ship.
+            # supply convoy.
             waypoints = [p.position for p in group.points]
             origin = self.theater.closest_control_point(waypoints[0])
             if origin is None:
@@ -502,16 +555,6 @@ class MizCampaignLoader:
             self.control_points[destination.id].create_convoy_route(
                 origin, list(reversed(waypoints)), d_spawns
             )
-
-    def add_supply_routes(self) -> None:
-        for group in self.front_line_path_groups:
-            # ... existing code unchanged ...
-            self.control_points[destination.id].create_convoy_route(
-                origin, list(reversed(waypoints)), d_spawns
-            )
-        # ── Auto red supply routes ──────────────────────────────────────────
-        from game.logistics.red_supply_routes import auto_generate_red_supply_routes
-        auto_generate_red_supply_routes(self.theater)
 
     def add_shipping_lanes(self) -> None:
         for group in self.shipping_lane_groups:
@@ -571,7 +614,8 @@ class MizCampaignLoader:
             distance = meters(closest.position.distance_to_point(near.position))
             return closest, distance
 
-        # If no zones contain the point, find the closest control point without an influence radius
+        # If no zones contain the point, find the closest control point without an
+        # influence radius.
         if not allow_naval:
             fallback_candidates = [
                 cp
@@ -595,7 +639,8 @@ class MizCampaignLoader:
         ]
         if not fallback_candidates:
             raise RuntimeError(
-                f"All control points have an influence zone but no zones contain {near} at {near.position}"
+                f"All control points have an influence zone but no zones contain "
+                f"{near} at {near.position}"
             )
         closest = min(
             fallback_candidates,
@@ -605,62 +650,111 @@ class MizCampaignLoader:
         return closest, distance
 
     def add_preset_locations(self) -> None:
+        # claimed_vehicle_ids tracks which VehicleGroup objects (by Python id()) have
+        # already been routed to a typed preset list.  Any group not claimed by the
+        # name-prefix pass or the unit-type pass ends up in custom_groups so it still
+        # gets spawned and tracked when killed.
+        claimed_vehicle_ids: set[int] = set()
+
+        # ── Static / ship objectives (no unit-type ambiguity) ─────────────────
         for static in self.offshore_strike_targets:
-            closest, distance = self.objective_info(static)
+            closest, _ = self.objective_info(static)
             closest.preset_locations.offshore_strike_locations.append(
                 PresetLocation.from_group(static)
             )
 
         for ship in self.ships:
-            closest, distance = self.objective_info(ship, allow_naval=True)
+            closest, _ = self.objective_info(ship, allow_naval=True)
             closest.preset_locations.ships.append(PresetLocation.from_group(ship))
 
-        for group in self.missile_sites:
-            closest, distance = self.objective_info(group)
-            closest.preset_locations.missile_sites.append(
-                PresetLocation.from_group(group)
+        # ── Pass 1: name-prefix routing ───────────────────────────────────────
+        # Check every vehicle group from both coalitions.  If the group name starts
+        # with a known prefix it is routed to the corresponding preset list regardless
+        # of the unit type placed inside it.  This lets campaign designers freely
+        # choose any placeholder unit.
+        all_vehicle_groups: list[VehicleGroup] = list(
+            itertools.chain(self.blue.vehicle_group, self.red.vehicle_group)
+        )
+
+        for group in all_vehicle_groups:
+            list_name = self._route_by_name_prefix(group)
+            if list_name is None:
+                continue
+            closest, _ = self.objective_info(group)
+            preset_list = getattr(closest.preset_locations, list_name)
+            preset_list.append(PresetLocation.from_group(group))
+            claimed_vehicle_ids.add(id(group))
+            logging.debug(
+                f"Name-prefix routed '{group.name}' → {list_name} "
+                f"at {closest.name}"
             )
 
-        for group in self.coastal_defenses:
-            closest, distance = self.objective_info(group)
-            closest.preset_locations.coastal_defenses.append(
+        # ── Pass 2: unit-type matching (backward-compatible) ──────────────────
+        # Groups already claimed by the name-prefix pass are skipped.
+        def _claim(group: VehicleGroup, list_name: str) -> None:
+            if id(group) in claimed_vehicle_ids:
+                return
+            closest, _ = self.objective_info(group)
+            preset_list = getattr(closest.preset_locations, list_name)
+            preset_list.append(PresetLocation.from_group(group))
+            claimed_vehicle_ids.add(id(group))
+
+        for group in self.red.vehicle_group:
+            if group.units[0].type == self.MISSILE_SITE_UNIT_TYPE:
+                _claim(group, "missile_sites")
+
+        for group in self.red.vehicle_group:
+            if group.units[0].type == self.COASTAL_DEFENSE_UNIT_TYPE:
+                _claim(group, "coastal_defenses")
+
+        for group in self.red.vehicle_group:
+            if group.units[0].type in self.LONG_RANGE_SAM_UNIT_TYPES:
+                _claim(group, "long_range_sams")
+
+        for group in self.red.vehicle_group:
+            if group.units[0].type in self.MEDIUM_RANGE_SAM_UNIT_TYPES:
+                _claim(group, "medium_range_sams")
+
+        for group in self.red.vehicle_group:
+            if group.units[0].type in self.SHORT_RANGE_SAM_UNIT_TYPES:
+                _claim(group, "short_range_sams")
+
+        for group in itertools.chain(self.blue.vehicle_group, self.red.vehicle_group):
+            if group.units[0].type in self.AAA_UNIT_TYPES:
+                _claim(group, "aaa")
+
+        for group in self.red.vehicle_group:
+            if group.units[0].type == self.EWR_UNIT_TYPE:
+                _claim(group, "ewrs")
+
+        for group in itertools.chain(self.blue.vehicle_group, self.red.vehicle_group):
+            if group.units[0].type == self.ARMOR_GROUP_UNIT_TYPE:
+                _claim(group, "armor_groups")
+
+        # ── Pass 3: custom_groups catch-all ───────────────────────────────────
+        # Any vehicle group not yet claimed that is also not an internal placeholder
+        # (supply-route M113, convoy HMMWV, FOB markers) is added to custom_groups.
+        # start_generator.py will spawn these as BASE_DEFENSE ground objects so they
+        # appear in the mission, are registered in the UnitMap, and are counted when
+        # destroyed in the debrief.
+        for group in all_vehicle_groups:
+            if id(group) in claimed_vehicle_ids:
+                continue
+            if group.units[0].type in self._skip_unit_types:
+                continue
+            closest, _ = self.objective_info(group)
+            closest.preset_locations.custom_groups.append(
                 PresetLocation.from_group(group)
             )
-
-        for group in self.long_range_sams:
-            closest, distance = self.objective_info(group)
-            closest.preset_locations.long_range_sams.append(
-                PresetLocation.from_group(group)
+            claimed_vehicle_ids.add(id(group))
+            logging.info(
+                f"Custom group '{group.name}' (unit: {group.units[0].type}) "
+                f"added to custom_groups at {closest.name}"
             )
 
-        for group in self.medium_range_sams:
-            closest, distance = self.objective_info(group)
-            closest.preset_locations.medium_range_sams.append(
-                PresetLocation.from_group(group)
-            )
-
-        for group in self.short_range_sams:
-            closest, distance = self.objective_info(group)
-            closest.preset_locations.short_range_sams.append(
-                PresetLocation.from_group(group)
-            )
-
-        for group in self.aaa:
-            closest, distance = self.objective_info(group)
-            closest.preset_locations.aaa.append(PresetLocation.from_group(group))
-
-        for group in self.ewrs:
-            closest, distance = self.objective_info(group)
-            closest.preset_locations.ewrs.append(PresetLocation.from_group(group))
-
-        for group in self.armor_groups:
-            closest, distance = self.objective_info(group)
-            closest.preset_locations.armor_groups.append(
-                PresetLocation.from_group(group)
-            )
-
+        # ── Helipads, ground spawns, statics (unchanged) ──────────────────────
         for static in self.helipads:
-            closest, distance = self.objective_info(static)
+            closest, _ = self.objective_info(static)
             if static.units[0].type == "SINGLE_HELIPAD":
                 self._add_helipad(closest.helipads, static)
             elif static.units[0].type == "FARP":
@@ -669,53 +763,53 @@ class MizCampaignLoader:
                 self._add_helipad(closest.helipads_invisible, static)
 
         for plane_group in self.ground_spawns_roadbase:
-            closest, distance = self.objective_info(plane_group)
+            closest, _ = self.objective_info(plane_group)
             self._add_ground_spawn(closest.ground_spawns_roadbase, plane_group)
 
         for plane_group in self.ground_spawns_large:
-            closest, distance = self.objective_info(plane_group)
+            closest, _ = self.objective_info(plane_group)
             self._add_ground_spawn(closest.ground_spawns_large, plane_group)
 
         for plane_group in self.ground_spawns:
-            closest, distance = self.objective_info(plane_group)
+            closest, _ = self.objective_info(plane_group)
             self._add_ground_spawn(closest.ground_spawns, plane_group)
 
         for static in self.factories:
-            closest, distance = self.objective_info(static)
+            closest, _ = self.objective_info(static)
             closest.preset_locations.factories.append(PresetLocation.from_group(static))
 
         for static in self.ammunition_depots:
-            closest, distance = self.objective_info(static)
+            closest, _ = self.objective_info(static)
             closest.preset_locations.ammunition_depots.append(
                 PresetLocation.from_group(static)
             )
 
         for static in self.strike_targets:
-            closest, distance = self.objective_info(static)
+            closest, _ = self.objective_info(static)
             closest.preset_locations.strike_locations.append(
                 PresetLocation.from_group(static)
             )
 
         for iads_command_center in self.iads_command_centers:
-            closest, distance = self.objective_info(iads_command_center)
+            closest, _ = self.objective_info(iads_command_center)
             closest.preset_locations.iads_command_center.append(
                 PresetLocation.from_group(iads_command_center)
             )
 
         for iads_connection_node in self.iads_connection_nodes:
-            closest, distance = self.objective_info(iads_connection_node)
+            closest, _ = self.objective_info(iads_connection_node)
             closest.preset_locations.iads_connection_node.append(
                 PresetLocation.from_group(iads_connection_node)
             )
 
         for iads_power_source in self.iads_power_sources:
-            closest, distance = self.objective_info(iads_power_source)
+            closest, _ = self.objective_info(iads_power_source)
             closest.preset_locations.iads_power_source.append(
                 PresetLocation.from_group(iads_power_source)
             )
 
         for scenery_group in self.scenery:
-            closest, distance = self.objective_info(scenery_group)
+            closest, _ = self.objective_info(scenery_group)
             closest.preset_locations.scenery.append(scenery_group)
 
     def populate_theater(self) -> None:
