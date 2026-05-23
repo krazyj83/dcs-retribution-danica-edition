@@ -1,10 +1,9 @@
 from __future__ import annotations
-
 from typing import TYPE_CHECKING
-
 from pydantic import BaseModel
-
 from game.server.controlpoints.models import ControlPointJs
+from game.server.dropzones.models import DropZoneJs
+from game.server.dropzones import routes as dz_routes
 from game.server.flights.models import FlightJs
 from game.server.frontlines.models import FrontLineJs
 from game.server.iadsnetwork.models import IadsNetworkJs
@@ -17,11 +16,8 @@ from game.server.mapzones.models import (
 from game.server.navmesh.models import NavMeshesJs
 from game.server.supplyroutes.models import SupplyRouteJs
 from game.server.tgos.models import TgoJs
-
 if TYPE_CHECKING:
     from game import Game
-
-
 class GameJs(BaseModel):
     control_points: list[ControlPointJs]
     tgos: list[TgoJs]
@@ -34,10 +30,9 @@ class GameJs(BaseModel):
     map_center: LeafletPoint | None
     unculled_zones: list[UnculledZoneJs]
     map_zones: MapZonesJs
-
+    drop_zones: list[DropZoneJs]
     class Config:
         title = "Game"
-
     @staticmethod
     def from_game(game: Game) -> GameJs:
         return GameJs(
@@ -54,4 +49,5 @@ class GameJs(BaseModel):
             ),
             unculled_zones=UnculledZoneJs.from_game(game),
             map_zones=MapZonesJs.from_game(game),
+            drop_zones=dz_routes.get_all(),
         )
