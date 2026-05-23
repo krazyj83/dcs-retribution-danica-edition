@@ -1,0 +1,7 @@
+mnemonic: fatcow
+nameInUI: "FATCOW (AI CH-47 Forward Arming & Refueling)"
+skipUI: false
+defaultValue: false
+scriptsWorkOrders:
+  - file: CG_FATCOW_1_0_5_2.lua
+    mnemonic: fatcow
