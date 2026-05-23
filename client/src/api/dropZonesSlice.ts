@@ -14,22 +14,22 @@ export function serverBase(): string {
   return `http://${server}`;
 }
 
-export const createDropZone = createAsyncThunk
-  DropZone,
-  { name: string; lat: number; lng: number }
->("dropZones/create", async (args) => {
-  const res = await fetch(`${serverBase()}/drop-zones/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(args),
-  });
-  if (!res.ok) throw new Error(`Create drop zone failed: ${res.status}`);
-  return res.json() as Promise<DropZone>;
-});
+export const createDropZone = createAsyncThunk(
+  "dropZones/create",
+  async (args: { name: string; lat: number; lng: number }): Promise<DropZone> => {
+    const res = await fetch(`${serverBase()}/drop-zones/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(args),
+    });
+    if (!res.ok) throw new Error(`Create drop zone failed: ${res.status}`);
+    return res.json();
+  }
+);
 
-export const deleteDropZone = createAsyncThunk<string, string>(
+export const deleteDropZone = createAsyncThunk(
   "dropZones/delete",
-  async (id) => {
+  async (id: string): Promise<string> => {
     const res = await fetch(`${serverBase()}/drop-zones/${id}`, {
       method: "DELETE",
     });
