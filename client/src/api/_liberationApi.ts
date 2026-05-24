@@ -460,7 +460,14 @@ export type DropZone = {
   name: string;
   position: LatLng;
 };
+export type ConvoyRoute = {
+  id: string;
+  name: string;
+  start: LatLng;
+  end: LatLng;
+};
 export type Game = {
+  convoy_routes: ConvoyRoute[];
   control_points: ControlPoint[];
   tgos: Tgo[];
   supply_routes: SupplyRoute[];
