@@ -2,6 +2,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from pydantic import BaseModel
 from game.server.controlpoints.models import ControlPointJs
+from game.server.convoyroutes.models import ConvoyRouteJs
+from game.server.convoyroutes import routes as cr_routes
 from game.server.dropzones.models import DropZoneJs
 from game.server.dropzones import routes as dz_routes
 from game.server.flights.models import FlightJs
@@ -31,6 +33,7 @@ class GameJs(BaseModel):
     unculled_zones: list[UnculledZoneJs]
     map_zones: MapZonesJs
     drop_zones: list[DropZoneJs]
+    convoy_routes: list[ConvoyRouteJs]
     class Config:
         title = "Game"
     @staticmethod
@@ -50,4 +53,5 @@ class GameJs(BaseModel):
             unculled_zones=UnculledZoneJs.from_game(game),
             map_zones=MapZonesJs.from_game(game),
             drop_zones=dz_routes.get_all(),
+            convoy_routes=cr_routes.get_all(),
         )
