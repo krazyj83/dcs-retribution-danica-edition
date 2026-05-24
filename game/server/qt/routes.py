@@ -108,5 +108,5 @@ def new_drop_zone_package(
         LatLng(dz.position.lat, dz.position.lng),
         game.theater.terrain,
     )
-    target = CustomAirdropTarget(name=dz.name, position=position)
+target = CustomAirdropTarget(name=dz.name, position=position, _coalition=game.blue)
     qt.create_new_package(target)
