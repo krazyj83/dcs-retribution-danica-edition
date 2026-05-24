@@ -3,7 +3,6 @@ import { useAppSelector } from "../../app/hooks";
 import AircraftLayer from "../aircraftlayer";
 import AirDefenseRangeLayer from "../airdefenserangelayer";
 import CombatLayer from "../combatlayer";
-import ConvoyRoutesLayer from "../convoyroutes";
 import ControlPointsLayer from "../controlpointslayer";
 import CullingExclusionZones from "../cullingexclusionzones/CullingExclusionZones";
 import DropZoneLayer from "../dropzonelayer";
@@ -78,8 +77,8 @@ export default function LiberationMap() {
         <LayersControl.Overlay name="Supply routes" checked>
           <SupplyRoutesLayer />
         </LayersControl.Overlay>
-        <LayersControl.Overlay name="Convoy routes" checked>
-          <ConvoyRoutesLayer />
+        <LayersControl.Overlay name="Drop zones & Convoy routes" checked>
+          <DropZoneLayer />
         </LayersControl.Overlay>
         <LayersControl.Overlay name="Front lines" checked>
           <FrontLinesLayer />
@@ -124,9 +123,6 @@ export default function LiberationMap() {
         <TerrainZonesLayers />
         <CullingExclusionZones />
         <WaypointDebugZonesControls />
-        <LayersControl.Overlay name="Drop zones" checked>
-          <DropZoneLayer />
-        </LayersControl.Overlay>
       </LayersControl>
     </MapContainer>
   );
