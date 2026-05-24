@@ -25,14 +25,11 @@ class LoggingWebPage(QWebEnginePage):
         else:
             logging.info(message)
 
-    def javaScriptPrompt(
-        self,
-        url: QUrl,
-        message: str,
-        default_value: str,
-        result,
-    ) -> bool:
+    def javaScriptPrompt(self, *args):
         """Handle window.prompt() calls from the map JavaScript."""
+        message = args[1] if len(args) > 1 else "Input"
+        default_value = args[2] if len(args) > 2 else ""
+        result = args[3] if len(args) > 3 else None
         text, ok = QInputDialog.getText(
             None,
             "Input",
@@ -40,9 +37,13 @@ class LoggingWebPage(QWebEnginePage):
             text=default_value,
         )
         if ok:
-            result.append(text)
-            return True
-        return False
+            if result is not None:
+                result.append(text)
+                return True
+            return True, text
+        if result is not None:
+            return False
+        return False, ""
 
 
 class QLiberationMap(QWebEngineView):
