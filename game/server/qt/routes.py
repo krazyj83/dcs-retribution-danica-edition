@@ -8,6 +8,7 @@ from game.server.dropzones.routes import get_by_id as get_drop_zone
 from game.server.convoyroutes.routes import get_all as get_all_convoy_routes
 from game.theater.convoyroute import ConvoyRouteTarget
 from ..dependencies import GameContext, QtCallbacks, QtContext
+from pydantic import BaseModel
 
 router: APIRouter = APIRouter(prefix="/qt")
 
@@ -152,3 +153,19 @@ def new_convoy_route_package(
         _coalition=game.blue,
     )
     qt.create_new_package(target)
+class OpenDropZoneDialogRequest(BaseModel):
+    lat: float
+    lng: float
+
+
+@router.post(
+    "/open-drop-zone-dialog",
+    operation_id="open_drop_zone_dialog",
+    status_code=status.HTTP_200_OK,
+)
+def open_drop_zone_dialog(
+    body: OpenDropZoneDialogRequest,
+    qt: QtCallbacks = Depends(QtContext.get),
+) -> None:
+    """Open the logistics Drop Zone dialog pre-filled with map coordinates."""
+    qt.open_drop_zone_dialog(body.lat, body.lng)
