@@ -22,7 +22,7 @@ class CustomAirdropTarget(MissionTarget):
     _coalition: object = field(default=None, repr=False)
 
     def is_friendly(self, to_player) -> bool:
-        return True
+        return False
 
     @property
     def coalition(self) -> "Coalition":
