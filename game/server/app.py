@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from . import (
     controlpoints,
+    convoyroutes,
     debuggeometries,
     dropzones,
     eventstream,
@@ -19,6 +20,7 @@ from . import (
 from .settings import ServerSettings
 app = FastAPI()
 app.include_router(controlpoints.router)
+app.include_router(convoyroutes.router)
 app.include_router(debuggeometries.router)
 app.include_router(dropzones.router)
 app.include_router(eventstream.router)
