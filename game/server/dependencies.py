@@ -37,10 +37,12 @@ class QtCallbacks:
         create_new_package: Callable[[MissionTarget], None],
         show_tgo_info: Callable[[TheaterGroundObject], None],
         show_control_point_info: Callable[[ControlPoint], None],
+        open_drop_zone_dialog: Callable[[float, float], None],
     ) -> None:
         self.create_new_package = create_new_package
         self.show_tgo_info = show_tgo_info
         self.show_control_point_info = show_control_point_info
+        self.open_drop_zone_dialog = open_drop_zone_dialog
 
 
 class QtContext:
