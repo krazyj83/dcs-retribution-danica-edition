@@ -455,6 +455,11 @@ export type UnculledZone = {
   position: LatLng;
   radius: number;
 };
+export type DropZone = {
+  id: string;
+  name: string;
+  position: LatLng;
+};
 export type Game = {
   control_points: ControlPoint[];
   tgos: Tgo[];
@@ -467,6 +472,7 @@ export type Game = {
   map_center?: LatLng;
   unculled_zones: UnculledZone[];
   map_zones: MapZones;
+  drop_zones: DropZone[];
 };
 export type MapZones = {
   inclusion: LatLng[][][];
