@@ -1,6 +1,7 @@
 import { baseApi } from "../api/baseApi";
 import combatReducer from "../api/combatSlice";
 import controlPointsReducer from "../api/controlPointsSlice";
+import convoyRoutesReducer from "../api/convoyRoutesSlice";
 import dropZonesReducer from "../api/dropZonesSlice";
 import flightsReducer from "../api/flightsSlice";
 import frontLinesReducer from "../api/frontLinesSlice";
@@ -22,6 +23,7 @@ import {
 const rootReducer = combineReducers({
   combat: combatReducer,
   controlPoints: controlPointsReducer,
+  convoyRoutes: convoyRoutesReducer,
   dropZones: dropZonesReducer,
   flights: flightsReducer,
   frontLines: frontLinesReducer,
@@ -46,7 +48,7 @@ export function setupStore(preloadedState?: PreloadedState<RootState>) {
 export type AppStore = ReturnType<typeof setupStore>;
 export type AppDispatch = AppStore["dispatch"];
 export type RootState = ReturnType<typeof rootReducer>;
-export type AppThunk<ReturnType = void> = ThunkAction<
+export type AppThunk<ReturnType = void> = ThunkAction
   ReturnType,
   RootState,
   unknown,
