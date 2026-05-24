@@ -5,9 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from game import Game
 from game.logistics.custom_airdrop import CustomAirdropTarget
 from game.server.dropzones.routes import get_by_id as get_drop_zone
-from ..dependencies import GameContext, QtCallbacks, QtContext
 from game.server.convoyroutes.routes import get_all as get_all_convoy_routes
 from game.theater.convoyroute import ConvoyRouteTarget
+from ..dependencies import GameContext, QtCallbacks, QtContext
 
 router: APIRouter = APIRouter(prefix="/qt")
 
@@ -112,7 +112,9 @@ def new_drop_zone_package(
     )
     target = CustomAirdropTarget(name=dz.name, position=position, _coalition=game.blue)
     qt.create_new_package(target)
-    @router.post(
+
+
+@router.post(
     "/create-package/convoy-route/{route_id}",
     operation_id="open_new_convoy_route_package_dialog",
     status_code=status.HTTP_200_OK,
@@ -122,6 +124,7 @@ def new_convoy_route_package(
     game: Game = Depends(GameContext.require),
     qt: QtCallbacks = Depends(QtContext.get),
 ) -> None:
+    """Open the New Package dialog pre-set for escorting a player-drawn convoy route."""
     all_routes = get_all_convoy_routes()
     route = next((r for r in all_routes if r.id == route_id), None)
     if route is None:
@@ -130,8 +133,12 @@ def new_convoy_route_package(
             detail=f"No convoy route with id {route_id}",
         )
     terrain = game.theater.terrain
-    start_point = Point.from_latlng(LatLng(route.start.lat, route.start.lng), terrain)
-    end_point = Point.from_latlng(LatLng(route.end.lat, route.end.lng), terrain)
+    start_point = Point.from_latlng(
+        LatLng(route.start.lat, route.start.lng), terrain
+    )
+    end_point = Point.from_latlng(
+        LatLng(route.end.lat, route.end.lng), terrain
+    )
     mid_point = Point(
         (start_point.x + end_point.x) / 2,
         (start_point.y + end_point.y) / 2,
