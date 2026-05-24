@@ -1,4 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
 try:
     from game.theater.missiontarget import MissionTarget
 except Exception:
@@ -7,6 +9,9 @@ except Exception:
             self.name = name
             self.position = position
 
+if TYPE_CHECKING:
+    from game.coalition import Coalition
+
 @dataclass
 class CustomAirdropTarget(MissionTarget):
     name: str
@@ -14,10 +19,14 @@ class CustomAirdropTarget(MissionTarget):
     troop_count: int = 8
     cargo_weight: int = 0
     requires_helicopter: bool = True
+    _coalition: object = field(default=None, repr=False)
 
     def is_friendly(self, to_player) -> bool:
-        # Drop zones are always placed by the player — always friendly territory.
         return True
+
+    @property
+    def coalition(self) -> "Coalition":
+        return self._coalition
 
     def mission_types(self, for_player=True):
         try:
@@ -31,8 +40,9 @@ class CustomAirdropTarget(MissionTarget):
             return []
 
 
-def create_custom_airdrop_target(name, position, coalition="blue"):
+def create_custom_airdrop_target(name, position, coalition=None):
     return CustomAirdropTarget(
         name=name,
         position=position,
+        _coalition=coalition,
     )
