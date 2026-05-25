@@ -62,6 +62,7 @@ GENERAL_SECTION = "General"
 PILOTS_AND_SQUADRONS_SECTION = "Pilots and Squadrons"
 HQ_AUTOMATION_SECTION = "HQ Automation"
 FLIGHT_PLANNER_AUTOMATION = "Flight Planner Automation"
+REDFOR_LOGISTICS_SECTION = "REDFOR Logistics"
 
 CAMPAIGN_DOCTRINE_PAGE = "Campaign Doctrine"
 DOCTRINE_DISTANCES_SECTION = "Doctrine distances"
@@ -748,6 +749,54 @@ class Settings:
         default=10,
         detail=(
             "The number of units that will be bought as reserves for applicable control points."
+        ),
+    )
+
+    # REDFOR Logistics
+    redfor_resupply_enabled: bool = boolean_option(
+        "Enable REDFOR AI resupply missions",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=REDFOR_LOGISTICS_SECTION,
+        default=True,
+        detail=(
+            "When enabled, the AI will automatically plan logistic flights "
+            "to resupply REDFOR bases that fall below the 40% supply threshold."
+        ),
+    )
+    redfor_resupply_max_bases: int = bounded_int_option(
+        "Maximum REDFOR bases to resupply per turn",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=REDFOR_LOGISTICS_SECTION,
+        default=3,
+        min=1,
+        max=10,
+        detail=(
+            "Maximum number of REDFOR bases that will receive resupply "
+            "flights in a single turn. Higher values increase AI logistics "
+            "activity but may impact performance."
+        ),
+    )
+    redfor_resupply_max_distance_km: int = bounded_int_option(
+        "Maximum REDFOR resupply distance (km)",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=REDFOR_LOGISTICS_SECTION,
+        default=200,
+        min=50,
+        max=800,
+        detail=(
+            "REDFOR will only resupply bases within this distance of the "
+            "source base. Prevents long cross-map supply runs."
+        ),
+    )
+    redfor_main_base_enabled: bool = boolean_option(
+        "REDFOR designates a main supply base",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=REDFOR_LOGISTICS_SECTION,
+        default=True,
+        detail=(
+            "When enabled, REDFOR will automatically designate its largest "
+            "airbase as the primary supply hub. All resupply flights "
+            "originate from this base."
         ),
     )
 
