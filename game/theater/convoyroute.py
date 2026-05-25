@@ -2,11 +2,12 @@
 
 A ConvoyRouteTarget wraps a ConvoyRouteJs (from the server store) into a
 MissionTarget so it can be passed to qt.create_new_package(), which opens
-the standard New Package dialog. The dialog will offer ESCORT and CAS
-mission types — exactly what you want when planning protection for a convoy.
+the standard New Package dialog. The dialog will offer CONVOY_ESCORT as an
+independent mission type — not subject to the "only escort flights" validation
+— along with CAS and BARCAP as alternatives.
 
 The target position is set to the route midpoint so the flight plan builder
-places the escort orbit over the centre of the route.
+places the orbit over the centre of the route.
 """
 from __future__ import annotations
 
@@ -14,7 +15,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Iterator
 
 from dcs.mapping import Point
-
 from game.theater.missiontarget import MissionTarget
 
 if TYPE_CHECKING:
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class ConvoyRouteTarget(MissionTarget):
-    """A player-defined ground supply route that can be escorted by air.
+    """A player-defined ground supply route that can be protected from the air.
 
     Attributes:
         name:       Display name (e.g. "MSR Alpha").
@@ -49,9 +49,13 @@ class ConvoyRouteTarget(MissionTarget):
         return self._coalition
 
     def mission_types(self, for_player: Player) -> Iterator[FlightType]:
-        """Only yield escort-style missions for friendly convoy routes."""
-        from game.ato.flighttype import FlightType
+        """Yield mission types suitable for protecting a player convoy route.
 
-        yield FlightType.ESCORT
+        CONVOY_ESCORT is an independent FlightType (not ESCORT or SEAD_ESCORT)
+        so it bypasses the package dialog's 'only escort flights' validation.
+        CAS and BARCAP are offered as alternatives.
+        """
+        from game.ato.flighttype import FlightType
+        yield FlightType.CONVOY_ESCORT
         yield FlightType.CAS
         yield FlightType.BARCAP
