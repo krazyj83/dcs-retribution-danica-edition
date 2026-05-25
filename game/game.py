@@ -27,6 +27,7 @@ from .ato import Flight
 from .ato.flighttype import FlightType
 from .campaignloader import CampaignAirWingConfig
 from .coalition import Coalition
+from .ato.redfor_supply_planner import RedforSupplyPlanner
 from .db.gamedb import GameDb
 from .dcs.countries import country_with_name
 from .infos.information import Information
@@ -309,6 +310,10 @@ class Game:
         # bases, and freshly delivered units will spawn one leg through their journey.
         self.blue.end_turn()
         self.red.end_turn()
+
+        # REDFOR AI supply convoys — creates ground transfer orders each turn
+        with logged_duration("REDFOR supply planning"):
+            RedforSupplyPlanner(self).plan()
 
         for control_point in self.theater.controlpoints:
             control_point.process_turn(self)
