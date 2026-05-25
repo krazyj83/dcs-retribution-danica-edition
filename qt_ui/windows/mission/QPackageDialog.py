@@ -293,7 +293,7 @@ class QPackageDialog(QDialog):
         if len(self.package_model.package.flights) == 0:
             return True
         if any(
-            flight.flight_type.name not in {"ESCORT", "SEAD_ESCORT"}
+            flight.flight_type.name not in {"ESCORT", "SEAD_ESCORT", "CONVOY_ESCORT"}
             for flight in self.package_model.package.flights
         ):
             return True
