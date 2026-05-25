@@ -24,5 +24,6 @@ variants:
 tasks:
   BAI: 500
   CAS: 500
+  Convoy Escort: 500
   Escort: 90
   OCA/Aircraft: 500
