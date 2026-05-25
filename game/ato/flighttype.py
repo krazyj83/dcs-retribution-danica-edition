@@ -62,6 +62,7 @@ class FlightType(Enum):
     ARMED_RECON = "Armed Recon"
     RECOVERY = "Recovery"
     LOGISTIC = "Logistic"
+    CONVOY_ESCORT = "Convoy Escort"
 
     def __str__(self) -> str:
         return self.value
