@@ -107,8 +107,15 @@ def new_drop_zone_package(
             status.HTTP_404_NOT_FOUND,
             detail=f"No drop zone with id {dz_id}",
         )
+    # dz is a raw logistics.DropZone with .lat/.lon attributes
+    try:
+        lat = dz.lat
+        lon = dz.lon
+    except AttributeError:
+        lat = dz.position.lat
+        lon = dz.position.lng
     position = Point.from_latlng(
-        LatLng(dz.position.lat, dz.position.lng),
+        LatLng(lat, lon),
         game.theater.terrain,
     )
     target = CustomAirdropTarget(name=dz.name, position=position, _coalition=game.blue)
@@ -153,6 +160,8 @@ def new_convoy_route_package(
         _coalition=game.blue,
     )
     qt.create_new_package(target)
+
+
 class OpenDropZoneDialogRequest(BaseModel):
     lat: float
     lng: float
