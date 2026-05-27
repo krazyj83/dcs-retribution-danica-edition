@@ -1,11 +1,10 @@
 """
 game/ato/redfor_supply_planner.py
 
-Automatically creates ground convoy transfer orders between REDFOR bases
-each turn, mirroring the blue player's manual transfer system.
-
-Wire into game turn processing by calling:
-    RedforSupplyPlanner(game).plan()
+Automatically creates ground convoy OR airlift transfer orders between
+REDFOR bases each turn, based on distance:
+  - Under 150 km  -> land convoy (visible on map, targetable by player)
+  - Over 150 km   -> airlift (requires transport aircraft at source base)
 """
 from __future__ import annotations
 
@@ -19,20 +18,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# How many ground units to send per convoy
 CONVOY_SIZE = 4
-
-# Maximum number of convoys to create per turn
 MAX_CONVOYS_PER_TURN = 3
+AIRLIFT_DISTANCE_THRESHOLD_KM = 150.0
 
 
 class RedforSupplyPlanner:
-    """Plans automatic ground supply convoys between REDFOR control points.
+    """Plans automatic ground supply transfers between REDFOR control points.
 
-    Each turn, finds REDFOR bases connected by road via the transit network
-    and creates TransferOrder objects to move ground units between them.
-    This causes ConvoyGenerator to spawn vehicle groups in the DCS mission,
-    making REDFOR supply lines visible and targetable by the player.
+    Short routes (< 150 km) use land convoys.
+    Long routes (>= 150 km) use airlift if transport aircraft are available.
     """
 
     def __init__(self, game: Game) -> None:
@@ -40,7 +35,6 @@ class RedforSupplyPlanner:
         self.red = game.red
 
     def plan(self) -> None:
-        """Create convoy transfer orders for this turn."""
         if not self._is_enabled():
             return
 
@@ -48,10 +42,14 @@ class RedforSupplyPlanner:
         from game.theater.transitnetwork import TransitConnection
 
         now = datetime.utcnow()
-        convoys_created = 0
-        max_convoys = self._max_convoys()
+        transfers_created = 0
+        max_transfers = self._max_convoys()
+        threshold_m = AIRLIFT_DISTANCE_THRESHOLD_KM * 1000.0
 
-        # Get all red control points that have ground units
+        settings = getattr(self.game, "settings", None)
+        max_dist_km = getattr(settings, "redfor_resupply_max_distance_km", 200)
+        max_dist_m = max_dist_km * 1000.0
+
         red_cps = [
             cp for cp in self.game.theater.controlpoints
             if not cp.captured and cp.can_deploy_ground_units
@@ -60,52 +58,75 @@ class RedforSupplyPlanner:
         if len(red_cps) < 2:
             return
 
-        # Build list of connected pairs via road
-        connected_pairs = []
+        # Collect candidate pairs — both road-connected and airlift-capable
+        candidate_pairs = []
         transit_network = self.red.transit_network
+
         for cp in red_cps:
             if cp not in transit_network.nodes:
                 continue
             for neighbor, link_type in transit_network.nodes[cp].items():
-                if (
-                    link_type == TransitConnection.Road
-                    and not neighbor.captured
-                    and neighbor.can_deploy_ground_units
-                ):
-                    # Avoid duplicates (A->B and B->A)
-                    pair = tuple(sorted([cp.id, neighbor.id]))
-                    if pair not in [tuple(sorted([p[0].id, p[1].id])) for p in connected_pairs]:
-                        connected_pairs.append((cp, neighbor))
+                if neighbor.captured or not neighbor.can_deploy_ground_units:
+                    continue
 
-        if not connected_pairs:
-            logger.debug("RedforSupplyPlanner: no road-connected REDFOR base pairs found.")
+                try:
+                    dist_m = cp.position.distance_to_point(neighbor.position)
+                except Exception:
+                    dist_m = 0.0
+
+                if dist_m > max_dist_m:
+                    continue
+
+                use_airlift = dist_m >= threshold_m
+
+                # Road pairs: only if road link exists
+                if not use_airlift and link_type != TransitConnection.Road:
+                    continue
+
+                pair = tuple(sorted([cp.id, neighbor.id]))
+                existing = [tuple(sorted([p[0].id, p[1].id])) for p in candidate_pairs]
+                if pair not in existing:
+                    candidate_pairs.append((cp, neighbor, dist_m, use_airlift))
+
+        if not candidate_pairs:
+            logger.debug("RedforSupplyPlanner: no eligible REDFOR base pairs found.")
             return
 
-        # Shuffle for variety each turn
-        random.shuffle(connected_pairs)
+        # Sort: short road routes first (more reliable), then airlift
+        candidate_pairs.sort(key=lambda t: (t[3], t[2]))
+        random.shuffle(candidate_pairs[:max(1, len(candidate_pairs) // 2)])
 
-        for source, destination in connected_pairs:
-            if convoys_created >= max_convoys:
+        for source, destination, dist_m, use_airlift in candidate_pairs:
+            if transfers_created >= max_transfers:
                 break
 
-            # Find units available at source
             units = self._select_units(source, CONVOY_SIZE)
             if not units:
                 continue
 
+            mode = "airlift" if use_airlift else "convoy"
+            dist_km = dist_m / 1000.0
+
             try:
                 transfer = TransferOrder(source, destination, units)
+                if use_airlift:
+                    transfer.request_airflift = True
                 self.red.transfers.new_transfer(transfer, now)
-                convoys_created += 1
+                transfers_created += 1
                 logger.info(
-                    "RedforSupplyPlanner: convoy %s -> %s (%d units)",
-                    source.name, destination.name, len(units),
+                    "RedforSupplyPlanner: %s %s -> %s (%.0f km, %d units)",
+                    mode, source.name, destination.name, dist_km, len(units),
                 )
             except Exception as e:
-                logger.warning("RedforSupplyPlanner: failed to create convoy: %s", e)
+                logger.warning(
+                    "RedforSupplyPlanner: failed to create %s %s->%s: %s",
+                    mode, source.name, destination.name, e,
+                )
 
-        if convoys_created:
-            logger.info("RedforSupplyPlanner: created %d convoy(s) this turn.", convoys_created)
+        if transfers_created:
+            logger.info(
+                "RedforSupplyPlanner: created %d transfer(s) this turn.", transfers_created
+            )
 
     def _is_enabled(self) -> bool:
         settings = getattr(self.game, "settings", None)
@@ -120,10 +141,6 @@ class RedforSupplyPlanner:
         return getattr(settings, "redfor_resupply_max_bases", MAX_CONVOYS_PER_TURN)
 
     def _select_units(self, cp, count: int) -> dict:
-        """Select ground units from a control point to send in a convoy.
-
-        Returns a dict of {GroundUnitType: quantity} or empty dict if none available.
-        """
         units = {}
         try:
             if not hasattr(cp, "base") or not hasattr(cp.base, "armor"):
@@ -131,12 +148,13 @@ class RedforSupplyPlanner:
             for unit_type, available in cp.base.armor.items():
                 if available <= 0:
                     continue
-                # Send at most half the available units, up to count
                 send = min(available // 2, count - sum(units.values()))
                 if send > 0:
                     units[unit_type] = send
                 if sum(units.values()) >= count:
                     break
         except Exception as e:
-            logger.debug("RedforSupplyPlanner: error selecting units from %s: %s", cp.name, e)
+            logger.debug(
+                "RedforSupplyPlanner: error selecting units from %s: %s", cp.name, e
+            )
         return units
