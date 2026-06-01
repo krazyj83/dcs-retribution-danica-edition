@@ -263,6 +263,18 @@ class ObjectiveFinder:
             if not c.is_friendly(self.is_player) and c.captured != Player.NEUTRAL
         )
 
+    def neutral_control_points(self) -> Iterator[ControlPoint]:
+        """Iterates over all neutral control points adjacent to friendly CPs."""
+        friendly_ids = {cp.id for cp in self.friendly_control_points()}
+        for cp in self.game.theater.controlpoints:
+            if cp.captured != Player.NEUTRAL:
+                continue
+            # Only include neutral CPs that are connected to a friendly CP
+            for connected in cp.connected_points:
+                if connected.id in friendly_ids:
+                    yield cp
+                    break
+
     def prioritized_points(self) -> list[ControlPoint]:
         prioritized = []
         capturable_later = []
@@ -275,6 +287,11 @@ class ObjectiveFinder:
                 prioritized.append(cp)
             else:
                 capturable_later.append(cp)
+        # REDFOR also targets adjacent neutral CPs aggressively
+        if self.is_player.is_red:
+            for cp in self.neutral_control_points():
+                if cp not in capturable_later and cp not in prioritized:
+                    capturable_later.insert(0, cp)  # prioritize neutral CPs
         prioritized.extend(self._targets_by_range(capturable_later))
         prioritized.extend(self._targets_by_range(isolated))
         return prioritized

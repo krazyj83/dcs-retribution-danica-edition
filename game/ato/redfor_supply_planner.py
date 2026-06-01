@@ -128,6 +128,57 @@ class RedforSupplyPlanner:
                 "RedforSupplyPlanner: created %d transfer(s) this turn.", transfers_created
             )
 
+        # Also send units toward adjacent neutral CPs to capture them
+        self._plan_neutral_captures(now, max_transfers - transfers_created)
+
+    def _plan_neutral_captures(self, now: datetime, budget: int) -> None:
+        """Send REDFOR units toward adjacent neutral control points to capture them."""
+        if budget <= 0:
+            return
+
+        from game.transfers import TransferOrder
+        from game.theater.player import Player
+
+        captures = 0
+        red_cps = {
+            cp for cp in self.game.theater.controlpoints
+            if not cp.captured and cp.can_deploy_ground_units
+        }
+
+        for cp in self.game.theater.controlpoints:
+            if captures >= budget:
+                break
+            if cp.captured != Player.NEUTRAL:
+                continue
+
+            # Find an adjacent red CP to send from
+            source = None
+            for connected in cp.connected_points:
+                if connected in red_cps and connected.base.total_armor > 2:
+                    source = connected
+                    break
+
+            if source is None:
+                continue
+
+            units = self._select_units(source, 2)
+            if not units:
+                continue
+
+            try:
+                transfer = TransferOrder(source, cp, units)
+                self.red.transfers.new_transfer(transfer, now)
+                captures += 1
+                logger.info(
+                    "RedforSupplyPlanner: sending units toward neutral CP %s from %s",
+                    cp.name, source.name,
+                )
+            except Exception as e:
+                logger.warning(
+                    "RedforSupplyPlanner: failed to target neutral CP %s: %s",
+                    cp.name, e,
+                )
+
     def _is_enabled(self) -> bool:
         settings = getattr(self.game, "settings", None)
         if settings is None:
