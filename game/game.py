@@ -28,6 +28,8 @@ from .ato.flighttype import FlightType
 from .campaignloader import CampaignAirWingConfig
 from .coalition import Coalition
 from .ato.redfor_supply_planner import RedforSupplyPlanner
+from .ato.redfor_adaptive_planner import RedforAdaptivePlanner
+from .models.game_stats import BlueforMissionHistory
 from .db.gamedb import GameDb
 from .dcs.countries import country_with_name
 from .infos.information import Information
@@ -308,12 +310,22 @@ class Game:
         # since the coalition-specific finalization handles transit network updates and
         # transfer processing. If in the other order, units may be delivered to captured
         # bases, and freshly delivered units will spawn one leg through their journey.
+        # Snapshot BLUEFOR ATO before it is cleared — must happen first
+        if not hasattr(self, "bluefor_mission_history"):
+            self.bluefor_mission_history = BlueforMissionHistory()
+        with logged_duration("REDFOR strategy observation"):
+            RedforAdaptivePlanner(self).observe()
+
         self.blue.end_turn()
         self.red.end_turn()
 
         # REDFOR AI supply convoys — creates ground transfer orders each turn
         with logged_duration("REDFOR supply planning"):
             RedforSupplyPlanner(self).plan()
+
+        # REDFOR adapts its strategy based on observed BLUEFOR patterns
+        with logged_duration("REDFOR adaptive strategy"):
+            RedforAdaptivePlanner(self).adapt()
 
         for control_point in self.theater.controlpoints:
             control_point.process_turn(self)

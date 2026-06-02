@@ -65,3 +65,53 @@ class GameStats:
                 turn_data.enemy_units.vehicles_count += sum(cp.base.armor.values())
 
         self.data_per_turn.append(turn_data)
+
+
+class BlueforTurnMissions:
+    """Snapshot of BLUEFOR mission types planned in one turn."""
+    def __init__(self, turn: int) -> None:
+        self.turn = turn
+        self.mission_counts: Counter = Counter()
+
+
+class BlueforMissionHistory:
+    """Rolling window of BLUEFOR mission type usage across recent turns.
+
+    Stores the last WINDOW turns of BLUEFOR ATO data. Used by
+    RedforAdaptivePlanner to detect player strategy patterns and
+    adjust REDFOR priorities accordingly.
+    """
+    WINDOW: int = 3
+
+    def __init__(self) -> None:
+        self._turns: Deque[BlueforTurnMissions] = deque(maxlen=self.WINDOW)
+
+    def record(self, ato: AirTaskingOrder, turn: int) -> None:
+        """Snapshot the current BLUEFOR ATO mission type counts."""
+        snapshot = BlueforTurnMissions(turn)
+        for package in ato.packages:
+            for flight in package.flights:
+                snapshot.mission_counts[flight.flight_type] += 1
+        self._turns.append(snapshot)
+
+    def total_counts(self) -> Counter:
+        """Sum of mission type counts across all stored turns."""
+        total: Counter = Counter()
+        for turn in self._turns:
+            total += turn.mission_counts
+        return total
+
+    def count(self, flight_type) -> int:
+        """Total count of a specific flight type across the window."""
+        return self.total_counts().get(flight_type, 0)
+
+    def dominant(self, threshold: int = 2) -> list:
+        """Flight types that appear at least threshold times in the window."""
+        return [ft for ft, n in self.total_counts().items() if n >= threshold]
+
+    def has_turns(self) -> bool:
+        return len(self._turns) > 0
+
+    @property
+    def turns_recorded(self) -> int:
+        return len(self._turns)
