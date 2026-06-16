@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import List, TYPE_CHECKING
+from collections import Counter, deque
+from typing import Deque, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from game import Game
