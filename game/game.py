@@ -34,6 +34,7 @@ from .db.gamedb import GameDb
 from .dcs.countries import country_with_name
 from .infos.information import Information
 from .lasercodes.lasercoderegistry import LaserCodeRegistry
+from .logistics import LogisticsManager
 from .profiling import logged_duration
 from .settings import Settings
 from .theater import ConflictTheater, Player
@@ -54,7 +55,6 @@ if TYPE_CHECKING:
     from .sim import GameUpdateEvents
     from .squadrons import AirWing
     from .threatzones import ThreatZones
-    from game.logistics import LogisticsManager
 
 COMMISION_UNIT_VARIETY = 4
 COMMISION_LIMITS_SCALE = 1.5
@@ -133,8 +133,6 @@ class Game:
         self.laser_code_registry = LaserCodeRegistry()
         self.db = GameDb()
         self.logistics = LogisticsManager()
-
-        self.db = GameDb()
 
         if start_time is None:
             self.time_of_day_offset_for_start_time = list(TimeOfDay).index(
