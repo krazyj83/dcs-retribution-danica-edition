@@ -191,7 +191,7 @@ class MissionGenerator:
 
         for package in self.game.blue.ato.packages:
             for flight in package.flights:
-                if flight.flight_type is not FlightType.LOGISTICS:
+                if flight.flight_type is not FlightType.LOGISTIC:
                     continue
 
                 transfer_id = getattr(flight, "transfer_id", None)
