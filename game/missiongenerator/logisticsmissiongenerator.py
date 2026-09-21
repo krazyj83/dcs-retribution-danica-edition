@@ -112,6 +112,7 @@ class LogisticsMissionGenerator:
             import dcs as pydcs
             import dcs.task
             import dcs.mapping
+            from dcs.mapping import LatLng
 
             aircraft_type_str = str(self.flight.squadron.aircraft)
 
@@ -125,8 +126,10 @@ class LogisticsMissionGenerator:
             source_airport = getattr(source_cp, "airport", None)
 
             # ── Destination drop zone position ──────────────────────
+            # Point.from_latlng() takes a single LatLng object, not two
+            # raw floats — the previous 3-arg call would raise TypeError.
             dest_point = pydcs.mapping.Point.from_latlng(
-                dz.lat, dz.lon, self.mission.terrain
+                LatLng(dz.lat, dz.lon), self.mission.terrain
             )
 
             # ── Set DCS task based on aircraft type ─────────────────
@@ -174,13 +177,3 @@ class LogisticsMissionGenerator:
                 transfer_id,
             )
             return False
-
-    @staticmethod
-    def is_logistics_capable(aircraft_type_str: str) -> bool:
-        """Return True if this aircraft type can fly LOGISTICS missions."""
-        return aircraft_type_str in (SLING_LOAD_TYPES | PARADROP_TYPES)
-
-    @staticmethod
-    def logistics_capable_types() -> set[str]:
-        """Return the full set of logistics-capable aircraft type strings."""
-        return SLING_LOAD_TYPES | PARADROP_TYPES
