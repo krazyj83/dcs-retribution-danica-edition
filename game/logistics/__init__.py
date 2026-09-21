@@ -270,6 +270,26 @@ class LogisticsTransfer:
     status:        TransferStatus  = TransferStatus.PLANNED
     delivered:     Optional[float] = None
 
+    def mark_in_flight(self) -> None:
+        """Called by LogisticsMissionGenerator once the flight has been
+        generated in the mission. Raises ValueError if the transfer isn't
+        in the PLANNED state (e.g. it was already marked, or cancelled)."""
+        if self.status != TransferStatus.PLANNED:
+            raise ValueError(
+                f"Cannot mark transfer {self.transfer_id} in_flight from "
+                f"status {self.status.value!r} (expected 'planned')"
+            )
+        self.status = TransferStatus.IN_FLIGHT
+
+    def mark_delivered(self, amount: Optional[float] = None) -> None:
+        """Called by debrief_hook.py once the mission ends successfully."""
+        self.status = TransferStatus.DELIVERED
+        self.delivered = amount if amount is not None else self.quantity
+
+    def mark_failed(self) -> None:
+        """Called when the flight is lost/aborted before delivering."""
+        self.status = TransferStatus.FAILED
+
 
 # ======================================================================
 # Logistics Manager
@@ -303,6 +323,63 @@ class LogisticsManager:
 
     def drop_zones_for_cp(self, cp_id: int) -> List[DropZone]:
         return [dz for dz in self._drop_zones.values() if dz.cp_id == cp_id]
+
+    def inject_into_mission(self, mission) -> None:
+        """
+        Create a real DCS trigger zone for every active drop zone, so the
+        Lua handler (logistic_supply.lua) can locate them at runtime.
+
+        This method didn't exist before — missiongenerator.py has been
+        calling game.logistics.inject_into_mission(self.mission) since it
+        was written, but nothing defined it, so every mission generation
+        raised AttributeError here (silently caught by the try/except
+        around the call site) and no drop zone was ever actually written
+        into the .miz file.
+
+        Uses the same mission.triggers.add_triggerzone() API that
+        LogisticsGenerator (game/missiongenerator/logisticsgenerator.py)
+        already uses for CTLD pickup/dropoff zones, so zone creation is
+        consistent with the rest of the codebase.
+        """
+        import logging
+        from dcs.mapping import LatLng, Point
+
+        logger = logging.getLogger(__name__)
+        created = 0
+
+        for dz in self._drop_zones.values():
+            if not dz.active:
+                continue
+            try:
+                position = Point.from_latlng(LatLng(dz.lat, dz.lon), mission.terrain)
+            except Exception:
+                logger.exception(
+                    "inject_into_mission: failed to convert drop zone "
+                    "'%s' (%s) to a mission position — skipped",
+                    dz.name, dz.dz_id,
+                )
+                continue
+
+            # Zone name is prefixed and includes a short id so it's both
+            # human-readable in the DCS Mission Editor and unique even if
+            # two drop zones share a name.
+            zone_name = f"DZ_{dz.dz_id[:8]}_{dz.name}"
+            try:
+                mission.triggers.add_triggerzone(
+                    position, dz.radius_m, False, zone_name
+                )
+                created += 1
+            except Exception:
+                logger.exception(
+                    "inject_into_mission: failed to create trigger zone "
+                    "for drop zone '%s' (%s) — skipped",
+                    dz.name, dz.dz_id,
+                )
+
+        logger.info(
+            "inject_into_mission: created %d of %d drop zone trigger zone(s)",
+            created, len(self._drop_zones),
+        )
 
     # ── Warehouses ─────────────────────────────────────────────────────
 
@@ -429,7 +506,7 @@ class LogisticsManager:
             ):
                 try:
                     from game.dcs.groundunittype import GroundUnitType
-                    for gut in GroundUnitType.each_unit_type():
+                    for gut in GroundUnitType._by_name.values():  # each_unit_type() does not exist
                         if getattr(gut, "variant_id", None) == item.clsid:
                             total += deficit * gut.price
                             break
