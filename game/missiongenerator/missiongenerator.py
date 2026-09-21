@@ -34,6 +34,7 @@ from .briefinggenerator import BriefingGenerator, MissionInfoGenerator
 from .cargoshipgenerator import CargoShipGenerator
 from .convoygenerator import ConvoyGenerator
 from .drawingsgenerator import DrawingsGenerator
+from .dtc import DtcGenerator
 from .environmentgenerator import EnvironmentGenerator
 from .flotgenerator import FlotGenerator
 from .forcedoptionsgenerator import ForcedOptionsGenerator
@@ -135,6 +136,14 @@ class MissionGenerator:
         LuaGenerator(self.game, self.mission, self.mission_data).generate()
         DrawingsGenerator(self.mission, self.game).generate()
 
+        # Native DTC cartridges for the blue client flights, so the jets spawn
+        # with comms, steerpoints and the SA picture loaded. Best-effort: a
+        # failure here never blocks the mission.
+        try:
+            DtcGenerator(self.mission, self.game, self.mission_data).generate()
+        except Exception:
+            logging.exception("DTC: cartridge generation failed; mission unaffected")
+
         self.setup_combined_arms()
 
         self.notify_info_generators()
@@ -189,42 +198,47 @@ class MissionGenerator:
         logistics_flights_generated = 0
         logistics_flights_skipped   = 0
 
-        for package in self.game.blue.ato.packages:
-            for flight in package.flights:
-                if flight.flight_type is not FlightType.LOGISTIC:
-                    continue
+        # Both coalitions can plan LOGISTIC flights (LogisticPlanner runs for
+        # blue and red alike — see game/ato/logistic_planner.py), but this
+        # loop only ever checked game.blue.ato.packages. Red LOGISTIC flights
+        # were silently never generated or marked in-flight as a result.
+        for coalition_ato in (self.game.blue.ato, self.game.red.ato):
+            for package in coalition_ato.packages:
+                for flight in package.flights:
+                    if flight.flight_type is not FlightType.LOGISTIC:
+                        continue
 
-                transfer_id = getattr(flight, "transfer_id", None)
-                if not transfer_id:
-                    logging.warning(
-                        "MissionGenerator: LOGISTICS flight in package '%s' "
-                        "has no transfer_id — skipped. "
-                        "Was schedule_transfer() called when planning?",
-                        package.target.name if package.target else "unknown",
-                    )
-                    logistics_flights_skipped += 1
-                    continue
-
-                try:
-                    gen = LogisticsMissionGenerator(
-                        flight, self.game, self.mission
-                    )
-                    success = gen.generate()
-                    if success:
-                        logistics_flights_generated += 1
-                        logging.info(
-                            "MissionGenerator: LOGISTICS flight generated "
-                            "(transfer %s)", transfer_id[:8],
+                    transfer_id = getattr(flight, "transfer_id", None)
+                    if not transfer_id:
+                        logging.warning(
+                            "MissionGenerator: LOGISTICS flight in package '%s' "
+                            "has no transfer_id — skipped. "
+                            "Was schedule_transfer() called when planning?",
+                            package.target.name if package.target else "unknown",
                         )
-                    else:
                         logistics_flights_skipped += 1
-                except Exception:
-                    logging.exception(
-                        "MissionGenerator: LOGISTICS flight generation failed "
-                        "for transfer %s — skipping this flight",
-                        transfer_id[:8] if transfer_id else "unknown",
-                    )
-                    logistics_flights_skipped += 1
+                        continue
+
+                    try:
+                        gen = LogisticsMissionGenerator(
+                            flight, self.game, self.mission
+                        )
+                        success = gen.generate()
+                        if success:
+                            logistics_flights_generated += 1
+                            logging.info(
+                                "MissionGenerator: LOGISTICS flight generated "
+                                "(transfer %s)", transfer_id[:8],
+                            )
+                        else:
+                            logistics_flights_skipped += 1
+                    except Exception:
+                        logging.exception(
+                            "MissionGenerator: LOGISTICS flight generation failed "
+                            "for transfer %s — skipping this flight",
+                            transfer_id[:8] if transfer_id else "unknown",
+                        )
+                        logistics_flights_skipped += 1
 
         if logistics_flights_generated or logistics_flights_skipped:
             logging.info(
