@@ -18,6 +18,7 @@ from dcs.unitgroup import PlaneGroup, ShipGroup, StaticGroup, VehicleGroup
 from dcs.vehicles import AirDefence, Armor, MissilesSS, Unarmed
 
 from game.controlpoint_influenceradius import ControlPointInfluenceRadius, point_in_zone
+from game.logistics.red_supply_routes import auto_generate_red_supply_routes
 from game.point_with_heading import PointWithHeading
 from game.positioned import Positioned
 from game.profiling import logged_duration
@@ -555,6 +556,10 @@ class MizCampaignLoader:
             self.control_points[destination.id].create_convoy_route(
                 origin, list(reversed(waypoints)), d_spawns
             )
+
+        # Auto-generate additional convoy routes between red control points
+        # that don't already have a manually-defined route in the .miz.
+        auto_generate_red_supply_routes(self.theater)
 
     def add_shipping_lanes(self) -> None:
         for group in self.shipping_lane_groups:
