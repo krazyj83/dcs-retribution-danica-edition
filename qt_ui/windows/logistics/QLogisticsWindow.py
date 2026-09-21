@@ -188,7 +188,7 @@ def _item_restock_cost(item: WeaponStockItem) -> float:
                           "Infantry Fighting Vehicle", "Artillery", "Support"):
         try:
             from game.dcs.groundunittype import GroundUnitType
-            for gut in GroundUnitType.each_unit_type():
+            for gut in GroundUnitType._by_name.values():  # each_unit_type() does not exist
                 if getattr(gut, "variant_id", None) == item.clsid:
                     return round(deficit * gut.price, 1)
         except Exception:
