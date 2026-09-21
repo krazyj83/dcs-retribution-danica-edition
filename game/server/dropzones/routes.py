@@ -85,15 +85,22 @@ def create_drop_zone(body: CreateDropZoneRequest) -> DropZoneJs:
 
     dz_id = str(uuid4())
 
-    # Find the nearest blue control point for the cp_id field
+    # Find the nearest blue control point for the cp_id field.
+    # None (not 0) is the "no CP found" sentinel — ControlPoint.id is a
+    # UUID, and a bare int 0 would never equal any real cp.id anyway, but
+    # None is the honest/idiomatic way to say "unassociated."
     game = GameContext.get()
-    cp_id = 0
+    cp_id = None
     cp_name = "Map point"
     coalition = "blue"
     if game is not None:
         try:
+            # Note: the dead "from dcs.unit import Point" import that used to
+            # be here doesn't exist in dcs.unit (Point lives in dcs.mapping,
+            # already imported below) — it raised ImportError every time and
+            # was silently swallowed by this try/except, meaning this entire
+            # nearest-CP lookup never ran. Removed; nothing here needs Point.
             from dcs.mapping import LatLng
-            from dcs.unit import Point
             nearest = None
             nearest_dist = float("inf")
             for cp in game.theater.controlpoints:
