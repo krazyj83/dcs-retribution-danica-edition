@@ -23,8 +23,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -76,7 +76,7 @@ class SupplyBar(QWidget):
 
         pct = QLabel(f"{int(level * 100)}%")
         pct.setFixedWidth(36)
-        pct.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        pct.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         row.addWidget(pct)
 
     def _color(self, level: float) -> str:
@@ -158,32 +158,10 @@ class LogisticSupplyPanel(QWidget):
 
     def _on_resupply_clicked(self) -> None:
         """
-        Opens the package editor pre-configured for a LOGISTIC flight
-        targeting this control point.
-
-        Replace the placeholder below with the real PackageDialog call once
-        you have located it. Search for:
-            grep -rn "PackageDialog\|NewPackageDialog\|package.*dialog" qt_ui/
+        Opens the new-package dialog targeting this control point, the same
+        way QBaseMenu2's own "new package" button does. The user selects the
+        LOGISTIC flight type from within the dialog, same as any other type.
         """
-        from PyQt5.QtWidgets import QMessageBox
-        from game.ato.flighttype import FlightType
+        from qt_ui.dialogs import Dialog
 
-        # ── Placeholder — replace with real dialog call ────────────────────
-        # Example pattern (adjust class name to match your codebase):
-        #
-        # from qt_ui.windows.mission.package.QPackageDialog import QPackageDialog
-        # dialog = QPackageDialog(
-        #     game=self.game,
-        #     package=None,
-        #     flight_type=FlightType.LOGISTIC,
-        #     target_cp=self.cp,
-        # )
-        # dialog.exec_()
-
-        QMessageBox.information(
-            self,
-            "Logistic Resupply",
-            f"Plan a logistic flight to {self.cp.name}.\n\n"
-            "Replace this placeholder with the real PackageDialog call.\n"
-            "Run: grep -rn 'PackageDialog' qt_ui/ to find it.",
-        )
+        Dialog.open_new_package_dialog(self.cp, parent=self.window())
