@@ -51,11 +51,15 @@ def build_logistic_mission_table(packages: list[Package]) -> str:
             origin     = payload.get("origin_base_name", "")
             dest       = payload.get("dest_base_name", "")
 
-            # Determine which DCS coalition side constant to use
-            # coalition.player is True for blue
+            # Determine which DCS coalition side constant to use.
+            # squadron.player returns a Player enum (BLUE/RED/NEUTRAL), which
+            # has no __bool__ override — testing it directly as a condition
+            # is always truthy regardless of value. Compare with .is_blue
+            # explicitly instead (same class of bug found elsewhere in this
+            # port: Coalition.player and cp.captured have the same trap).
             coalition_lua = (
                 "coalition.side.BLUE"
-                if getattr(flight.squadron, "player", True)
+                if flight.squadron.player.is_blue
                 else "coalition.side.RED"
             )
 
