@@ -90,7 +90,7 @@ class LogisticPlanner:
                 packages.append(pkg)
 
         if packages:
-            side = "blue" if self.coalition.player else "red"
+            side = "blue" if self.coalition.player.is_blue else "red"
             logger.info(
                 "LogisticPlanner [%s]: planned %d logistic flight(s) this turn.",
                 side, len(packages),
@@ -159,13 +159,14 @@ class LogisticPlanner:
         if dest_cp is None:
             return None
 
-        origin_cp, squadron = self._find_transport_squadron(exclude_cp=dest_cp)
-        if origin_cp is None or squadron is None:
+        squadron = self._find_transport_squadron(dest_cp)
+        if squadron is None:
             logger.debug(
                 "LogisticPlanner: no transport squadron found for %s",
                 getattr(dest_cp, "name", dest_cp_id),
             )
             return None
+        origin_cp = squadron.location
 
         dest_fuel = dest_wh.stock.get(WarehouseCategory.FUEL)
         dest_ammo = dest_wh.stock.get(WarehouseCategory.AMMUNITION)
@@ -173,15 +174,20 @@ class LogisticPlanner:
         fuel_to_deliver = FUEL_DELIVERY_UNITS if (dest_fuel and dest_fuel.needs_resupply) else 0.0
         ammo_to_deliver = AMMO_DELIVERY_UNITS if (dest_ammo and dest_ammo.needs_resupply) else 0.0
 
-        package = Package(target=dest_cp, auto_asap=True)
+        # Package requires the shared Flight database (game.db.flights) —
+        # see game/db/gamedb.py. There is no "country" argument on Flight;
+        # Flight derives self.coalition from squadron.coalition automatically.
+        # divert has no default on Flight and must be passed explicitly —
+        # None is the standard simple case used throughout the codebase.
+        package = Package(target=dest_cp, db=self.game.db.flights, auto_asap=True)
 
         flight = Flight(
-            package    = package,
-            country    = self.coalition.country,
-            squadron   = squadron,
-            count      = 1,
-            flight_type = FlightType.LOGISTIC,
-            start_type = "Warm",
+            package=package,
+            squadron=squadron,
+            count=1,
+            flight_type=FlightType.LOGISTIC,
+            start_type="Warm",
+            divert=None,
         )
 
         # logistic_payload is read by:
@@ -203,47 +209,4 @@ class LogisticPlanner:
         package.add_flight(flight)
         return package
 
-    def _build_ammo_items(self, ammo_item) -> list[dict]:
-        """
-        Returns the ammo_items list for the Lua plugin when ammo is low.
-        Each entry is {"item": DCS_clsid_string, "count": int}.
-        Returns an empty list when ammo does not need resupply.
-        """
-        if ammo_item is None or not ammo_item.needs_resupply:
-            return []
-        # Generic mixed load — adapt per faction later if needed
-        return [
-            {"item": "weapons.missiles.AIM_120C", "count": 8},
-            {"item": "weapons.missiles.AIM_9X",   "count": 8},
-            {"item": "weapons.bombs.Mk_82",        "count": 20},
-            {"item": "weapons.bombs.GBU_12",       "count": 8},
-        ]
-
-    def _friendly_cps(self):
-        """Yields control points owned by this coalition."""
-        is_player = self.coalition.player
-        for cp in self.game.theater.controlpoints:
-            # cp.captured is True when blue owns it
-            if bool(cp.captured) == bool(is_player):
-                yield cp
-
-    def _find_cp_by_id(self, cp_id: int):
-        for cp in self.game.theater.controlpoints:
-            if cp.id == cp_id:
-                return cp
-        return None
-
-    def _find_transport_squadron(self, exclude_cp):
-        """
-        Finds the nearest friendly CP (other than the destination) with
-        a squadron capable of LOGISTIC missions that has aircraft available.
-        Returns (ControlPoint, Squadron) or (None, None).
-        """
-        for cp in self._friendly_cps():
-            if cp is exclude_cp:
-                continue
-            for squadron in getattr(cp, "squadrons", []):
-                if FlightType.LOGISTIC in getattr(squadron, "mission_types", []):
-                    if getattr(squadron, "has_available_aircraft", False):
-                        return cp, squadron
-        return None, None
+    def
