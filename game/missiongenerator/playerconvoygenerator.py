@@ -8,6 +8,7 @@ Concepts used:
 - group.add_waypoint(..., move_formation=PointAction.OnRoad): DCS AI follows
   roads between waypoints rather than driving cross-country.
 """
+
 from __future__ import annotations
 
 import itertools
@@ -24,6 +25,7 @@ from game.utils import kph
 
 if TYPE_CHECKING:
     from game import Game
+    from game.server.convoyroutes.models import ConvoyRouteJs
 
 logger = logging.getLogger(__name__)
 
@@ -60,16 +62,12 @@ class PlayerConvoyGenerator:
                     f"Failed to generate player convoy for route '{route.name}'"
                 )
 
-    def _spawn_convoy(self, route) -> None:
+    def _spawn_convoy(self, route: ConvoyRouteJs) -> None:
         """Create one vehicle group driving the given ConvoyRouteJs."""
         terrain = self.game.theater.terrain
 
-        start = Point.from_latlng(
-            LatLng(route.start.lat, route.start.lng), terrain
-        )
-        end = Point.from_latlng(
-            LatLng(route.end.lat, route.end.lng), terrain
-        )
+        start = Point.from_latlng(LatLng(route.start.lat, route.start.lng), terrain)
+        end = Point.from_latlng(LatLng(route.end.lat, route.end.lng), terrain)
 
         # coalition_for(Player.BLUE) matches how convoygenerator.py resolves
         # the faction — Player is an enum with BLUE, RED, NEUTRAL values.
@@ -89,7 +87,7 @@ class PlayerConvoyGenerator:
         group_name = f"Player Convoy {next(self._counter)} - {route.name}"
 
         logger.debug(
-            f"Spawning '{group_name}' ({unit_type.name} x{CONVOY_SIZE})"
+            f"Spawning '{group_name}' ({unit_type.display_name} x{CONVOY_SIZE})"
         )
 
         group = self.mission.vehicle_group(
