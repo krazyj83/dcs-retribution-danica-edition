@@ -1,0 +1,20 @@
+---
+name: VF-103
+nickname: Jolly Rogers
+female_pilot_percentage: 7
+country: USA
+role: Strike Fighter
+aircraft: F-14B(U) Tomcat
+mission_types:
+  - BAI
+  - BARCAP
+  - CAS
+  - DEAD
+  - Escort
+  - Intercept
+  - OCA/Aircraft
+  - OCA/Runway
+  - SEAD
+  - Strike
+  - Fighter sweep
+  - TARCAP
