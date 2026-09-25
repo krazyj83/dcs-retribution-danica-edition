@@ -914,29 +914,29 @@ class A_4E_C(PlaneType):
     livery_name = "A-4E-C"  # from type
 
     class Pylon1:
-        LAU_7_with_AIM_9B_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9B_Sidewinder_IR_AAM = (
             1,
-            Weapons.LAU_7_with_AIM_9B_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9B_Sidewinder_IR_AAM,
         )
-        LAU_7_with_AIM_9P_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9P_Sidewinder_IR_AAM = (
             1,
-            Weapons.LAU_7_with_AIM_9P_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9P_Sidewinder_IR_AAM,
         )
-        LAU_7_with_AIM_9P5_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9P5_Sidewinder_IR_AAM = (
             1,
-            Weapons.LAU_7_with_AIM_9P5_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9P5_Sidewinder_IR_AAM,
         )
-        LAU_7_with_AIM_9P3_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9P3_Sidewinder_IR_AAM = (
             1,
-            WeaponsA4EC.LAU_7_with_AIM_9P3_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9P3_Sidewinder_IR_AAM,
         )
         LAU_7_with_AN_ASQ_T50_TCTS_Pod___ACMI_Pod_ = (
             1,
             WeaponsA4EC.LAU_7_with_AN_ASQ_T50_TCTS_Pod___ACMI_Pod_,
         )
-        LAU_7_with_AIM_9J_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9J_Sidewinder_IR_AAM = (
             1,
-            WeaponsA4EC.LAU_7_with_AIM_9J_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9J_Sidewinder_IR_AAM,
         )
         LAU_68_pod___7_x_2_75_Hydra__UnGd_Rkts_M151__HE = (
             1,
@@ -1031,9 +1031,9 @@ class A_4E_C(PlaneType):
         Smokewinder___white = (1, Weapons.Smokewinder___white)
         Smokewinder___yellow = (1, Weapons.Smokewinder___yellow)
         Smokewinder___orange = (1, Weapons.Smokewinder___orange)
-        SUU_25_x_8_LUU_2___Target_Marker_Flares = (
+        SUU_25___8_x_Illumination_Flare__LUU_2B = (
             1,
-            Weapons.SUU_25_x_8_LUU_2___Target_Marker_Flares,
+            Weapons.SUU_25___8_x_Illumination_Flare__LUU_2B,
         )
 
     # ERRR <CLEAN>
@@ -1043,29 +1043,29 @@ class A_4E_C(PlaneType):
         Fuel_Tank_300_gallons__EMPTY__ = (2, WeaponsA4EC.Fuel_Tank_300_gallons__EMPTY__)
         Fuel_Tank_150_gallons = (2, WeaponsA4EC.Fuel_Tank_150_gallons)
         Fuel_Tank_150_gallons__EMPTY_ = (2, WeaponsA4EC.Fuel_Tank_150_gallons__EMPTY_)
-        LAU_7_with_AIM_9B_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9B_Sidewinder_IR_AAM = (
             2,
-            Weapons.LAU_7_with_AIM_9B_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9B_Sidewinder_IR_AAM,
         )
-        LAU_7_with_AIM_9P_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9P_Sidewinder_IR_AAM = (
             2,
-            Weapons.LAU_7_with_AIM_9P_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9P_Sidewinder_IR_AAM,
         )
-        LAU_7_with_AIM_9P5_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9P5_Sidewinder_IR_AAM = (
             2,
-            Weapons.LAU_7_with_AIM_9P5_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9P5_Sidewinder_IR_AAM,
         )
-        LAU_7_with_AIM_9P3_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9P3_Sidewinder_IR_AAM = (
             2,
-            WeaponsA4EC.LAU_7_with_AIM_9P3_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9P3_Sidewinder_IR_AAM,
         )
         LAU_7_with_AN_ASQ_T50_TCTS_Pod___ACMI_Pod_ = (
             2,
             WeaponsA4EC.LAU_7_with_AN_ASQ_T50_TCTS_Pod___ACMI_Pod_,
         )
-        LAU_7_with_AIM_9J_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9J_Sidewinder_IR_AAM = (
             2,
-            WeaponsA4EC.LAU_7_with_AIM_9J_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9J_Sidewinder_IR_AAM,
         )
         LAU_3_pod___19_x_2_75_FFAR__UnGd_Rkts_M156__Wht_Phos = (
             2,
@@ -1313,9 +1313,9 @@ class A_4E_C(PlaneType):
         Smokewinder___white = (2, Weapons.Smokewinder___white)
         Smokewinder___yellow = (2, Weapons.Smokewinder___yellow)
         Smokewinder___orange = (2, Weapons.Smokewinder___orange)
-        SUU_25_x_8_LUU_2___Target_Marker_Flares = (
+        SUU_25___8_x_Illumination_Flare__LUU_2B = (
             2,
-            Weapons.SUU_25_x_8_LUU_2___Target_Marker_Flares,
+            Weapons.SUU_25___8_x_Illumination_Flare__LUU_2B,
         )
 
     # ERRR <CLEAN>
@@ -1668,9 +1668,9 @@ class A_4E_C(PlaneType):
         Smokewinder___white = (3, Weapons.Smokewinder___white)
         Smokewinder___yellow = (3, Weapons.Smokewinder___yellow)
         Smokewinder___orange = (3, Weapons.Smokewinder___orange)
-        SUU_25_x_8_LUU_2___Target_Marker_Flares = (
+        SUU_25___8_x_Illumination_Flare__LUU_2B = (
             3,
-            Weapons.SUU_25_x_8_LUU_2___Target_Marker_Flares,
+            Weapons.SUU_25___8_x_Illumination_Flare__LUU_2B,
         )
 
     # ERRR <CLEAN>
@@ -1680,29 +1680,29 @@ class A_4E_C(PlaneType):
         Fuel_Tank_300_gallons__EMPTY__ = (4, WeaponsA4EC.Fuel_Tank_300_gallons__EMPTY__)
         Fuel_Tank_150_gallons = (4, WeaponsA4EC.Fuel_Tank_150_gallons)
         Fuel_Tank_150_gallons__EMPTY_ = (4, WeaponsA4EC.Fuel_Tank_150_gallons__EMPTY_)
-        LAU_7_with_AIM_9B_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9B_Sidewinder_IR_AAM = (
             4,
-            Weapons.LAU_7_with_AIM_9B_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9B_Sidewinder_IR_AAM,
         )
-        LAU_7_with_AIM_9P_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9P_Sidewinder_IR_AAM = (
             4,
-            Weapons.LAU_7_with_AIM_9P_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9P_Sidewinder_IR_AAM,
         )
-        LAU_7_with_AIM_9P5_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9P5_Sidewinder_IR_AAM = (
             4,
-            Weapons.LAU_7_with_AIM_9P5_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9P5_Sidewinder_IR_AAM,
         )
-        LAU_7_with_AIM_9P3_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9P3_Sidewinder_IR_AAM = (
             4,
-            WeaponsA4EC.LAU_7_with_AIM_9P3_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9P3_Sidewinder_IR_AAM,
         )
         LAU_7_with_AN_ASQ_T50_TCTS_Pod___ACMI_Pod_ = (
             4,
             WeaponsA4EC.LAU_7_with_AN_ASQ_T50_TCTS_Pod___ACMI_Pod_,
         )
-        LAU_7_with_AIM_9J_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9J_Sidewinder_IR_AAM = (
             4,
-            WeaponsA4EC.LAU_7_with_AIM_9J_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9J_Sidewinder_IR_AAM,
         )
         LAU_3_pod___19_x_2_75_FFAR__UnGd_Rkts_M156__Wht_Phos = (
             4,
@@ -1950,37 +1950,37 @@ class A_4E_C(PlaneType):
         Smokewinder___white = (4, Weapons.Smokewinder___white)
         Smokewinder___yellow = (4, Weapons.Smokewinder___yellow)
         Smokewinder___orange = (4, Weapons.Smokewinder___orange)
-        SUU_25_x_8_LUU_2___Target_Marker_Flares = (
+        SUU_25___8_x_Illumination_Flare__LUU_2B = (
             4,
-            Weapons.SUU_25_x_8_LUU_2___Target_Marker_Flares,
+            Weapons.SUU_25___8_x_Illumination_Flare__LUU_2B,
         )
 
     # ERRR <CLEAN>
 
     class Pylon5:
-        LAU_7_with_AIM_9B_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9B_Sidewinder_IR_AAM = (
             5,
-            Weapons.LAU_7_with_AIM_9B_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9B_Sidewinder_IR_AAM,
         )
-        LAU_7_with_AIM_9P_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9P_Sidewinder_IR_AAM = (
             5,
-            Weapons.LAU_7_with_AIM_9P_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9P_Sidewinder_IR_AAM,
         )
-        LAU_7_with_AIM_9P5_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9P5_Sidewinder_IR_AAM = (
             5,
-            Weapons.LAU_7_with_AIM_9P5_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9P5_Sidewinder_IR_AAM,
         )
-        LAU_7_with_AIM_9P3_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9P3_Sidewinder_IR_AAM = (
             5,
-            WeaponsA4EC.LAU_7_with_AIM_9P3_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9P3_Sidewinder_IR_AAM,
         )
         LAU_7_with_AN_ASQ_T50_TCTS_Pod___ACMI_Pod_ = (
             5,
             WeaponsA4EC.LAU_7_with_AN_ASQ_T50_TCTS_Pod___ACMI_Pod_,
         )
-        LAU_7_with_AIM_9J_Sidewinder_IR_AAM = (
+        LAU_7___AIM_9J_Sidewinder_IR_AAM = (
             5,
-            WeaponsA4EC.LAU_7_with_AIM_9J_Sidewinder_IR_AAM,
+            Weapons.LAU_7___AIM_9J_Sidewinder_IR_AAM,
         )
         LAU_68_pod___7_x_2_75_Hydra__UnGd_Rkts_M151__HE = (
             5,
@@ -2075,9 +2075,9 @@ class A_4E_C(PlaneType):
         Smokewinder___white = (5, Weapons.Smokewinder___white)
         Smokewinder___yellow = (5, Weapons.Smokewinder___yellow)
         Smokewinder___orange = (5, Weapons.Smokewinder___orange)
-        SUU_25_x_8_LUU_2___Target_Marker_Flares = (
+        SUU_25___8_x_Illumination_Flare__LUU_2B = (
             5,
-            Weapons.SUU_25_x_8_LUU_2___Target_Marker_Flares,
+            Weapons.SUU_25___8_x_Illumination_Flare__LUU_2B,
         )
 
     # ERRR <CLEAN>

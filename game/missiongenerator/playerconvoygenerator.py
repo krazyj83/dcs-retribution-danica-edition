@@ -19,7 +19,6 @@ from dcs import Mission
 from dcs.mapping import LatLng, Point
 from dcs.point import PointAction
 
-from game.server.convoyroutes.routes import get_all as get_all_convoy_routes
 from game.theater.player import Player
 from game.utils import kph
 
@@ -44,6 +43,11 @@ class PlayerConvoyGenerator:
         self._counter = itertools.count(1)
 
     def generate(self) -> None:
+        # Imported here, not at module level: game.server imports game.sim, which
+        # imports game.missiongenerator, so a top-level import is a cycle that
+        # only works when game.server happens to be imported first.
+        from game.server.convoyroutes.routes import get_all as get_all_convoy_routes
+
         routes = get_all_convoy_routes()
         if not routes:
             return

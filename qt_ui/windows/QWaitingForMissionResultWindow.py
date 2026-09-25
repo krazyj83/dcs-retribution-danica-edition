@@ -181,6 +181,11 @@ class QWaitingForMissionResultWindow(QDialog):
         self.add_update_row(
             "Base capture events", len(debriefing.base_captures), update_layout
         )
+        self.add_update_row(
+            "Motorpool units destroyed",
+            len(list(debriefing.motorpool_losses)),
+            update_layout,
+        )
 
         # Clear previous content of the window
         for i in reversed(range(self.gridLayout.count())):

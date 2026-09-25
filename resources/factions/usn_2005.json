@@ -82,7 +82,8 @@
   "doctrine": "modern",
   "liveries_overrides": {
       "F-14B(U) Tomcat": [
-      "VF-103 Jolly Rogers"
+      "VF-103 Jolly Rogers - High Vis",
+      "VF-103 Jolly Rogers - Low Vis"
     ],
     "F/A-18C Hornet (Lot 20)": [
       "VMFA-251 high visibility"

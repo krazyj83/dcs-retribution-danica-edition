@@ -17,7 +17,7 @@ Wire it into the AI planner by adding to ai_flight_planner.py:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Iterator, Optional
 
 from game.ato.flighttype import FlightType
 from game.logistics import WarehouseCategory
@@ -25,7 +25,9 @@ from game.logistics import WarehouseCategory
 if TYPE_CHECKING:
     from game.coalition import Coalition
     from game.game import Game
-    from game.logistics import LogisticsManager, Warehouse
+    from game.logistics import LogisticsManager, StockItem, Warehouse
+    from game.squadrons import Squadron
+    from game.theater import ControlPoint
     from game.ato.package import Package
 
 logger = logging.getLogger(__name__)
@@ -209,4 +211,52 @@ class LogisticPlanner:
         package.add_flight(flight)
         return package
 
-    def
+    def _build_ammo_items(self, ammo_item: Optional[StockItem]) -> list[dict[str, Any]]:
+        """
+        Returns the ammo_items list for the Lua plugin when ammo is low.
+        Each entry is {"item": DCS weapon type string, "count": int}.
+        Returns an empty list when ammo does not need resupply.
+        """
+        if ammo_item is None or not ammo_item.needs_resupply:
+            return []
+        # Generic mixed load — adapt per faction later if needed
+        return [
+            {"item": "weapons.missiles.AIM_120C", "count": 8},
+            {"item": "weapons.missiles.AIM_9X", "count": 8},
+            {"item": "weapons.bombs.Mk_82", "count": 20},
+            {"item": "weapons.bombs.GBU_12", "count": 8},
+        ]
+
+    def _friendly_cps(self) -> Iterator[ControlPoint]:
+        """Yields control points owned by this coalition."""
+        for cp in self.game.theater.controlpoints:
+            # cp.captured is a Player (BLUE/RED/NEUTRAL), same type as
+            # coalition.player, so ownership is a straight comparison.
+            if cp.captured == self.coalition.player:
+                yield cp
+
+    def _find_cp_by_id(self, cp_id: int) -> Optional[ControlPoint]:
+        for cp in self.game.theater.controlpoints:
+            if cp.id == cp_id:
+                return cp
+        return None
+
+    def _find_transport_squadron(self, dest_cp: ControlPoint) -> Optional[Squadron]:
+        """
+        The nearest friendly squadron to ``dest_cp`` that can fly LOGISTIC and
+        has an untasked aircraft, based anywhere except ``dest_cp`` itself.
+        The caller takes the origin base from ``squadron.location``.
+        """
+        best: Optional[Squadron] = None
+        best_distance = float("inf")
+        for squadron in self.coalition.air_wing.iter_squadrons():
+            if squadron.location is dest_cp:
+                continue
+            if not squadron.capable_of(FlightType.LOGISTIC):
+                continue
+            if squadron.untasked_aircraft < 1:
+                continue
+            distance = squadron.location.position.distance_to_point(dest_cp.position)
+            if distance < best_distance:
+                best, best_distance = squadron, distance
+        return best
