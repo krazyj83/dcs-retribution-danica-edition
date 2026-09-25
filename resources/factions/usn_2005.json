@@ -81,8 +81,8 @@
   "jtac_unit": "MQ-9 Reaper",
   "doctrine": "modern",
   "liveries_overrides": {
-    "F-14B Tomcat": [
-      "VF-142 Ghostriders"
+      "F-14B(U) Tomcat": [
+      "VF-103 Jolly Rogers"
     ],
     "F/A-18C Hornet (Lot 20)": [
       "VMFA-251 high visibility"
