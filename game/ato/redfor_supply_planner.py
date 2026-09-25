@@ -15,12 +15,27 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from game.game import Game
+    from game.dcs.groundunittype import GroundUnitType
+    from game.theater import ControlPoint
 
 logger = logging.getLogger(__name__)
 
 CONVOY_SIZE = 4
 MAX_CONVOYS_PER_TURN = 3
 AIRLIFT_DISTANCE_THRESHOLD_KM = 150.0
+
+
+def has_transfer_route(game: Game, origin: ControlPoint, destination: ControlPoint) -> bool:
+    """True if origin's coalition can route a ground transfer to destination.
+
+    PendingTransfers.new_transfer() removes the units from the origin base
+    *before* it looks for a route, so a transfer with no route loses those
+    units and leaves a broken pending transfer behind. Always check first.
+    """
+    network = game.transit_network_for(origin.captured)
+    if origin not in network.nodes or destination not in network.nodes:
+        return False
+    return network.has_path_between(origin, destination)
 
 
 class RedforSupplyPlanner:
@@ -52,21 +67,21 @@ class RedforSupplyPlanner:
 
         red_cps = [
             cp for cp in self.game.theater.controlpoints
-            if not cp.captured and cp.can_deploy_ground_units
+            if cp.captured.is_red and cp.can_deploy_ground_units
         ]
 
         if len(red_cps) < 2:
             return
 
         # Collect candidate pairs — both road-connected and airlift-capable
-        candidate_pairs = []
+        candidate_pairs: list[tuple[ControlPoint, ControlPoint, float, bool]] = []
         transit_network = self.red.transit_network
 
         for cp in red_cps:
             if cp not in transit_network.nodes:
                 continue
             for neighbor, link_type in transit_network.nodes[cp].items():
-                if neighbor.captured or not neighbor.can_deploy_ground_units:
+                if not neighbor.captured.is_red or not neighbor.can_deploy_ground_units:
                     continue
 
                 try:
@@ -107,6 +122,9 @@ class RedforSupplyPlanner:
             mode = "airlift" if use_airlift else "convoy"
             dist_km = dist_m / 1000.0
 
+            if not has_transfer_route(self.game, source, destination):
+                continue
+
             try:
                 transfer = TransferOrder(source, destination, units)
                 if use_airlift:
@@ -142,7 +160,7 @@ class RedforSupplyPlanner:
         captures = 0
         red_cps = {
             cp for cp in self.game.theater.controlpoints
-            if not cp.captured and cp.can_deploy_ground_units
+            if cp.captured.is_red and cp.can_deploy_ground_units
         }
 
         for cp in self.game.theater.controlpoints:
@@ -159,6 +177,12 @@ class RedforSupplyPlanner:
                     break
 
             if source is None:
+                continue
+
+            # Neutral CPs are never part of a coalition's transit network, so
+            # this is currently always skipped; the check stops new_transfer()
+            # from deleting the units when no route exists.
+            if not has_transfer_route(self.game, source, cp):
                 continue
 
             units = self._select_units(source, 2)
@@ -191,8 +215,10 @@ class RedforSupplyPlanner:
             return MAX_CONVOYS_PER_TURN
         return getattr(settings, "redfor_resupply_max_bases", MAX_CONVOYS_PER_TURN)
 
-    def _select_units(self, cp, count: int) -> dict:
-        units = {}
+    def _select_units(
+        self, cp: ControlPoint, count: int
+    ) -> dict[GroundUnitType, int]:
+        units: dict[GroundUnitType, int] = {}
         try:
             if not hasattr(cp, "base") or not hasattr(cp.base, "armor"):
                 return {}

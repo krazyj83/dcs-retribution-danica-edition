@@ -126,7 +126,7 @@ class RedforAdaptivePlanner:
         # Find frontline red CPs and request SAM replenishment
         requested = 0
         for cp in self.game.theater.controlpoints:
-            if cp.captured or not cp.has_active_frontline:
+            if not cp.captured.is_red or not cp.has_active_frontline:
                 continue
             if requested >= 2:
                 break
@@ -165,7 +165,7 @@ class RedforAdaptivePlanner:
         # Find red airbases with squadrons and request fighter replenishment
         requested = 0
         for cp in self.game.theater.controlpoints:
-            if cp.captured or requested >= 2:
+            if not cp.captured.is_red or requested >= 2:
                 continue
             if not hasattr(cp, "squadrons"):
                 continue
@@ -189,6 +189,7 @@ class RedforAdaptivePlanner:
     def _counter_cas(self, count: int) -> None:
         """REDFOR detects heavy CAS → sends more armor to frontline bases."""
         from game.transfers import TransferOrder
+        from game.ato.redfor_supply_planner import has_transfer_route
         from datetime import datetime
 
         strength = "heavy" if count >= THRESHOLD_HIGH else "moderate"
@@ -201,7 +202,7 @@ class RedforAdaptivePlanner:
         reinforced = 0
 
         for cp in self.game.theater.controlpoints:
-            if cp.captured or reinforced >= 2:
+            if not cp.captured.is_red or reinforced >= 2:
                 continue
             if not cp.has_active_frontline:
                 continue
@@ -210,7 +211,7 @@ class RedforAdaptivePlanner:
 
             # Find a rear base to send armor from
             for source in self.game.theater.controlpoints:
-                if source.captured or source is cp:
+                if not source.captured.is_red or source is cp:
                     continue
                 if not hasattr(source, "base") or source.base.total_armor < 4:
                     continue
@@ -227,6 +228,8 @@ class RedforAdaptivePlanner:
                         break
 
                 if not units:
+                    continue
+                if not has_transfer_route(self.game, source, cp):
                     continue
 
                 try:
@@ -256,7 +259,7 @@ class RedforAdaptivePlanner:
 
         requested = 0
         for cp in self.game.theater.controlpoints:
-            if cp.captured or requested >= 1:
+            if not cp.captured.is_red or requested >= 1:
                 continue
             if not hasattr(cp, "squadrons"):
                 continue
