@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from .ato.airtaaskingorder import AirTaskingOrder
     from .factions.faction import Faction
     from .navmesh import NavMesh
+    from .procurement import AircraftProcurementRequest
     from .sim import GameUpdateEvents
     from .squadrons import AirWing
     from .threatzones import ThreatZones
@@ -133,6 +134,9 @@ class Game:
         self.laser_code_registry = LaserCodeRegistry()
         self.db = GameDb()
         self.logistics = LogisticsManager()
+        # Aircraft purchase requests from RedforAdaptivePlanner, re-added by
+        # Coalition.initialize_turn() after it clears procurement_requests.
+        self.redfor_pending_procurement_requests: list[AircraftProcurementRequest] = []
 
         if start_time is None:
             self.time_of_day_offset_for_start_time = list(TimeOfDay).index(

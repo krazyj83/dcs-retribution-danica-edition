@@ -191,6 +191,7 @@ class Coalition:
         self.air_wing.reset()
         self.refund_outstanding_orders()
         self.procurement_requests.clear()
+        self.restore_redfor_adaptive_requests()
 
         with logged_duration("Transit network identification"):
             self.update_transit_network()
@@ -202,6 +203,21 @@ class Coalition:
         if not is_turn_0:
             self.plan_missions(self.game.conditions.start_time)
         self.plan_procurement()
+
+    def restore_redfor_adaptive_requests(self) -> None:
+        """Re-add aircraft requests RedforAdaptivePlanner queued last turn.
+
+        The planner runs at the end of a turn; procurement_requests is cleared
+        at the start of the next one, before procurement reads it.
+        """
+        if not self.player.is_red:
+            return
+        pending = getattr(self.game, "redfor_pending_procurement_requests", None)
+        if not pending:
+            return
+        for request in pending:
+            self.procurement_requests.add(request)
+        pending.clear()
 
     def refund_outstanding_orders(self) -> None:
         # TODO: Split orders between air and ground units.

@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from game.game import Game
+    from game.procurement import AircraftProcurementRequest
 
 logger = logging.getLogger(__name__)
 
@@ -113,8 +114,13 @@ class RedforAdaptivePlanner:
     # ── Counter-strategies ────────────────────────────────────────────────────
 
     def _counter_sead(self, count: int) -> None:
-        """REDFOR detects heavy SEAD activity → requests more SAM units."""
-        from game.procurement import GroundUnitProcurementRequest
+        """REDFOR detects heavy SEAD activity → buys SHORAD for its front line.
+
+        Orders go straight onto the frontline bases' ground_unit_orders and are
+        paid from Red's budget, the same way ProcurementAi.reinforce_front_line()
+        buys armor. Game.finish_turn() runs ControlPoint.process_turn() right
+        after adapt(), which delivers the orders into base.armor.
+        """
         from game.data.units import UnitClass
 
         strength = "heavy" if count >= THRESHOLD_HIGH else "moderate"
@@ -123,23 +129,32 @@ class RedforAdaptivePlanner:
             strength, count,
         )
 
-        # Find frontline red CPs and request SAM replenishment
-        requested = 0
+        faction_units = self.red.faction.frontline_units
+        candidates = [u for u in faction_units if u.unit_class is UnitClass.SHORAD]
+        if not candidates:
+            candidates = [u for u in faction_units if u.unit_class is UnitClass.AAA]
+        if not candidates:
+            logger.debug("RedforAdaptivePlanner: faction has no SHORAD/AAA units")
+            return
+
+        ordered = 0
         for cp in self.game.theater.controlpoints:
+            if ordered >= 2:
+                break
             if not cp.captured.is_red or not cp.has_active_frontline:
                 continue
-            if requested >= 2:
+            affordable = [u for u in candidates if u.price <= self.red.budget]
+            if not affordable:
+                logger.debug("RedforAdaptivePlanner: no budget left for SHORAD")
                 break
-            try:
-                self.red.procurement_requests.add(
-                    GroundUnitProcurementRequest(cp, [UnitClass.SHORAD], 1)
-                )
-                requested += 1
-                logger.debug(
-                    "RedforAdaptivePlanner: requested SHORAD unit at %s", cp.name
-                )
-            except Exception as e:
-                logger.debug("RedforAdaptivePlanner: SHORAD request failed: %s", e)
+            unit = min(affordable, key=lambda u: u.price)
+            self.red.adjust_budget(-unit.price)
+            cp.ground_unit_orders.order({unit: 1})
+            ordered += 1
+            logger.info(
+                "RedforAdaptivePlanner: ordered %s for %s (%dM)",
+                unit, cp.name, unit.price,
+            )
 
     def _counter_bai(self, count: int) -> None:
         """REDFOR detects heavy BAI → signals convoy planner to add SHORAD escort."""
@@ -172,7 +187,7 @@ class RedforAdaptivePlanner:
             for squadron in cp.squadrons:
                 if squadron.can_auto_assign(FlightType.BARCAP):
                     try:
-                        self.red.procurement_requests.add(
+                        self._queue_request(
                             AircraftProcurementRequest(cp, FlightType.BARCAP, 2)
                         )
                         requested += 1
@@ -266,7 +281,7 @@ class RedforAdaptivePlanner:
             for squadron in cp.squadrons:
                 if squadron.can_auto_assign(FlightType.TARCAP):
                     try:
-                        self.red.procurement_requests.add(
+                        self._queue_request(
                             AircraftProcurementRequest(cp, FlightType.TARCAP, 2)
                         )
                         requested += 1
@@ -279,6 +294,19 @@ class RedforAdaptivePlanner:
                         logger.debug(
                             "RedforAdaptivePlanner: TARCAP request failed: %s", e
                         )
+
+    def _queue_request(self, request: AircraftProcurementRequest) -> None:
+        """Hold a purchase request until Red's next procurement pass.
+
+        adapt() runs at the end of a turn, but Coalition.initialize_turn()
+        clears procurement_requests before buying, so adding them directly
+        had no effect. initialize_turn() re-adds these after that clear.
+        """
+        queue = getattr(self.game, "redfor_pending_procurement_requests", None)
+        if queue is None:
+            queue = []
+            self.game.redfor_pending_procurement_requests = queue
+        queue.append(request)
 
     def _is_enabled(self) -> bool:
         settings = getattr(self.game, "settings", None)
