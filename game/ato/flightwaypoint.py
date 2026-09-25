@@ -55,6 +55,17 @@ class FlightWaypoint:
     def y(self) -> float:
         return self.position.y
 
+    @property
+    def display_name(self) -> str:
+        """User-facing waypoint name (used by the DTC cartridges).
+
+        Upstream (#695) adds a player-editable ``custom_name`` and returns
+        ``custom_name or pretty_name``. This fork has no waypoint renaming yet,
+        so it is the auto ``pretty_name`` — the same value upstream returns for
+        a waypoint nobody renamed.
+        """
+        return self.pretty_name
+
     def __hash__(self) -> int:
         return hash(id(self))
 
