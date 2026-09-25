@@ -9,9 +9,11 @@ Sections emitted (schema mined from ``CoreMods/aircraft/FA-18C/DTC``):
   sequence with per-leg altitude/speed/ETA, and ``NAV_SETTINGS`` that auto-tune
   the recovery TACAN / ICLS / ACLS from the carrier's card and the FPAS home
   waypoint.
-* ``SA`` -- FLOT line(s) from the live front; the flight's OWN orbit as the
+* ``SA`` -- the front lines chained into one continuous boundary across the
+  FLOT lines; the flight's OWN orbit as the
   first, pre-selected CAP_PTS racetrack (its patrol track, or a stand-in at
-  the hold point) followed by the tanker/AEW&C orbits; and enemy SAM rings
+  the hold point) followed by the tanker/AEW&C orbits; the tanker orbits as
+  FAOR boxes, nearest to the target first; and enemy SAM rings
   as MEZ threats ("Custom" type; radius NM).
 * ``TCN`` -- deliberately empty in v1 (the boat's TACAN already auto-tunes via
   NAV_SETTINGS; a stations list needs channel->frequency pairing, deferred).
@@ -29,7 +31,8 @@ from game.missiongenerator.dtc.common import (
     SupportTrack,
     leg_altitude,
     steerpoint_altitude,
-    flot_segments,
+    red_land_boundary,
+    support_boxes,
     is_route_waypoint,
     is_target_waypoint,
     known_enemy_threat_sites,
@@ -52,6 +55,9 @@ MAX_WAYPOINTS = 59
 MAX_CAP_POINTS = 9
 MAX_LINE_POINTS = 7
 MAX_FLOT_LINES = 3
+#: The SA page draws only the SELECTED CAP point's racetrack, and only FAOR
+#: line 1, so line 1 is the tanker nearest the target.
+MAX_FAOR_LINES = 3
 MAX_MEZ_THREATS = 40
 
 #: CAP racetrack orbit diameter (the ME default, 5 NM).
@@ -105,6 +111,7 @@ def _build_wypt(
     home_wypt = 1
     aa_wypt: Optional[int] = None
     route_order = 0
+    target_flagged = False
     prev_route_wp = None
     # The kneeboard numbers the flight plan from 0 (row 0 = takeoff/spawn).
     # Skip that row so the jet's STPT n IS the kneeboard's waypoint n — the
@@ -144,8 +151,10 @@ def _build_wypt(
                 "speed": leg_speed_kmh(prev_route_wp, waypoint),
                 "ETA": seconds_of_day(game, waypoint.tot),
                 "FIX_Time": waypoint.tot is not None,
-                "TGT": is_target_waypoint(waypoint),
+                # One TGT per sequence (ROUTE_SEQ.lua): the first target.
+                "TGT": is_target_waypoint(waypoint) and not target_flagged,
             }
+            target_flagged = target_flagged or is_target_waypoint(waypoint)
             prev_route_wp = waypoint
         nav_pts.append(entry)
         if "LANDING" in waypoint.waypoint_type.name:
@@ -280,7 +289,7 @@ def _build_sa(
 
     flot_lines: list[dict[str, Any]] = []
     if options.flot_and_zones:
-        for name, points in flot_segments(game)[:MAX_FLOT_LINES]:
+        for name, points in red_land_boundary(game, MAX_FLOT_LINES, MAX_LINE_POINTS):
             line_num = len(flot_lines) + 1
             flot_lines.append(
                 {
@@ -288,6 +297,19 @@ def _build_sa(
                     "num": line_num,
                     "note": name,
                     "points": _line_points("FLOT", line_num, points),
+                }
+            )
+
+    faor_lines: list[dict[str, Any]] = []
+    if options.friendly_orbits:
+        for callsign, points in support_boxes(mission_data, MAX_FAOR_LINES, flight):
+            line_num = len(faor_lines) + 1
+            faor_lines.append(
+                {
+                    "id": f"FAOR_{line_num}",
+                    "num": line_num,
+                    "note": callsign,
+                    "points": _line_points("FAOR", line_num, points),
                 }
             )
 
@@ -311,7 +333,7 @@ def _build_sa(
     return {
         "CAP_PTS": caps,
         "CORRIDORS": [],
-        "FAOR_FLOT": {"FAOR": [], "FLOT": flot_lines},
+        "FAOR_FLOT": {"FAOR": faor_lines, "FLOT": flot_lines},
         "MEZ_THRTS": threats,
         "SETTINGS": _sa_settings(),
         "Default_CAP_Point": default_cap_point,

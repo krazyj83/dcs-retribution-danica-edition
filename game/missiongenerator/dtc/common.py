@@ -139,7 +139,6 @@ def steerpoint_altitude(waypoint: FlightWaypoint) -> float:
     first: a Viper flown with ``alt`` 131 ft and ``routeAltitude`` 22,000 ft
     read ELEV 131 on the DED. Without a cartridge the jet takes ELEV from the
     mission-editor waypoint altitude, so the mirror carries the same number.
-
     The generator has no terrain height source, so a point the .miz puts on
     the deck (a client flight's flyover waypoints) or plans AGL reads 0 here;
     the route entry keeps its AGL encoding for the DTC Manager.
@@ -305,6 +304,157 @@ def flot_segments(game: Game) -> list[tuple[str, list[tuple[float, float]]]]:
         )
         segments.append((front_line.name, [(start.x, start.y), (end.x, end.y)]))
     return segments
+
+
+#: A support orbit's turn diameter, matching the Hornet SA page's own CAP
+#: racetrack. The box is the racetrack's footprint: the straight legs plus the
+#: room the turns need at each end.
+SUPPORT_ORBIT_DIAMETER_M = 5 * 1852.0
+
+#: Corners plus the repeat that closes the figure. No display auto-closes a
+#: line: the Hornet's FAOR and the Viper's GEO sets both draw segments between
+#: consecutive points and stop.
+SUPPORT_BOX_POINTS = 5
+
+
+def _reference_point(flight: FlightData) -> Optional[Point]:
+    """The flight's target, else its last waypoint: what "nearest" is measured from."""
+    for waypoint in flight.waypoints:
+        if is_target_waypoint(waypoint):
+            return waypoint.position
+    return flight.waypoints[-1].position if flight.waypoints else None
+
+
+def nearest_tanker_tracks(
+    flight: FlightData, mission_data: MissionData
+) -> list[SupportTrack]:
+    """The tanker orbits, nearest to the flight's target first.
+
+    The Hornet's SA page draws only FAOR line 1, so line 1 is the tanker nearest
+    the fight. No boom/probe filter: nothing in the game records which tanker a
+    jet can take gas from. The AWACS never gets a box.
+    """
+    tankers = [track for track in support_tracks(mission_data) if track.kind == "TKR"]
+    reference = _reference_point(flight)
+    if reference is not None:
+        tankers.sort(key=lambda t: math.dist(t.center, (reference.x, reference.y)))
+    return tankers
+
+
+def support_boxes(
+    mission_data: MissionData, max_boxes: int, flight: Optional[FlightData] = None
+) -> list[tuple[str, list[tuple[float, float]]]]:
+    """Each tanker orbit as a closed box, (callsign, 5 points).
+
+    The orbits already ride the jets as points, but on the Hornet's SA page only
+    the SELECTED CAP point draws its racetrack, so the gas is invisible until you
+    go looking for it. With ``flight`` given the boxes are
+    :func:`nearest_tanker_tracks`; without it, every support orbit.
+    """
+    boxes: list[tuple[str, list[tuple[float, float]]]] = []
+    tracks = (
+        nearest_tanker_tracks(flight, mission_data)
+        if flight is not None
+        else support_tracks(mission_data)
+    )
+    for track in tracks[:max_boxes]:
+        half_width = SUPPORT_ORBIT_DIAMETER_M / 2
+        half_length = track.length_m / 2 + half_width
+        course = math.radians(track.course)
+        # DCS x is north, y east, and `bearing_degrees` is a compass bearing.
+        along = (math.cos(course), math.sin(course))
+        across = (-math.sin(course), math.cos(course))
+        centre_x, centre_y = track.center
+        corners = [
+            (
+                centre_x + along[0] * length + across[0] * width,
+                centre_y + along[1] * length + across[1] * width,
+            )
+            for length, width in (
+                (half_length, half_width),
+                (half_length, -half_width),
+                (-half_length, -half_width),
+                (-half_length, half_width),
+            )
+        ]
+        boxes.append((track.callsign, corners + [corners[0]]))
+    return boxes
+
+
+def _chain_bars(bars: list[list[tuple[float, float]]]) -> list[tuple[float, float]]:
+    """Order and orient the front bars into one continuous trace.
+
+    A theater's fronts are separate bars with uncontested border between them.
+    The gaps are joined straight: nothing in the campaign model says where an
+    unopposed border runs, and a straight join cannot invent a salient.
+    """
+    if not bars:
+        return []
+    remaining = list(bars)
+    # Start from the endpoint farthest from the set's centroid, so the chain
+    # runs across the theater instead of outward from its middle.
+    ends = [point for bar in remaining for point in (bar[0], bar[-1])]
+    centroid = (
+        sum(x for x, _ in ends) / len(ends),
+        sum(y for _, y in ends) / len(ends),
+    )
+    first = max(
+        remaining,
+        key=lambda bar: max(math.dist(bar[0], centroid), math.dist(bar[-1], centroid)),
+    )
+    remaining.remove(first)
+    if math.dist(first[-1], centroid) > math.dist(first[0], centroid):
+        first = first[::-1]
+    chain = list(first)
+    while remaining:
+        tail = chain[-1]
+        best = min(
+            remaining,
+            key=lambda bar: min(math.dist(tail, bar[0]), math.dist(tail, bar[-1])),
+        )
+        remaining.remove(best)
+        if math.dist(tail, best[-1]) < math.dist(tail, best[0]):
+            best = best[::-1]
+        chain.extend(best)
+    return chain
+
+
+def _decimate_open(
+    points: list[tuple[float, float]], max_points: int
+) -> list[tuple[float, float]]:
+    """Thin an open polyline to `max_points`, keeping both ends."""
+    if max_points < 2 or len(points) <= max_points:
+        return points
+    step = (len(points) - 1) / (max_points - 1)
+    kept = [points[round(index * step)] for index in range(max_points)]
+    kept[-1] = points[-1]
+    return kept
+
+
+def red_land_boundary(
+    game: Game, max_lines: int, max_points_per_line: int
+) -> list[tuple[str, list[tuple[float, float]]]]:
+    """The land boundary with red, as runs fitting the display's line budget.
+
+    One continuous trace, not a front per line: the pilot reads which side of
+    the line is hostile, and disconnected stubs cannot say it. Consecutive runs
+    repeat the vertex they meet on, so the display draws them as one line.
+    """
+    bars = [points for _, points in flot_segments(game) if len(points) >= 2]
+    chain = _chain_bars(bars)
+    if len(chain) < 2:
+        return []
+    # The repeated meeting vertices come out of the budget.
+    budget = max_lines * max_points_per_line - (max_lines - 1)
+    chain = _decimate_open(chain, budget)
+    runs: list[list[tuple[float, float]]] = []
+    index = 0
+    while index < len(chain) - 1 and len(runs) < max_lines:
+        runs.append(chain[index : index + max_points_per_line])
+        index += max_points_per_line - 1
+    if len(runs) == 1:
+        return [("FLOT", runs[0])]
+    return [(f"FLOT {n}", points) for n, points in enumerate(runs, start=1)]
 
 
 @dataclass(frozen=True)

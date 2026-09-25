@@ -10,11 +10,12 @@ Sections emitted (schema mined from ``CoreMods/aircraft/F-16C/DTC``):
   labelled in ``note`` -- the DTC Manager's reference label, which the jet does
   not upload (F-16C manual, NAV RTE tab); the flight route first, then the
   flight's OWN orbit (racetrack or hold point) and the tanker / AEW&C anchors as
-  extra steerpoints (the jet has no orbit element). The editor caps the list at
-  25 and the jet auto-sequences only 1-20, so the route takes 1-20 and anchors
-  21-25.
-* ``MPD.GEO_LINES`` -- the active front lines (FLOT) as up to 4 line sets on
-  the HSD, capped at the partition's 25 points.
+  extra steerpoints (the jet has no orbit element). The jet auto-sequences
+  only 1-20 and reserves 25 for the bullseye, so the route takes 1-20 and
+  anchors 21-24.
+* ``MPD.GEO_LINES`` -- the front lines chained into one continuous boundary on
+  line set L1, and a box around each tanker orbit on L2-L4, nearest to the
+  target first. The four sets share the partition's 25 points.
 * ``MPD.THREAT_PTS`` -- enemy SAM rings ("Custom" type, radius in meters,
   <= 15).
 * ``MPD.DEST`` -- friendly recovery fields as Destination steerpoints 81-99,
@@ -31,7 +32,9 @@ from game.missiongenerator.dtc.common import (
     SupportTrack,
     leg_altitude,
     steerpoint_altitude,
-    flot_segments,
+    SUPPORT_BOX_POINTS,
+    red_land_boundary,
+    support_boxes,
     is_route_waypoint,
     is_target_waypoint,
     known_enemy_threat_sites,
@@ -50,9 +53,11 @@ if TYPE_CHECKING:
 
 VIPER_UNIT_TYPE = "F-16C_50"
 
-MAX_STEERPOINTS = 25
+#: STPT 25 is the jet's bullseye, "automatically configured as such when a
+#: mission is loaded" (F-16C EA guide p325); a 25th nav point overwrites it.
+MAX_STEERPOINTS = 24
 #: The jet auto-sequences only from STPT 1-20 (EA guide p223), so the flown
-#: route stops there and the support anchors take 21-25.
+#: route stops there and the support anchors take 21-24.
 MAX_ROUTE_STEERPOINTS = 20
 MAX_GEO_LINE_SETS = 4
 #: GEO_LINES owns steerpoints 31-55: ``GEO_LINES.lua`` refuses a 26th point,
@@ -286,10 +291,26 @@ def _build_nav_pts(
     return points
 
 
-def _build_geo_lines(game: Game) -> list[dict[str, Any]]:
-    """FLOT boundaries across the HSD's four line sets."""
+def _build_geo_lines(
+    game: Game, mission_data: MissionData, flight: FlightData
+) -> list[dict[str, Any]]:
+    """The boundary with red on L1, tanker boxes on L2-L4.
+
+    A box keeps all five points and the boundary takes what is left, so three
+    boxes thin the boundary to 10 points rather than cost a box a corner.
+    """
+    options = flight.dtc_options
     line_sets: list[tuple[str, list[tuple[float, float]]]] = []
-    line_sets.extend(flot_segments(game))
+    boxes = (
+        support_boxes(mission_data, MAX_GEO_LINE_SETS - 1, flight)
+        if options.friendly_orbits
+        else []
+    )
+    if options.flot_and_zones:
+        boundary_budget = MAX_GEO_POINTS - len(boxes) * SUPPORT_BOX_POINTS
+        if boundary_budget >= 2:
+            line_sets.extend(red_land_boundary(game, 1, boundary_budget))
+    line_sets.extend(boxes)
     geo_points: list[dict[str, Any]] = []
     for set_index, (name, points) in enumerate(line_sets[:MAX_GEO_LINE_SETS]):
         flags = {f"L{i}": i == set_index + 1 for i in range(1, 5)}
@@ -356,7 +377,7 @@ def build_viper_cartridge(
             "mirror_NAV_PTS": False,
             "NAV_PTS": _build_nav_pts(flight, mission_data, game),
             "mirror_GEO_LINES": False,
-            "GEO_LINES": _build_geo_lines(game) if options.flot_and_zones else [],
+            "GEO_LINES": _build_geo_lines(game, mission_data, flight),
             "mirror_THREAT_PTS": False,
             "THREAT_PTS": (
                 _build_threat_pts(flight, game) if options.threat_rings else []
