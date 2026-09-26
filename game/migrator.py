@@ -13,7 +13,7 @@ from game.ato.flightplans.waypointbuilder import WaypointBuilder
 from game.ato.packagewaypoints import PackageWaypoints
 from game.data.doctrine import MODERN_DOCTRINE, COLDWAR_DOCTRINE, WWII_DOCTRINE
 from game.theater import ParkingType, SeasonalConditions, Airfield
-from game.theater.theatergroundobject import TheaterGroundObject
+from game.theater.theatergroundobject import ShipGroundObject, TheaterGroundObject
 
 if TYPE_CHECKING:
     from game import Game
@@ -264,6 +264,11 @@ class Migrator:
         for go in self.game.theater.ground_objects:
             try_set_attr(go, "task", None)
             try_set_attr(go, "hide_on_mfd", False)
+            # Movable-ship state added after some saves were written; pickle
+            # bypasses __init__, so back-fill it or finish_turn's movement pass
+            # raises AttributeError on pre-feature saves.
+            if isinstance(go, ShipGroundObject):
+                try_set_attr(go, "target_position", None)
 
     def _ensure_motorpool_tgos(self) -> None:
         from game.data.groups import GroupTask
