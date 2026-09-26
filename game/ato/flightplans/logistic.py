@@ -4,35 +4,71 @@ game/ato/flightplans/logistic.py
 Flight plan for a LOGISTIC warehouse-resupply mission.
 
 Route shape is identical to AirliftFlightPlan:
-  Depart -> Pickup (load supplies) -> Dropoff (unload) -> RTB
+  Depart -> Pickup (source warehouse) -> Dropoff (destination) -> RTB
 
-The Lua plugin (logistic_supply.lua) handles DCS warehouse transfers
-when the aircraft lands at each stop. Works for player and AI, both
-BLUEFOR and REDFOR.
-
-Why AirliftFlightPlan and not TransportFlightPlan?
-transport.py does not exist in this codebase. AirliftFlightPlan in
-airlift.py is the concrete transport flight plan used by TRANSPORT,
-and is the correct base for LOGISTIC too since the route is identical.
+The difference is where the stops come from. An airlift reads them from
+``flight.cargo``, a unit TransferOrder. A LOGISTIC flight carries supplies, not
+units, so it must NOT set ``flight.cargo`` (that would register it as a unit
+airlift and the results processor would try to move ground units). Instead the
+flight carries ``flight.transfer_id``, and the stops come from that warehouse
+transfer: its source base and destination base.
 """
+
 from __future__ import annotations
 
-from game.ato.flightplans.airlift import AirliftFlightPlan
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Type
+
+from dcs import Point
+
+from game.ato.flightplans.airlift import (
+    AirliftFlightPlan,
+    Builder as AirliftBuilder,
+    CargoStops,
+)
+from game.ato.flightplans.planningerror import PlanningError
+
+if TYPE_CHECKING:
+    from game.theater import ControlPoint
+
+
+@dataclass(frozen=True)
+class LogisticStops:
+    origin: ControlPoint
+    next_stop: ControlPoint
+
+
+class Builder(AirliftBuilder):
+    def cargo_stops(self) -> CargoStops:
+        transfer_id = self.flight.transfer_id
+        if transfer_id is None:
+            raise PlanningError("LOGISTIC flight has no warehouse transfer.")
+        game = self.flight.coalition.game
+        transfer = game.logistics._transfers.get(transfer_id)
+        if transfer is None:
+            raise PlanningError(f"Warehouse transfer {transfer_id} not found.")
+        try:
+            origin = game.theater.find_control_point_by_id(transfer.source_cp_id)  # type: ignore[arg-type]
+            destination = game.theater.find_control_point_by_id(transfer.dest_cp_id)  # type: ignore[arg-type]
+        except KeyError as ex:
+            raise PlanningError(str(ex)) from ex
+        return LogisticStops(origin, destination)
+
+    # Helicopter airlifts add CTLD pickup/drop-off zones, which only exist at
+    # CTLD-capable points. Supplies are loaded and unloaded at the bases.
+    def _generate_ctld_pickup(self) -> Point:
+        return self.cargo_stops().origin.position
+
+    def _generate_ctld_dropoff(self) -> Point:
+        return self.cargo_stops().next_stop.position
+
+    def build(self, dump_debug_info: bool = False) -> LogisticFlightPlan:
+        return LogisticFlightPlan(self.flight, self.layout())
 
 
 class LogisticFlightPlan(AirliftFlightPlan):
-    """
-    Flight plan for a LOGISTIC resupply mission.
+    """Flight plan for a LOGISTIC resupply mission (see module docstring)."""
 
-    Route shape is identical to Transport/Airlift. The distinction is:
-      - Transport moves *units* (troops, vehicles)
-      - Logistic moves *supplies* (fuel, ammo) via DCS warehouse API
-
-    All waypoint generation, timing, TOT calculation, and ROE settings
-    are inherited from AirliftFlightPlan -- nothing needs overriding yet.
-
-    If you later want logistic flights to use different cruise altitude
-    or speed from airlift, override cruise_speed() and cruise_altitude()
-    here following the pattern in other FlightPlan subclasses.
-    """
-    pass
+    @staticmethod
+    def builder_type() -> Type[Builder]:
+        return Builder

@@ -4,7 +4,7 @@ import random
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Protocol
 from typing import TYPE_CHECKING, Type
 
 from game.theater.missiontarget import MissionTarget
@@ -20,6 +20,7 @@ from ...theater.interfaces.CTLD import CTLD
 if TYPE_CHECKING:
     from ..flightwaypoint import FlightWaypoint
     from dcs import Point
+    from game.theater import ControlPoint
 
 
 @dataclass
@@ -125,13 +126,31 @@ class AirliftFlightPlan(StandardFlightPlan[AirliftLayout]):
         return self.package.time_over_target
 
 
+class CargoStops(Protocol):
+    """Where a transport flight picks up and drops off.
+
+    A unit TransferOrder satisfies this; LogisticFlightPlan supplies its own for
+    warehouse transfers, which carry supplies rather than units.
+    """
+
+    @property
+    def origin(self) -> ControlPoint: ...
+
+    @property
+    def next_stop(self) -> ControlPoint: ...
+
+
 class Builder(IBuilder[AirliftFlightPlan, AirliftLayout]):
-    def layout(self) -> AirliftLayout:
+    def cargo_stops(self) -> CargoStops:
         cargo = self.flight.cargo
         if cargo is None:
             raise PlanningError(
                 "Cannot plan transport mission for flight with no cargo."
             )
+        return cargo
+
+    def layout(self) -> AirliftLayout:
+        cargo = self.cargo_stops()
 
         builder = WaypointBuilder(self.flight)
 

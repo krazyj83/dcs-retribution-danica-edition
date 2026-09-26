@@ -199,6 +199,17 @@ class Coalition:
             self.transfers.order_airlift_assets()
         with logged_duration("Transport planning"):
             self.transfers.plan_transports(self.game.conditions.start_time)
+        if self.player.is_blue:
+            # Before plan_missions(), so warehouse transfers get first call on
+            # transport aircraft.
+            with logged_duration("Warehouse transfer flights"):
+                from game.logistics.transfer_flights import (
+                    plan_pending_transfer_flights,
+                )
+
+                plan_pending_transfer_flights(
+                    self.game, self.game.conditions.start_time
+                )
 
         if not is_turn_0:
             self.plan_missions(self.game.conditions.start_time)

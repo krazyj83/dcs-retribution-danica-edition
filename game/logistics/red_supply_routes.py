@@ -8,6 +8,7 @@ Each red CP is connected to its nearest red neighbours (up to MAX_NEIGHBOURS)
 within MAX_DISTANCE_KM. Routes are straight-line; spawn points are interpolated
 at 100ft intervals from the CP position toward the destination.
 """
+
 from __future__ import annotations
 
 import logging
@@ -20,9 +21,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ── Tuneable constants ────────────────────────────────────────────────────────
-MAX_NEIGHBOURS: int = 3        # Max red neighbours each CP connects to
-MAX_DISTANCE_KM: float = 250   # Only connect CPs within this range (km)
-SPAWN_DEPTH_M: float = 500     # How far from the CP to generate spawn points
+MAX_NEIGHBOURS: int = 3  # Max red neighbours each CP connects to
+MAX_DISTANCE_KM: float = 250  # Only connect CPs within this range (km)
+SPAWN_DEPTH_M: float = 500  # How far from the CP to generate spawn points
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -55,7 +56,20 @@ def auto_generate_red_supply_routes(theater: "ConflictTheater") -> None:
     so it runs after any manual blue routes have already been registered.
     """
     # Collect all red CPs
-    red_cps = [cp for cp in theater.controlpoints if cp.captured.is_red]
+    # Runs while the campaign .miz is being loaded, before Game.finish_init()
+    # gives control points a coalition, so ``cp.captured`` would raise here.
+    # ``starting_coalition`` is the owner the campaign defines.
+    # Ground convoys only: ships (carriers, LHAs) are not road nodes, and the
+    # game may remove them after loading (e.g. a faction without an LHA),
+    # which would leave a route pointing at a control point that no longer
+    # exists and crash turn 0.
+    red_cps = [
+        cp
+        for cp in theater.controlpoints
+        if cp.starting_coalition.is_red
+        and cp.can_deploy_ground_units
+        and not cp.is_fleet
+    ]
 
     if not red_cps:
         logger.debug("No red control points found; skipping auto supply routes.")

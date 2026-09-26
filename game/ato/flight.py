@@ -81,6 +81,8 @@ class Flight(
 
         self.start_type = start_type
         self.custom_name = custom_name
+        # Warehouse transfer this LOGISTIC flight carries (game.logistics), if any.
+        self.transfer_id: Optional[str] = None
         self.group_id: int = 0
 
         self.frequency = frequency
@@ -170,6 +172,7 @@ class Flight(
         state["state"] = Uninitialized(self, state["squadron"].settings)
         if "use_same_loadout_for_all_members" not in state:
             state["use_same_loadout_for_all_members"] = True
+        state.setdefault("transfer_id", None)
         self.__dict__.update(state)
         if isinstance(self.roster, FlightRoster):
             self.roster = FlightMembers.from_roster(self, self.roster)

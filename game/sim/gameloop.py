@@ -72,18 +72,17 @@ class GameLoop:
             self.start()
 
         # ----------------------------------------------------------------
-        # Logistics hook A — notify the logistics manager that the turn
-        # is ending so it can:
-        #   - move PLANNED transfers → IN_FLIGHT (stock consumed at source)
-        #   - apply warehouse spoilage (fuel evaporation etc.)
-        # This must run BEFORE generate_miz so the mission generator can
-        # see which transfers are now IN_FLIGHT and spawn their flights.
+        # Logistics hook A — the mission is about to be generated:
+        #   - warehouse transfers whose LOGISTIC flight is in the ATO go
+        #     PLANNED → IN_FLIGHT (stock already left the source when the
+        #     transfer was scheduled)
+        #   - once-per-turn warehouse attrition
+        # Runs BEFORE generate_miz so LogisticsMissionGenerator sees the
+        # IN_FLIGHT transfers.
         # ----------------------------------------------------------------
         if hasattr(self.game, "logistics"):
             try:
-                self.game.logistics.on_turn_end(
-                    current_turn=self.game.turn
-                )
+                self.game.logistics.on_turn_end(self.game)
                 logging.info(
                     "Logistics: on_turn_end completed for turn %d",
                     self.game.turn,
@@ -105,27 +104,17 @@ class GameLoop:
         self.sim.process_results(debriefing, self.events)
 
         # ----------------------------------------------------------------
-        # Logistics hook C — process delivery results from state.json.
-        # By the time process_results() has finished, the debriefing object
-        # holds everything that happened in DCS (units destroyed, bases
-        # captured, and — once the Lua script is in place — logistics events).
-        #
-        # debriefing.state_data is the raw dict parsed from state.json.
-        # We pass it to on_state_processed so the logistics manager can:
-        #   - mark IN_FLIGHT transfers as DELIVERED or FAILED
-        #   - credit delivered stock to destination warehouses
-        #   - release reservations for failed transfers
+        # Logistics hook C — settle IN_FLIGHT warehouse transfers from the
+        # mission results (after captures are committed, before pass_turn()
+        # clears the ATO): flight shot down or base lost → FAILED; otherwise
+        # DELIVERED, with any overflow returned to the source warehouse.
         # ----------------------------------------------------------------
         if hasattr(self.game, "logistics"):
             try:
-                # state_data holds the parsed state.json dict.
-                # Fall back to an empty dict if the attribute doesn't exist
-                # yet (e.g. older debriefing objects from before this feature).
-                state_dict = getattr(debriefing, "state_data", {}) or {}
-                self.game.logistics.on_state_processed(
-                    state=state_dict,
-                    current_turn=self.game.turn,
-                )
+                for line in self.game.logistics.on_state_processed(
+                    self.game, debriefing
+                ):
+                    logging.info("Logistics: %s", line)
                 logging.info(
                     "Logistics: on_state_processed completed for turn %d",
                     self.game.turn,

@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         ConvoyUnit,
         FlyingUnit,
         FrontLineUnit,
+        PlayerDrawnConvoyUnit,
         TheaterUnitMapping,
         UnitMap,
         SceneryObjectMapping,
@@ -70,6 +71,9 @@ class GroundLosses:
 
     player_convoy: List[ConvoyUnit] = field(default_factory=list)
     enemy_convoy: List[ConvoyUnit] = field(default_factory=list)
+
+    #: Convoys drawn by the player on the map (always blue).
+    player_drawn_convoy: List[PlayerDrawnConvoyUnit] = field(default_factory=list)
 
     player_cargo_ships: List[CargoShip] = field(default_factory=list)
     enemy_cargo_ships: List[CargoShip] = field(default_factory=list)
@@ -163,7 +167,7 @@ class Debriefing:
         self.player_country = game.blue.faction.country.name
         self.enemy_country = game.red.faction.country.name
 
-        self.air_losses = self.dead_aircraft()
+        self.air_losses: AirLosses = self.dead_aircraft()
         self.ground_losses = self.dead_ground_units()
         self.base_captures = self.base_capture_events()
 
@@ -183,6 +187,10 @@ class Debriefing:
     def motorpool_losses(self) -> Iterator[FrontLineUnit]:
         yield from self.ground_losses.player_motorpool
         yield from self.ground_losses.enemy_motorpool
+
+    @property
+    def player_drawn_convoy_losses(self) -> Iterator[PlayerDrawnConvoyUnit]:
+        yield from self.ground_losses.player_drawn_convoy
 
     @property
     def convoy_losses(self) -> Iterator[ConvoyUnit]:
@@ -235,6 +243,15 @@ class Debriefing:
             losses = self.ground_losses.enemy_motorpool
         for loss in losses:
             losses_by_type[loss.unit_type] += 1
+        return losses_by_type
+
+    def player_drawn_convoy_losses_by_type(
+        self, player: Player
+    ) -> dict[GroundUnitType, int]:
+        losses_by_type: dict[GroundUnitType, int] = defaultdict(int)
+        if player.is_blue:
+            for loss in self.ground_losses.player_drawn_convoy:
+                losses_by_type[loss.unit_type] += 1
         return losses_by_type
 
     def convoy_losses_by_type(self, player: Player) -> dict[GroundUnitType, int]:
@@ -320,6 +337,11 @@ class Debriefing:
                     losses.player_motorpool.append(motorpool_unit)
                 else:
                     losses.enemy_motorpool.append(motorpool_unit)
+                continue
+
+            drawn_convoy_unit = self.unit_map.player_drawn_convoy_unit(unit_name)
+            if drawn_convoy_unit is not None:
+                losses.player_drawn_convoy.append(drawn_convoy_unit)
                 continue
 
             convoy_unit = self.unit_map.convoy_unit(unit_name)

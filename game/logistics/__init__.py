@@ -9,6 +9,7 @@ from game.logistics.custom_airdrop import CustomAirdropTarget, create_custom_air
 
 if TYPE_CHECKING:
     from game import Game
+    from game.debriefing import Debriefing
 
 # ======================================================================
 # Drop Zones
@@ -297,12 +298,18 @@ class LogisticsTransfer:
 
 class LogisticsManager:
 
+    #: Fraction of every warehouse category lost each turn (handling, spoilage).
+    ATTRITION_PER_TURN = 0.01
+
     def __init__(self) -> None:
         self._drop_zones:         Dict[str, DropZone]         = {}
         self._warehouses:         Dict[int, Warehouse]         = {}
         self._weapon_inventories: Dict[int, WeaponInventory]   = {}
         self._transfers:          Dict[str, LogisticsTransfer] = {}
         self._main_base_cp_id:    Optional[int]                = None
+        #: Last turn attrition was applied, so regenerating a mission doesn't
+        #: apply it twice.
+        self._last_attrition_turn: Optional[int]                = None
 
     # ── Drop zones ─────────────────────────────────────────────────────
 
@@ -556,6 +563,95 @@ class LogisticsManager:
         )
         self._transfers[transfer.transfer_id] = transfer
         return transfer
+
+    # ── Turn hooks (called from game/sim/gameloop.py) ─────────────────
+
+    def on_turn_end(self, game: "Game") -> None:
+        """Mission is being generated: transfers with a flight go IN_FLIGHT.
+
+        Also applies once-per-turn warehouse attrition. Called every time the
+        mission is (re)generated, so both steps are idempotent within a turn.
+        """
+        from game.logistics.transfer_flights import flight_for_transfer
+
+        if getattr(self, "_last_attrition_turn", None) != game.turn:
+            self._last_attrition_turn = game.turn
+            for wh in self._warehouses.values():
+                for item in wh.stock.values():
+                    item.apply_consumption(item.quantity * self.ATTRITION_PER_TURN)
+
+        for t in self._transfers.values():
+            if t.status is TransferStatus.PLANNED and flight_for_transfer(
+                game, t.transfer_id
+            ):
+                t.mark_in_flight()
+
+    def on_state_processed(
+        self, game: "Game", debriefing: "Debriefing"
+    ) -> List[str]:
+        """Settle IN_FLIGHT transfers from the mission results.
+
+        - Every aircraft of the flight lost: FAILED, cargo lost.
+        - Source or destination no longer friendly: FAILED, cargo lost.
+        - Otherwise DELIVERED: what fits goes into the destination warehouse,
+          the overflow returns to the source warehouse.
+        - Flight no longer in the ATO: back to PLANNED, flown next turn.
+
+        Runs after results are committed (captures applied) and before
+        Game.pass_turn() clears the ATO. Returns human-readable log lines.
+        """
+        from game.logistics.transfer_flights import control_point, flight_for_transfer
+        from game.theater.player import Player
+
+        log: List[str] = []
+        for t in self._transfers.values():
+            if t.status is not TransferStatus.IN_FLIGHT:
+                continue
+            label = f"{t.quantity:.0f} {t.category.value}"
+            flight = flight_for_transfer(game, t.transfer_id)
+            if flight is None:
+                t.status = TransferStatus.PLANNED
+                continue
+
+            if debriefing.air_losses.surviving_flight_members(flight) <= 0:
+                t.mark_failed()
+                log.append(f"Transfer {t.transfer_id[:8]}: flight lost, {label} lost")
+                continue
+
+            source = control_point(game, t.source_cp_id)
+            destination = control_point(game, t.dest_cp_id)
+            dest_wh = self._warehouses.get(t.dest_cp_id)
+            if (
+                destination is None
+                or destination.captured is not Player.BLUE
+                or source is None
+                or source.captured is not Player.BLUE
+                or dest_wh is None
+            ):
+                t.mark_failed()
+                log.append(
+                    f"Transfer {t.transfer_id[:8]}: base changed hands, {label} lost"
+                )
+                continue
+
+            item = dest_wh.stock[t.category]
+            delivered = min(t.quantity, max(0.0, item.capacity - item.quantity))
+            item.apply_delivery(delivered)
+            t.mark_delivered(delivered)
+            line = (
+                f"Transfer {t.transfer_id[:8]}: {delivered:.0f} {t.category.value} "
+                f"delivered to {destination.name}"
+            )
+            overflow = t.quantity - delivered
+            if overflow > 0:
+                src_wh = self._warehouses.get(t.source_cp_id)
+                if src_wh is not None:
+                    src_wh.stock[t.category].apply_delivery(overflow)
+                    line += f", {overflow:.0f} returned to {source.name} (no room)"
+                else:
+                    line += f", {overflow:.0f} lost (no room)"
+            log.append(line)
+        return log
 
     def cancel_transfer(self, transfer_id: str) -> bool:
         t = self._transfers.get(transfer_id)

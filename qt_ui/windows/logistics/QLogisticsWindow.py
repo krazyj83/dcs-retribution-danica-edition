@@ -1415,12 +1415,25 @@ class InventoryTab(QWidget):
 class TransfersTab(QWidget):
     transferScheduled = Signal(object)
 
-    def __init__(self, logistics: LogisticsManager, current_turn: int = 0) -> None:
+    def __init__(
+        self, logistics: LogisticsManager, game: Game, current_turn: int = 0
+    ) -> None:
         super().__init__()
         self.logistics = logistics
+        self.game = game
         self.current_turn = current_turn
         self._build_ui()
         self.refresh()
+
+    @staticmethod
+    def _refresh_ato_panel() -> None:
+        """Show added/removed LOGISTIC flights in the main window's ATO list."""
+        try:
+            from game.server import GameContext
+
+            GameContext.get_model().ato_model.replace_from_game(player=True)
+        except Exception:
+            logging.exception("Could not refresh the ATO panel")
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -1437,7 +1450,9 @@ class TransfersTab(QWidget):
         self.tamt_spin.setSingleStep(50.0)
         self.tamt_spin.setDecimals(0)
         self.tamt_spin.setValue(200.0)
-        self.aircraft_edit = QLineEdit("UH-1H")
+        self.aircraft_label = QLabel(
+            "Nearest free transport squadron to the source base (1 aircraft)"
+        )
         self.tnotes_edit = QLineEdit()
         self.tnotes_edit.setPlaceholderText("Optional notes...")
         self.dst_combo.currentIndexChanged.connect(self._on_dst_changed)
@@ -1448,7 +1463,7 @@ class TransfersTab(QWidget):
         sched_layout.addRow("Drop zone:",     self.dz_combo)
         sched_layout.addRow("Category:",      self.tcat_combo)
         sched_layout.addRow("Quantity:",      self.tamt_spin)
-        sched_layout.addRow("Aircraft type:", self.aircraft_edit)
+        sched_layout.addRow("Flown by:",      self.aircraft_label)
         sched_layout.addRow("Notes:",         self.tnotes_edit)
         sched_layout.addRow("",               self.schedule_btn)
         sched_group.setLayout(sched_layout)
@@ -1509,7 +1524,7 @@ class TransfersTab(QWidget):
         dz_id     = self.dz_combo.currentData()
         category  = self.tcat_combo.currentData()
         quantity  = self.tamt_spin.value()
-        aircraft  = self.aircraft_edit.text().strip() or "UH-1H"
+        aircraft  = "pending"  # set to the real type when the flight is planned
         notes     = self.tnotes_edit.text().strip()
         if src_cp_id == dst_cp_id:
             self.sched_status.setText("Source and destination must differ.")
@@ -1524,10 +1539,27 @@ class TransfersTab(QWidget):
         )
         if transfer is None:
             self.sched_status.setText("Insufficient stock at source.")
+            return
+
+        from game.logistics.transfer_flights import plan_transfer_flight
+
+        flight = plan_transfer_flight(
+            self.game, transfer, self.game.conditions.start_time
+        )
+        if flight is not None:
+            self._refresh_ato_panel()
+            self.sched_status.setText(
+                f"Transfer {transfer.transfer_id[:8]} scheduled: {flight.unit_type} "
+                f"from {flight.squadron.location.name} added to the ATO."
+            )
         else:
-            self.sched_status.setText(f"Transfer {transfer.transfer_id[:8]} scheduled.")
-            self.transferScheduled.emit(transfer)
-            self.refresh()
+            self.sched_status.setText(
+                f"Transfer {transfer.transfer_id[:8]} scheduled, but no transport "
+                "aircraft is free this turn. It gets first call on transport "
+                "aircraft next turn."
+            )
+        self.transferScheduled.emit(transfer)
+        self.refresh()
 
     def _on_sel_changed(self) -> None:
         if not self.table.selectedItems():
@@ -1542,7 +1574,13 @@ class TransfersTab(QWidget):
             return
         tid = self.table.item(self.table.currentRow(), 0).data(Qt.ItemDataRole.UserRole)
         if self.logistics.cancel_transfer(tid):
-            self.sched_status.setText(f"Transfer {tid[:8]} cancelled.")
+            from game.logistics.transfer_flights import remove_transfer_flight
+
+            if remove_transfer_flight(self.game, tid):
+                self._refresh_ato_panel()
+            self.sched_status.setText(
+                f"Transfer {tid[:8]} cancelled; stock returned to the source."
+            )
             self.refresh()
 
 
@@ -1679,7 +1717,7 @@ class QLogisticsWindow(QDialog):
         self.dz_tab  = DropZonesTab(logistics, self.game)
         self.wh_tab  = WarehouseTab(logistics, self.game)
         self.inv_tab = InventoryTab(logistics, self.game)
-        self.tr_tab  = TransfersTab(logistics, current_turn=turn)
+        self.tr_tab  = TransfersTab(logistics, self.game, current_turn=turn)
         self.mb_tab  = MainBaseTab(logistics, self.game)
 
         self._tabs.addTab(self.dz_tab,  "Drop Zones")
