@@ -181,6 +181,7 @@ class PackageModel(QAbstractListModel):
     def delete_flight(self, flight: Flight) -> None:
         """Removes the given flight from the package."""
         with self.game_model.sim_controller.paused_sim():
+            self._release_cargo(flight)
             index = self.package.flights.index(flight)
             self.beginRemoveRows(QModelIndex(), index, index)
             self.package.remove_flight(flight)
@@ -188,6 +189,15 @@ class PackageModel(QAbstractListModel):
             self.update_tot()
             self.game_model.release_freq(flight.frequency)
             self.game_model.release_tacan(flight.tacan)
+
+    def _release_cargo(self, flight: Flight) -> None:
+        """A deleted LOGISTIC flight's cargo goes back to the pickup base."""
+        game = self.game_model.game
+        if game is None:
+            return
+        from game.logistics.flight_cargo import release_flight_transfer
+
+        release_flight_transfer(game, flight)
 
     def flight_at_index(self, index: QModelIndex) -> Flight:
         """Returns the flight located at the given index."""
@@ -302,6 +312,11 @@ class AtoModel(QAbstractListModel):
 
     def _delete_package(self, package: Package) -> None:
         """Removes the given package from the ATO."""
+        if self.game is not None:
+            from game.logistics.flight_cargo import release_flight_transfer
+
+            for flight in package.flights:
+                release_flight_transfer(self.game, flight)
         self.package_models.release(package)
         index = self.ato.packages.index(package)
         self.beginRemoveRows(QModelIndex(), index, index)

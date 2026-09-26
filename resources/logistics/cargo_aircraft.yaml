@@ -1,0 +1,24 @@
+# Weights used to work out how much cargo a warehouse-transfer flight can carry.
+#
+#   cargo = max_kg - empty_kg - (fuel % x the aircraft's DCS fuel capacity)
+#
+# Values are DCS's own unit data (M_empty / M_max), in kg. Fuel capacity is read
+# from DCS automatically. Keyed by the DCS unit type id.
+#
+# Example, CH-47F at 100% fuel: 22680 - 11400 - 3055 = 8225 kg (18,133 lb).
+#
+# Aircraft not listed here can still fly transfers, but their load is not checked.
+# To add one (e.g. a mod), copy its M_empty and M_max from the aircraft's lua file.
+
+UH-1H:
+  empty_kg: 2883
+  max_kg: 4310
+Mi-8MT:
+  empty_kg: 8866.2
+  max_kg: 13000
+CH-47Fbl1:
+  empty_kg: 11400
+  max_kg: 22680
+C-130J-30:
+  empty_kg: 39099.6
+  max_kg: 79379

@@ -1770,6 +1770,7 @@ class Fob(ControlPoint, RadioFrequencyContainer, CTLD):
                 FlightType.AEWC,
                 FlightType.ESCORT,
                 FlightType.REFUELING,
+                FlightType.LOGISTIC,  # supplies flown in by helicopter
             ]
         yield from super().mission_types(for_player)
 

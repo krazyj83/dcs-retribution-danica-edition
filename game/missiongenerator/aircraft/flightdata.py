@@ -5,6 +5,7 @@ from datetime import timedelta
 from typing import Optional, TYPE_CHECKING
 
 from dcs.flyingunit import FlyingUnit
+from dcs.mapping import Point
 
 from game.callsigns import create_group_callsign_from_unit
 from game.squadrons import Squadron
@@ -73,7 +74,16 @@ class FlightData:
 
     custom_name: Optional[str]
 
+    #: Warehouse transfer a LOGISTIC flight carries (for its load sheet).
+    transfer_id: Optional[str] = None
+
     callsign: str = field(init=False)
+
+    #: Cargo placed in the mission for this flight's transfer:
+    #: (contents, mass in kg, position, where it is) per crate.
+    cargo_crates: list[tuple[str, float, Point, str]] = field(
+        init=False, default_factory=list
+    )
 
     #: Map of radio frequencies to their assigned radio and channel, if any.
     frequency_to_channel_map: dict[RadioFrequency, ChannelAssignment] = field(

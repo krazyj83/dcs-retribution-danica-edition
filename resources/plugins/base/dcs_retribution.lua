@@ -48,6 +48,13 @@ function write_state()
         ["mission_ended"] = mission_ended,
         ["destroyed_objects_positions"] = destroyed_objects_positions,
     }
+    -- Cargo crates of weapon transfers (retribution_cargo.lua), if any.
+    if retribution_cargo_state then
+        local cargo_ok, cargo_crates = pcall(retribution_cargo_state)
+        if cargo_ok and cargo_crates and #cargo_crates > 0 then
+            game_state["cargo_crates"] = cargo_crates
+        end
+    end
     local ok, write_error = pcall(function()
         fp:write(json:encode(game_state))
     end)

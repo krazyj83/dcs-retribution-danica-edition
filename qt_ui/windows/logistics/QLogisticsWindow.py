@@ -8,7 +8,8 @@ Five tabs:
                    Restock button only shown when the main base is selected
   3. Inventory   - detailed per-base weapon, equipment and ground unit breakdown
                    Full restock and per-item restock (main base only)
-  4. Transfers   - schedule, monitor, and cancel logistics deliveries
+  4. Transfers   - log of all transfers (planned on LOGISTIC flights' Cargo
+                   tab in the mission planner); cancel ones not yet flown
   5. Main Base   - designate one blue base as the primary supply hub
 
 CSV formats:
@@ -1547,7 +1548,11 @@ class InventoryTab(QWidget):
 
 
 class TransfersTab(QWidget):
-    transferScheduled = Signal(object)
+    """Every warehouse transfer with its status; cancel the ones not yet flown.
+
+    Transfers are planned in the mission planner: new package on a friendly
+    base, add a LOGISTIC flight, then load it on the flight's Cargo tab.
+    """
 
     def __init__(
         self, logistics: LogisticsManager, game: Game, current_turn: int = 0
@@ -1561,7 +1566,7 @@ class TransfersTab(QWidget):
 
     @staticmethod
     def _refresh_ato_panel() -> None:
-        """Show added/removed LOGISTIC flights in the main window's ATO list."""
+        """Show removed LOGISTIC flights in the main window's ATO list."""
         try:
             from game.server import GameContext
 
@@ -1571,51 +1576,19 @@ class TransfersTab(QWidget):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        sched_group = QGroupBox("Schedule New Transfer")
-        sched_layout = QFormLayout()
-        self.src_combo = QComboBox()
-        self.dst_combo = QComboBox()
-        self.dz_combo = QComboBox()
-        self.tcat_combo = QComboBox()
-        for cat in WarehouseCategory:
-            self.tcat_combo.addItem(cat.value.replace("_", " ").title(), cat)
-        self.tamt_spin = QDoubleSpinBox()
-        self.tamt_spin.setRange(1.0, 9999.0)
-        self.tamt_spin.setSingleStep(50.0)
-        self.tamt_spin.setDecimals(0)
-        self.tamt_spin.setValue(200.0)
-        # BLUEFOR supplies are flown by players: pick the squadron to fly it.
-        self.squadron_combo = QComboBox()
-        self.tnotes_edit = QLineEdit()
-        self.tnotes_edit.setPlaceholderText("Optional notes...")
-        self.dst_combo.currentIndexChanged.connect(self._on_dst_changed)
-        self.src_combo.currentIndexChanged.connect(self._refresh_squadrons)
-        self.schedule_btn = QPushButton("Schedule Transfer")
-        self.schedule_btn.clicked.connect(self._on_schedule)
-        sched_layout.addRow("From base:", self.src_combo)
-        sched_layout.addRow("To base:", self.dst_combo)
-        sched_layout.addRow("Drop zone:", self.dz_combo)
-        sched_layout.addRow("Category:", self.tcat_combo)
-        sched_layout.addRow("Quantity:", self.tamt_spin)
-        sched_layout.addRow("Flown by:", self.squadron_combo)
-        sched_layout.addRow("Notes:", self.tnotes_edit)
-        sched_layout.addRow("", self.schedule_btn)
-        sched_group.setLayout(sched_layout)
-        layout.addWidget(sched_group)
+        hint = QLabel(
+            "To move weapons between bases: open the base on the map, create a new "
+            "package, add a LOGISTIC flight and load it on the flight's Cargo tab. "
+            "The cargo waits next to the aircraft in the mission and the load sheet "
+            "is on the kneeboard."
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
         layout.addWidget(QLabel("Transfer log:"))
         self.table = QTableWidget()
         self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels(
-            [
-                "ID",
-                "From",
-                "To",
-                "Category",
-                "Planned",
-                "Delivered",
-                "Status",
-                "Turn",
-            ]
+            ["ID", "From", "To", "Cargo", "Planned", "Delivered", "Status", "Turn"]
         )
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
@@ -1632,12 +1605,6 @@ class TransfersTab(QWidget):
         layout.addWidget(self.sched_status)
 
     def refresh(self) -> None:
-        warehouses = self.logistics.warehouses_for_coalition("blue")
-        for combo in (self.src_combo, self.dst_combo):
-            combo.clear()
-            for wh in warehouses:
-                combo.addItem(wh.cp_name, wh.cp_id)
-        self._on_dst_changed()
         all_transfers = list(self.logistics._transfers.values())
         self.table.setRowCount(len(all_transfers))
         for row, t in enumerate(all_transfers):
@@ -1650,7 +1617,9 @@ class TransfersTab(QWidget):
             self.table.setItem(
                 row, 2, QTableWidgetItem(dst.cp_name if dst else str(t.dest_cp_id))
             )
-            self.table.setItem(row, 3, QTableWidgetItem(t.category.value))
+            cargo_item = QTableWidgetItem(t.cargo_label)
+            cargo_item.setToolTip(t.cargo_label)
+            self.table.setItem(row, 3, cargo_item)
             self.table.setItem(row, 4, QTableWidgetItem(f"{t.quantity:.0f}"))
             self.table.setItem(
                 row, 5, QTableWidgetItem(f"{t.delivered:.0f}" if t.delivered else "-")
@@ -1660,93 +1629,6 @@ class TransfersTab(QWidget):
             self.table.setItem(row, 6, status_item)
             self.table.setItem(row, 7, QTableWidgetItem(str(t.turn_planned)))
             self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, t.transfer_id)
-
-    def _on_dst_changed(self) -> None:
-        dst_cp_id = self.dst_combo.currentData()
-        self.dz_combo.clear()
-        if dst_cp_id is not None:
-            for dz in self.logistics.drop_zones_for_cp(dst_cp_id):
-                if dz.active:
-                    self.dz_combo.addItem(f"{dz.name} ({dz.dz_type.value})", dz.dz_id)
-        self._refresh_squadrons()
-
-    def _refresh_squadrons(self) -> None:
-        """Squadrons that can fly the selected source -> destination, nearest first."""
-        from game.logistics.transfer_flights import control_point, transport_squadrons
-
-        self.squadron_combo.clear()
-        source = control_point(self.game, self.src_combo.currentData())
-        destination = control_point(self.game, self.dst_combo.currentData())
-        squadrons = (
-            transport_squadrons(self.game, source, destination)
-            if source is not None and destination is not None
-            else []
-        )
-        for sq in squadrons:
-            self.squadron_combo.addItem(
-                f"{sq.name} - {sq.aircraft} @ {sq.location.name} "
-                f"({sq.untasked_aircraft} free)",
-                sq,
-            )
-        if not squadrons:
-            self.squadron_combo.addItem(
-                "No free transport squadron can use both bases", None
-            )
-
-    def _on_schedule(self) -> None:
-        src_cp_id = self.src_combo.currentData()
-        dst_cp_id = self.dst_combo.currentData()
-        dz_id = self.dz_combo.currentData()
-        category = self.tcat_combo.currentData()
-        quantity = self.tamt_spin.value()
-        squadron = self.squadron_combo.currentData()
-        notes = self.tnotes_edit.text().strip()
-        if src_cp_id == dst_cp_id:
-            self.sched_status.setText("Source and destination must differ.")
-            return
-        if squadron is None:
-            self.sched_status.setText(
-                "No free transport squadron can use both bases this turn."
-            )
-            return
-        aircraft = str(squadron.aircraft)
-        if not dz_id:
-            self.sched_status.setText("No active drop zone at destination.")
-            return
-        transfer = self.logistics.schedule_transfer(
-            source_cp_id=src_cp_id,
-            dest_cp_id=dst_cp_id,
-            dz_id=dz_id,
-            category=category,
-            quantity=quantity,
-            aircraft_type=aircraft,
-            turn=self.current_turn,
-            notes=notes,
-        )
-        if transfer is None:
-            self.sched_status.setText("Insufficient stock at source.")
-            return
-
-        from game.logistics.transfer_flights import plan_transfer_flight
-
-        flight = plan_transfer_flight(
-            self.game, transfer, self.game.conditions.start_time, squadron=squadron
-        )
-        if flight is not None:
-            self._refresh_ato_panel()
-            self.sched_status.setText(
-                f"Transfer {transfer.transfer_id[:8]} scheduled: player-seat "
-                f"{flight.unit_type} from {flight.squadron.location.name} added "
-                "to the ATO."
-            )
-        else:
-            self.sched_status.setText(
-                f"Transfer {transfer.transfer_id[:8]} scheduled, but its flight "
-                f"could not be planned this turn. {squadron.name} will try again "
-                "next turn."
-            )
-        self.transferScheduled.emit(transfer)
-        self.refresh()
 
     def _on_sel_changed(self) -> None:
         if not self.table.selectedItems():
@@ -1766,7 +1648,8 @@ class TransfersTab(QWidget):
             if remove_transfer_flight(self.game, tid):
                 self._refresh_ato_panel()
             self.sched_status.setText(
-                f"Transfer {tid[:8]} cancelled; stock returned to the source."
+                f"Transfer {tid[:8]} cancelled; cargo returned to the source and "
+                "its flight removed."
             )
             self.refresh()
 

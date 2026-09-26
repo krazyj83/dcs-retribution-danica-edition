@@ -115,6 +115,10 @@ class StateData:
     #: Mangled names of bases that were captured during the mission.
     base_capture_events: List[str]
 
+    #: Cargo crates of weapon transfers: where each one ended up
+    #: (see game/logistics/crate_delivery.py).
+    cargo_crates: List[dict[str, Any]] = field(default_factory=list)
+
     @classmethod
     def from_json(cls, data: Dict[str, Any], unit_map: UnitMap) -> StateData:
         def clean_unit_list(unit_list: List[Any]) -> List[str]:
@@ -153,6 +157,7 @@ class StateData:
             killed_ground_units=killed_ground_units,
             destroyed_statics=data.get("destroyed_objects_positions", []),
             base_capture_events=data.get("base_capture_events", []),
+            cargo_crates=list(data.get("cargo_crates") or []),
         )
 
 

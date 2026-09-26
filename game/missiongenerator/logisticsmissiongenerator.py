@@ -102,6 +102,15 @@ class LogisticsMissionGenerator:
 
         # Get the drop zone
         dz = self.game.logistics.get_drop_zone(transfer.dz_id)
+        if dz is None and not transfer.dz_id:
+            # Planned on the flight's Cargo tab without a drop zone: the cargo
+            # is delivered to the base itself.
+            if transfer.status.value == "planned":
+                try:
+                    transfer.mark_in_flight()
+                except ValueError:
+                    pass
+            return True
         if dz is None:
             logger.error(
                 "LOGISTICS: drop zone %s not found", transfer.dz_id

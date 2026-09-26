@@ -799,6 +799,139 @@ class StrikeTaskPage(KneeboardPage):
         ]
 
 
+class LoadSheetPage(KneeboardPage):
+    """Load sheet of a LOGISTIC flight: route, weights, cargo and crates."""
+
+    CONTENTS_MAX_LEN = 28
+
+    def __init__(self, flight: FlightData, game: "Game", dark_kneeboard: bool) -> None:
+        self.flight = flight
+        self.game = game
+        self.dark_kneeboard = dark_kneeboard
+
+    def write(self, path: Path) -> None:
+        from game.logistics.cargo import (
+            cargo_aircraft,
+            flight_time_minutes,
+            lb,
+            manifest_weight_kg,
+            route_legs,
+            weapon_name,
+            weapon_weight_kg,
+        )
+        from game.logistics.transfer_flights import (
+            control_point,
+            flight_for_transfer,
+        )
+
+        writer = KneeboardPageWriter(dark_theme=self.dark_kneeboard)
+        custom = f' ("{self.flight.custom_name}")' if self.flight.custom_name else ""
+        writer.title(f"{self.flight.callsign} Load Sheet{custom}")
+
+        transfer = self.game.logistics._transfers.get(self.flight.transfer_id or "")
+        flight = flight_for_transfer(self.game, self.flight.transfer_id or "")
+        if transfer is None or flight is None:
+            writer.text("No cargo planned for this flight.")
+            writer.write(path)
+            return
+        source = control_point(self.game, transfer.source_cp_id)
+        destination = control_point(self.game, transfer.dest_cp_id)
+        cargo = transfer.cargo or {}
+
+        writer.heading("Route")
+        drop_zone = self.game.logistics.get_drop_zone(transfer.dz_id)
+        rows = [
+            ["Pick up", source.name if source else "?"],
+            ["Deliver", destination.name if destination else "?"],
+            ["Drop zone", drop_zone.name if drop_zone else "the base itself"],
+        ]
+        if source is not None and destination is not None:
+            legs = route_legs(flight.departure, source, destination)
+            minutes = flight_time_minutes(legs.total, flight.unit_type)
+            rows.append(
+                [
+                    "Distance",
+                    f"{legs.to_pickup / 1000:.0f} + {legs.pickup_to_drop / 1000:.0f}"
+                    f" + {legs.drop_to_home / 1000:.0f} = "
+                    f"{legs.total / 1000:.0f} km (~{int(minutes // 60)}h"
+                    f"{int(minutes % 60):02d})",
+                ]
+            )
+        writer.table(rows)
+
+        writer.heading("Weights (lb)")
+        weights = cargo_aircraft(flight.unit_type)
+        cargo_kg = manifest_weight_kg(cargo)
+        fuel_max = float(flight.unit_type.dcs_unit_type.fuel_max or 0)
+        share = flight.fuel / fuel_max if fuel_max else 0.0
+        if weights is None:
+            writer.table(
+                [
+                    [f"Fuel ({share:.0%})", f"{lb(flight.fuel):,.0f}"],
+                    ["Cargo", f"{lb(cargo_kg):,.0f}"],
+                    ["Take-off / max", "no weight data for this aircraft"],
+                ]
+            )
+        else:
+            total = weights.empty_kg + flight.fuel + cargo_kg
+            margin = weights.max_kg - total
+            writer.table(
+                [
+                    ["Empty", f"{lb(weights.empty_kg):,.0f}"],
+                    [f"Fuel ({share:.0%})", f"{lb(flight.fuel):,.0f}"],
+                    ["Cargo", f"{lb(cargo_kg):,.0f}"],
+                    ["Take-off", f"{lb(total):,.0f}"],
+                    ["Max take-off", f"{lb(weights.max_kg):,.0f}"],
+                    [
+                        "Margin" if margin >= 0 else "OVERWEIGHT",
+                        f"{lb(margin):+,.0f}",
+                    ],
+                ]
+            )
+
+        writer.heading("Cargo")
+        writer.table(
+            [
+                [
+                    writer.wrap_line(weapon_name(c), self.CONTENTS_MAX_LEN),
+                    str(n),
+                    f"{lb(weapon_weight_kg(c) or 0):,.0f}",
+                    f"{lb((weapon_weight_kg(c) or 0) * n):,.0f}",
+                ]
+                for c, n in cargo.items()
+            ]
+            or [["(none)", "", "", ""]],
+            headers=["Weapon", "Qty", "Each", "Total"],
+        )
+
+        crates = self.flight.cargo_crates
+        if crates:
+            writer.heading("Crates")
+            writer.table(
+                [
+                    [
+                        str(i + 1),
+                        writer.wrap_line(label, self.CONTENTS_MAX_LEN),
+                        f"{lb(mass):,.0f}",
+                        writer.wrap_line(where, 18),
+                        position.latlng().format_dms(),
+                    ]
+                    for i, (label, mass, position, where) in enumerate(crates)
+                ],
+                headers=["#", "Contents", "lb", "Where", "Position"],
+                font=writer.content_font,
+            )
+        elif cargo:
+            writer.text("Cargo not placed in the mission (no safe spot).")
+
+        writer.text(
+            "More cargo: land at a friendly base, F10 > Cargo > Order at <base>. "
+            "Crates count as delivered to the friendly base they are set down at.",
+            wrap=True,
+        )
+        writer.write(path)
+
+
 class NotesPage(KneeboardPage):
     """A kneeboard page containing the campaign owner's notes."""
 
@@ -874,6 +1007,8 @@ class KneeboardGenerator(MissionInfoGenerator):
             return SeadTaskPage(flight, self.dark_kneeboard)
         elif flight.flight_type is FlightType.STRIKE:
             return StrikeTaskPage(flight, self.dark_kneeboard)
+        elif flight.flight_type is FlightType.LOGISTIC and flight.transfer_id:
+            return LoadSheetPage(flight, self.game, self.dark_kneeboard)
         return None
 
     def generate_flight_kneeboard(

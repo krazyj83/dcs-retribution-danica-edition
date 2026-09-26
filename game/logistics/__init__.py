@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Dict, List, TYPE_CHECKING
+from typing import Any, Optional, Dict, List, Tuple, TYPE_CHECKING
 
 from game.logistics.custom_airdrop import (
     CustomAirdropTarget,
@@ -386,6 +386,20 @@ class LogisticsTransfer:
     #: Squadron the player picked to fly it (BLUEFOR supplies are player-flown).
     #: Class-level default keeps transfers pickled before this field loadable.
     squadron: Optional["Squadron"] = None
+    #: Weapons carried, DCS clsid -> count (weapon transfers). None for the
+    #: older category transfers. Class-level defaults keep old saves loadable.
+    cargo: Optional[Dict[str, int]] = None
+    #: Fuel load the player picked (1.0, 0.5 or 0.25 of full tanks).
+    fuel_fraction: float = 1.0
+
+    @property
+    def cargo_label(self) -> str:
+        """What the transfer carries, for logs and the transfer table."""
+        if self.cargo is not None:
+            from game.logistics.cargo import manifest_summary
+
+            return manifest_summary(self.cargo) or "no cargo"
+        return f"{self.quantity:.0f} {self.category.value}"
 
     def mark_in_flight(self) -> None:
         """Called by LogisticsMissionGenerator once the flight has been
@@ -528,11 +542,23 @@ class LogisticsManager:
         self._weapon_inventories[inv.cp_id] = inv
 
     def sync_weapon_inventories(self, game: "Game") -> None:
-        """Rebuild weapon inventories for all blue bases from current game state."""
+        """Refresh weapon inventories for all blue bases from current game state.
+
+        Weapons new to a base are added; weapons already tracked keep their
+        quantity and capacity, so stock moved by transfers isn't reset.
+        Ground units are always re-read from the garrison.
+        """
+        from dcs.weapons_data import weapon_ids
+
         try:
             for cp in game.theater.player_points():
-                inv = build_weapon_inventory(cp, game)
-                self._weapon_inventories[cp.id] = inv
+                fresh = build_weapon_inventory(cp, game)
+                current = self._weapon_inventories.get(cp.id)  # type: ignore[call-overload]
+                if current is not None:
+                    for clsid, item in current.items.items():
+                        if clsid in weapon_ids:
+                            fresh.items[clsid] = item
+                self._weapon_inventories[cp.id] = fresh
         except Exception as e:
             import logging
 
@@ -693,6 +719,198 @@ class LogisticsManager:
         self._transfers[transfer.transfer_id] = transfer
         return transfer
 
+    def schedule_weapon_transfer(
+        self,
+        source_cp_id: int,
+        dest_cp_id: int,
+        dz_id: str,
+        cargo: Dict[str, int],
+        aircraft_type: str,
+        turn: int,
+        fuel_fraction: float = 1.0,
+        notes: str = "",
+    ) -> Optional[LogisticsTransfer]:
+        """Take the weapons out of the source inventory and create a transfer.
+
+        None (nothing taken) if the source doesn't hold every item in the
+        requested quantity.
+        """
+        cargo = {clsid: int(n) for clsid, n in cargo.items() if n > 0}
+        src = self._weapon_inventories.get(source_cp_id)
+        if not cargo or src is None:
+            return None
+        for clsid, count in cargo.items():
+            item = src.items.get(clsid)
+            if item is None or item.quantity < count:
+                return None
+        for clsid, count in cargo.items():
+            src.items[clsid].quantity -= count
+        transfer = LogisticsTransfer(
+            transfer_id=str(uuid.uuid4()),
+            source_cp_id=source_cp_id,
+            dest_cp_id=dest_cp_id,
+            dz_id=dz_id,
+            category=WarehouseCategory.AMMUNITION,
+            quantity=float(sum(cargo.values())),
+            aircraft_type=aircraft_type,
+            turn_planned=turn,
+            notes=notes,
+            cargo=cargo,
+            fuel_fraction=fuel_fraction,
+        )
+        self._transfers[transfer.transfer_id] = transfer
+        return transfer
+
+    # ── Transfers planned with a flight (mission planner Cargo tab) ─────
+
+    def create_flight_transfer(
+        self,
+        source_cp_id: int,
+        dest_cp_id: int,
+        dz_id: str,
+        aircraft_type: str,
+        turn: int,
+    ) -> LogisticsTransfer:
+        """An empty weapon transfer for a LOGISTIC flight; cargo is added later."""
+        transfer = LogisticsTransfer(
+            transfer_id=str(uuid.uuid4()),
+            source_cp_id=source_cp_id,
+            dest_cp_id=dest_cp_id,
+            dz_id=dz_id,
+            category=WarehouseCategory.AMMUNITION,
+            quantity=0.0,
+            aircraft_type=aircraft_type,
+            turn_planned=turn,
+            cargo={},
+        )
+        self._transfers[transfer.transfer_id] = transfer
+        return transfer
+
+    def add_cargo(self, transfer: LogisticsTransfer, clsid: str, count: int) -> int:
+        """Load weapons from the pickup base's stock. Returns how many were added."""
+        if transfer.status is not TransferStatus.PLANNED or transfer.cargo is None:
+            return 0
+        src = self._weapon_inventories.get(transfer.source_cp_id)
+        item = src.items.get(clsid) if src is not None else None
+        if item is None:
+            return 0
+        added = max(0, min(int(count), item.quantity))
+        if added:
+            item.quantity -= added
+            transfer.cargo[clsid] = transfer.cargo.get(clsid, 0) + added
+            transfer.quantity = float(sum(transfer.cargo.values()))
+        return added
+
+    def remove_cargo(
+        self, transfer: LogisticsTransfer, clsid: str, count: Optional[int] = None
+    ) -> int:
+        """Unload weapons back into the pickup base's stock. Returns how many."""
+        if transfer.status is not TransferStatus.PLANNED or not transfer.cargo:
+            return 0
+        loaded = transfer.cargo.get(clsid, 0)
+        removed = loaded if count is None else max(0, min(int(count), loaded))
+        if removed:
+            self._return_weapons(transfer.source_cp_id, {clsid: removed})
+            if loaded - removed:
+                transfer.cargo[clsid] = loaded - removed
+            else:
+                del transfer.cargo[clsid]
+            transfer.quantity = float(sum(transfer.cargo.values()))
+        return removed
+
+    def change_pickup(self, transfer: LogisticsTransfer, source_cp_id: int) -> None:
+        """Pick up somewhere else: loaded cargo goes back to the old base."""
+        if transfer.status is not TransferStatus.PLANNED:
+            return
+        if transfer.cargo:
+            self._return_weapons(transfer.source_cp_id, transfer.cargo)
+        transfer.cargo = {} if transfer.cargo is not None else None
+        transfer.quantity = 0.0
+        transfer.source_cp_id = source_cp_id
+
+    def _take_weapons(self, cp_id: int, cargo: Dict[str, int]) -> None:
+        """Remove weapons from a base's stock (never below zero)."""
+        inv = self._weapon_inventories.get(cp_id)
+        if inv is None:
+            return
+        for clsid, count in cargo.items():
+            item = inv.items.get(clsid)
+            if item is not None:
+                item.quantity = max(0, item.quantity - count)
+
+    def _put_weapons(self, cp: Any, cargo: Dict[str, int]) -> Dict[str, int]:
+        """Add weapons to a base's stock. Returns what didn't fit."""
+        from game.logistics.cargo import weapon_name
+
+        inv = self._weapon_inventories.get(cp.id)
+        if inv is None:
+            inv = WeaponInventory(cp_id=cp.id, cp_name=cp.name)
+            self._weapon_inventories[cp.id] = inv
+        overflow: Dict[str, int] = {}
+        for clsid, count in cargo.items():
+            item = inv.items.get(clsid)
+            if item is None:
+                name = weapon_name(clsid)
+                inv.add_item(clsid, name, _weapon_category(name), quantity=0)
+                item = inv.items[clsid]
+            fits = min(count, max(0, item.capacity - item.quantity))
+            item.quantity += fits
+            if count - fits:
+                overflow[clsid] = count - fits
+        return overflow
+
+    def _return_weapons(self, cp_id: int, cargo: Dict[str, int]) -> None:
+        """Put weapons back into a base's inventory (cancel or overflow)."""
+        inv = self._weapon_inventories.get(cp_id)
+        if inv is None:
+            return
+        from game.logistics.cargo import weapon_name
+
+        for clsid, count in cargo.items():
+            item = inv.items.get(clsid)
+            if item is None:
+                name = weapon_name(clsid)
+                inv.add_item(clsid, name, _weapon_category(name), quantity=count)
+            else:
+                item.quantity += count
+
+    def _deliver_weapons(
+        self, t: LogisticsTransfer, source_cp_id: int, dest_cp_id: int, dest_name: str
+    ) -> Tuple[Dict[str, int], Dict[str, int]]:
+        """Add a weapon transfer's cargo to the destination inventory.
+
+        Returns (delivered, overflow). What doesn't fit goes back to the
+        source inventory. The destination inventory is created if needed.
+        """
+        from game.logistics.cargo import weapon_name
+
+        dest = self._weapon_inventories.get(dest_cp_id)
+        if dest is None:
+            dest = WeaponInventory(cp_id=dest_cp_id, cp_name=dest_name)
+            self._weapon_inventories[dest_cp_id] = dest
+        src = self._weapon_inventories.get(source_cp_id)
+        delivered: Dict[str, int] = {}
+        overflow: Dict[str, int] = {}
+        for clsid, count in (t.cargo or {}).items():
+            item = dest.items.get(clsid)
+            if item is None:
+                known = src.items.get(clsid) if src is not None else None
+                name = known.name if known is not None else weapon_name(clsid)
+                category = (
+                    known.category if known is not None else _weapon_category(name)
+                )
+                dest.add_item(clsid, name, category, quantity=0)
+                item = dest.items[clsid]
+            fits = min(count, max(0, item.capacity - item.quantity))
+            item.quantity += fits
+            if fits:
+                delivered[clsid] = fits
+            if count - fits:
+                overflow[clsid] = count - fits
+        if overflow:
+            self._return_weapons(source_cp_id, overflow)
+        return delivered, overflow
+
     # ── Turn hooks (called from game/sim/gameloop.py) ─────────────────
 
     def on_turn_end(self, game: "Game") -> None:
@@ -734,13 +952,28 @@ class LogisticsManager:
         for t in self._transfers.values():
             if t.status is not TransferStatus.IN_FLIGHT:
                 continue
-            label = f"{t.quantity:.0f} {t.category.value}"
+            label = t.cargo_label
             flight = flight_for_transfer(game, t.transfer_id)
             if flight is None:
                 t.status = TransferStatus.PLANNED
                 continue
 
-            if debriefing.air_losses.surviving_flight_members(flight) <= 0:
+            flight_lost = debriefing.air_losses.surviving_flight_members(flight) <= 0
+
+            # Weapon transfers: settled from where the crates ended up, when the
+            # mission script reported them (see crate_delivery).
+            if t.cargo is not None:
+                from game.logistics.crate_delivery import reports_for, settle_transfer
+
+                state = getattr(debriefing, "state_data", None)
+                reports = reports_for(
+                    list(getattr(state, "cargo_crates", None) or []), t.transfer_id
+                )
+                if reports:
+                    log.extend(settle_transfer(game, self, t, reports, flight_lost))
+                    continue
+
+            if flight_lost:
                 t.mark_failed()
                 log.append(f"Transfer {t.transfer_id[:8]}: flight lost, {label} lost")
                 continue
@@ -753,7 +986,7 @@ class LogisticsManager:
                 or destination.captured is not Player.BLUE
                 or source is None
                 or source.captured is not Player.BLUE
-                or dest_wh is None
+                or (dest_wh is None and t.cargo is None)
             ):
                 t.mark_failed()
                 log.append(
@@ -761,6 +994,28 @@ class LogisticsManager:
                 )
                 continue
 
+            if t.cargo is not None:
+                from game.logistics.cargo import manifest_summary
+
+                delivered_items, overflow_items = self._deliver_weapons(
+                    t, t.source_cp_id, t.dest_cp_id, destination.name
+                )
+                t.mark_delivered(float(sum(delivered_items.values())))
+                line = (
+                    f"Transfer {t.transfer_id[:8]}: "
+                    f"{manifest_summary(delivered_items) or 'nothing'} "
+                    f"delivered to {destination.name}"
+                )
+                if overflow_items:
+                    line += (
+                        f", {manifest_summary(overflow_items)} returned to "
+                        f"{source.name} (no room)"
+                    )
+                log.append(line)
+                continue
+
+            if dest_wh is None:  # checked above for category transfers
+                continue
             item = dest_wh.stock[t.category]
             delivered = min(t.quantity, max(0.0, item.capacity - item.quantity))
             item.apply_delivery(delivered)
@@ -784,9 +1039,12 @@ class LogisticsManager:
         t = self._transfers.get(transfer_id)
         if t is None or t.status != TransferStatus.PLANNED:
             return False
-        src = self._warehouses.get(t.source_cp_id)
-        if src:
-            src.stock[t.category].quantity += t.quantity
+        if t.cargo is not None:
+            self._return_weapons(t.source_cp_id, t.cargo)
+        else:
+            src = self._warehouses.get(t.source_cp_id)
+            if src:
+                src.stock[t.category].quantity += t.quantity
         t.status = TransferStatus.FAILED
         return True
 

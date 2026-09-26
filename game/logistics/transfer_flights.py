@@ -118,6 +118,10 @@ def plan_transfer_flight(
     package = Package(destination, game.db.flights, auto_asap=True)
     flight = Flight(package, squadron, 1, FlightType.LOGISTIC, start_type, divert=None)
     flight.transfer_id = transfer.transfer_id
+    # The fuel load the player picked; the cargo weight was checked against it.
+    flight.fuel = squadron.aircraft.dcs_unit_type.fuel_max * getattr(
+        transfer, "fuel_fraction", 1.0
+    )
     # A player seat, as if "Player" were ticked in the flight's slot editor.
     for member in flight.iter_members():
         if member.pilot is not None:
@@ -188,4 +192,8 @@ def plan_pending_transfer_flights(game: Game, now: datetime) -> None:
         if transfer.status is TransferStatus.IN_FLIGHT:
             transfer.status = TransferStatus.PLANNED
         if transfer.status is TransferStatus.PLANNED:
+            if transfer.cargo is not None and not transfer.cargo:
+                # A LOGISTIC flight planned without cargo: nothing to fly again.
+                logistics.cancel_transfer(transfer.transfer_id)
+                continue
             plan_transfer_flight(game, transfer, now)

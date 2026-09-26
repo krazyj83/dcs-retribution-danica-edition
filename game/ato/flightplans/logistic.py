@@ -40,10 +40,15 @@ class LogisticStops:
 
 class Builder(AirliftBuilder):
     def cargo_stops(self) -> CargoStops:
+        game = self.flight.coalition.game
         transfer_id = self.flight.transfer_id
         if transfer_id is None:
-            raise PlanningError("LOGISTIC flight has no warehouse transfer.")
-        game = self.flight.coalition.game
+            # Planned by hand in the mission planner: the flight gets an empty
+            # transfer (pickup = its own base, delivery = the package target)
+            # and the cargo is chosen in its Cargo tab.
+            from game.logistics.flight_cargo import attach_transfer
+
+            transfer_id = attach_transfer(game, self.flight).transfer_id
         transfer = game.logistics._transfers.get(transfer_id)
         if transfer is None:
             raise PlanningError(f"Warehouse transfer {transfer_id} not found.")

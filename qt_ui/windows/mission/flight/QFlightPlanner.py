@@ -2,6 +2,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QTabWidget
 
 from game.ato.flight import Flight
+from game.ato.flighttype import FlightType
 from qt_ui.models import PackageModel, GameModel
 from qt_ui.windows.mission.flight.payload.QFlightPayloadTab import QFlightPayloadTab
 from qt_ui.windows.mission.flight.settings.QGeneralFlightSettingsTab import (
@@ -35,4 +36,19 @@ class QFlightPlanner(QTabWidget):
         self.addTab(self.general_settings_tab, "General Flight settings")
         self.addTab(self.payload_tab, "Payload")
         self.addTab(self.waypoint_tab, "Waypoints")
+
+        # LOGISTIC flights carry a warehouse transfer: plan the load here.
+        if flight.flight_type is FlightType.LOGISTIC:
+            from qt_ui.windows.mission.flight.cargo.QFlightCargoTab import (
+                QFlightCargoTab,
+            )
+
+            self.cargo_tab = QFlightCargoTab(flight, gm.game)
+            self.cargo_tab.fuel_changed.connect(
+                lambda: self.payload_tab.fuel_selector.fuel.setValue(round(flight.fuel))
+            )
+            self.cargo_tab.route_changed.connect(
+                self.waypoint_tab.flight_waypoint_list.update_list
+            )
+            self.addTab(self.cargo_tab, "Cargo")
         self.setCurrentIndex(0)

@@ -183,6 +183,18 @@ class MissionGenerator:
         # Generate LOGISTICS flight groups from the blue ATO
         self._generate_logistics_flights()
 
+        # Weapon transfers: put the cargo next to the aircraft that flies it.
+        try:
+            from game.missiongenerator.transfercargogenerator import (
+                TransferCargoGenerator,
+            )
+
+            TransferCargoGenerator(
+                self.mission, self.game, self.unit_map, self.mission_data
+            ).generate()
+        except Exception:
+            logging.exception("MissionGenerator: transfer cargo placement failed")
+
     def _generate_logistics_flights(self) -> None:
         """
         Find all LOGISTICS-typed flights in the blue ATO and generate
