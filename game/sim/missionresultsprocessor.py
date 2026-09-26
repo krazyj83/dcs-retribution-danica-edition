@@ -28,6 +28,7 @@ class MissionResultsProcessor:
         self.commit_pilot_experience()
         self.commit_front_line_losses(debriefing)
         self.commit_motorpool_losses(debriefing)
+        self.commit_player_drawn_convoys(debriefing)
         self.commit_convoy_losses(debriefing)
         self.commit_cargo_ship_losses(debriefing)
         self.commit_airlift_losses(debriefing)
@@ -104,6 +105,37 @@ class MissionResultsProcessor:
                 continue
             logging.info(f"Motorpool {unit_type} destroyed from {control_point}")
             control_point.base.armor[unit_type] -= 1
+
+    @staticmethod
+    def commit_player_drawn_convoys(debriefing: Debriefing) -> None:
+        """Settle the vehicles borrowed by player-drawn convoys.
+
+        Dead vehicles are lost from their origin base. Survivors are delivered
+        to the friendly base nearest the route end, provided it is still on the
+        same side as the origin; otherwise they stay where they came from.
+        """
+        dead = {loss.name for loss in debriefing.player_drawn_convoy_losses}
+        for unit in debriefing.unit_map.player_drawn_convoys.values():
+            origin = unit.origin
+            if origin.base.total_units_of_type(unit.unit_type) <= 0:
+                logging.error(
+                    f"Player convoy {unit.unit_type} from {origin} but that base "
+                    "has none left."
+                )
+                continue
+            if unit.name in dead:
+                logging.info(f"Player convoy {unit.unit_type} destroyed from {origin}")
+                origin.base.armor[unit.unit_type] -= 1
+                continue
+            destination = unit.destination
+            if destination is origin or destination.captured != origin.captured:
+                continue
+            origin.base.armor[unit.unit_type] -= 1
+            destination.base.commission_units({unit.unit_type: 1})
+            logging.info(
+                f"Player convoy delivered {unit.unit_type} from {origin} "
+                f"to {destination}"
+            )
 
     @staticmethod
     def commit_convoy_losses(debriefing: Debriefing) -> None:

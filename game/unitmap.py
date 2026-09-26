@@ -52,6 +52,20 @@ class ConvoyUnit:
 
 
 @dataclass(frozen=True)
+class PlayerDrawnConvoyUnit:
+    """One vehicle of a convoy the player drew on the campaign map.
+
+    It is borrowed from ``origin``'s reserve for the mission. If it dies it is
+    lost from ``origin``; if it survives it is delivered to ``destination``.
+    """
+
+    name: str
+    unit_type: GroundUnitType
+    origin: ControlPoint
+    destination: ControlPoint
+
+
+@dataclass(frozen=True)
 class AirliftUnits:
     cargo: tuple[GroundUnitType, ...]
     transfer: TransferOrder
@@ -66,6 +80,7 @@ class UnitMap:
         self.theater_objects: Dict[str, TheaterUnitMapping] = {}
         self.scenery_objects: Dict[str, SceneryObjectMapping] = {}
         self.convoys: Dict[str, ConvoyUnit] = {}
+        self.player_drawn_convoys: Dict[str, PlayerDrawnConvoyUnit] = {}
         self.cargo_ships: Dict[str, CargoShip] = {}
         self.airlifts: Dict[str, AirliftUnits] = {}
 
@@ -141,6 +156,29 @@ class UnitMap:
 
     def convoy_unit(self, name: str) -> Optional[ConvoyUnit]:
         return self.convoys.get(name, None)
+
+    def add_player_drawn_convoy_units(
+        self,
+        group: VehicleGroup,
+        unit_types: list[GroundUnitType],
+        origin: ControlPoint,
+        destination: ControlPoint,
+    ) -> None:
+        """Register a player-drawn convoy. ``unit_types`` follows group.units."""
+        if len(unit_types) != len(group.units):
+            raise ValueError(
+                f"{group.name}: {len(group.units)} units but {len(unit_types)} types"
+            )
+        for unit, unit_type in zip(group.units, unit_types):
+            name = str(unit.name)
+            if name in self.player_drawn_convoys:
+                raise RuntimeError(f"Duplicate player convoy unit: {name}")
+            self.player_drawn_convoys[name] = PlayerDrawnConvoyUnit(
+                name, unit_type, origin, destination
+            )
+
+    def player_drawn_convoy_unit(self, name: str) -> Optional[PlayerDrawnConvoyUnit]:
+        return self.player_drawn_convoys.get(name, None)
 
     def add_cargo_ship(self, group: ShipGroup, ship: CargoShip) -> None:
         if len(group.units) > 1:

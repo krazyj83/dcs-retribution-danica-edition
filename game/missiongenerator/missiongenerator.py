@@ -113,7 +113,7 @@ class MissionGenerator:
 
         ConvoyGenerator(self.mission, self.game, self.unit_map).generate()
         CargoShipGenerator(self.mission, self.game, self.unit_map).generate()
-        PlayerConvoyGenerator(self.mission, self.game).generate()
+        PlayerConvoyGenerator(self.mission, self.game, self.unit_map).generate()
 
         self.generate_destroyed_units()
 

@@ -186,6 +186,11 @@ class QWaitingForMissionResultWindow(QDialog):
             len(list(debriefing.motorpool_losses)),
             update_layout,
         )
+        self.add_update_row(
+            "Player convoy units destroyed",
+            len(list(debriefing.player_drawn_convoy_losses)),
+            update_layout,
+        )
 
         # Clear previous content of the window
         for i in reversed(range(self.gridLayout.count())):
