@@ -14,6 +14,7 @@ from .minutesoption import minutes_option
 from .optiondescription import OptionDescription, SETTING_DESCRIPTION_KEY
 from .skilloption import skill_option
 from ..ato.starttype import StartType
+from ..ground_forces.combat_stance import CombatStance
 
 Views = ForcedOptions.Views
 
@@ -702,6 +703,25 @@ class Settings:
         CAMPAIGN_MANAGEMENT_PAGE,
         HQ_AUTOMATION_SECTION,
         default=True,
+    )
+    default_front_line_stance: CombatStance = choices_option(
+        "Default front line stance",
+        CAMPAIGN_MANAGEMENT_PAGE,
+        HQ_AUTOMATION_SECTION,
+        # RETREAT is intentionally omitted -- never a sensible standing default.
+        choices={
+            "Aggressive": CombatStance.AGGRESSIVE,
+            "Defensive": CombatStance.DEFENSIVE,
+            "Ambush": CombatStance.AMBUSH,
+            "Elimination": CombatStance.ELIMINATION,
+            "Breakthrough": CombatStance.BREAKTHROUGH,
+        },
+        default=CombatStance.AGGRESSIVE,
+        detail=(
+            "Starting stance for your front lines at campaign start and after a "
+            "capture. Only applies when 'Automatically manage front line stances' "
+            "is off; otherwise the AI commander chooses the stance."
+        ),
     )
     auto_procurement_balance: int = bounded_int_option(
         "AI ground unit procurement budget ratio (%) for OWNFOR",
@@ -1552,14 +1572,46 @@ class Settings:
     def deserialize_state_dict(state: dict[str, Any]) -> dict[str, Any]:
         # restore Enum & timedelta types
         s = Settings()
-        for key, value in state.items():
-            if isinstance(s.__dict__.get(key), timedelta) and isinstance(value, int):
+        for key, value in list(state.items()):
+            default = s.__dict__.get(key)
+            if isinstance(default, Enum):
+                # Restore the stored member, falling back to the field default
+                # for any value that no longer resolves to a member of this
+                # field's enum -- a stale/renamed choice, a corrupt string, or a
+                # legacy non-enum value. Otherwise the bad value crashes the
+                # load and later the settings UI. (Ported from upstream.)
+                restored = Settings._restore_enum(value, type(default))
+                state[key] = restored if restored is not None else default
+            elif isinstance(default, timedelta) and isinstance(value, int):
                 state[key] = timedelta(minutes=value)
-            elif isinstance(s.__dict__.get(key), Enum) and isinstance(value, str):
-                state[key] = eval(value)
             elif isinstance(value, dict):
                 state[key] = s.obj_hook(value)
         return state
+
+    @staticmethod
+    def _restore_enum(value: Any, enum_cls: type[Enum]) -> Optional[Enum]:
+        """Resolve a serialized value to a member of enum_cls, or None if it no
+        longer maps to one (stale, renamed, or a legacy non-enum value)."""
+        if isinstance(value, enum_cls):
+            return value
+        # Accept the JSON form {"Enum": "EnumName.MEMBER"} and the bare
+        # "EnumName.MEMBER" string; ignore anything that does not eval to a
+        # member of this field's enum.
+        expr: Optional[str] = None
+        if isinstance(value, dict):
+            inner = value.get("Enum")
+            if isinstance(inner, str):
+                expr = inner
+        elif isinstance(value, str):
+            expr = value
+        if expr is not None:
+            try:
+                restored = eval(expr)
+            except Exception:
+                return None
+            if isinstance(restored, enum_cls):
+                return restored
+        return None
 
     @classmethod
     def _field_description(cls, settings_field: Field[Any]) -> OptionDescription:

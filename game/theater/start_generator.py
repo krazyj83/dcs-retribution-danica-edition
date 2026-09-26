@@ -125,6 +125,17 @@ class ModSettings:
     VSN_F35: bool = False
 
 
+def apply_default_player_stances(theater: ConflictTheater, settings: Settings) -> None:
+    """Seed the configured default stance for player control points at new-game
+    time. Only applies when automatic stance management is off; the enemy and
+    auto-managed player stances are left to the commander (see ControlPoint.
+    apply_default_stance_on_capture)."""
+    if settings.automate_front_line_stance:
+        return
+    for control_point in theater.player_points():
+        control_point.seed_front_line_stances(settings.default_front_line_stance)
+
+
 class GameGenerator:
     def __init__(
         self,
@@ -165,6 +176,9 @@ class GameGenerator:
                 campaign_name=self.campaign_name,
             )
 
+            # Coalitions are wired by Game.__init__ (finish_init), so cp.captured
+            # is valid here. Runs only for new games -- never on save load.
+            apply_default_player_stances(self.theater, self.settings)
             GroundObjectGenerator(game, self.generator_settings).generate()
         game.settings.version = VERSION
         return game
@@ -501,9 +515,7 @@ class AirbaseGroundObjectGenerator(ControlPointGroundObjectGenerator):
         all other preset locations work — the miz unit is only a position marker.
         """
         for position in self.control_point.preset_locations.custom_groups:
-            unit_group = self.armed_forces.random_group_for_task(
-                GroupTask.BASE_DEFENSE
-            )
+            unit_group = self.armed_forces.random_group_for_task(GroupTask.BASE_DEFENSE)
             if not unit_group:
                 logging.warning(
                     f"{self.faction_name} has no BASE_DEFENSE ForceGroup — "
