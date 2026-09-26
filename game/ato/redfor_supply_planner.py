@@ -2,16 +2,20 @@
 game/ato/redfor_supply_planner.py
 
 Automatically creates ground convoy OR airlift transfer orders between
-REDFOR bases each turn, based on distance:
-  - Under 150 km  -> land convoy (visible on map, targetable by player)
-  - Over 150 km   -> airlift (requires transport aircraft at source base)
+REDFOR bases each turn, using the shared distance bands in
+game/logistics/transport_tiers.py:
+  - Under 120 km, road-connected -> land convoy (visible, targetable)
+  - Under 220 km                 -> airlift, helicopters preferred
+  - Over 220 km                  -> airlift, planes preferred
 """
+
 from __future__ import annotations
 
 import logging
 import random
 from datetime import datetime
-from typing import TYPE_CHECKING
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from game.game import Game
@@ -22,10 +26,11 @@ logger = logging.getLogger(__name__)
 
 CONVOY_SIZE = 4
 MAX_CONVOYS_PER_TURN = 3
-AIRLIFT_DISTANCE_THRESHOLD_KM = 150.0
 
 
-def has_transfer_route(game: Game, origin: ControlPoint, destination: ControlPoint) -> bool:
+def has_transfer_route(
+    game: Game, origin: ControlPoint, destination: ControlPoint
+) -> bool:
     """True if origin's coalition can route a ground transfer to destination.
 
     PendingTransfers.new_transfer() removes the units from the origin base
@@ -38,11 +43,39 @@ def has_transfer_route(game: Game, origin: ControlPoint, destination: ControlPoi
     return network.has_path_between(origin, destination)
 
 
+def airlift_possible(
+    game: Game, origin: ControlPoint, destination: ControlPoint
+) -> bool:
+    """True if some squadron of origin's side, with aircraft, could airlift it.
+
+    Uses AirliftPlanner.compatible_with_mission (TRANSPORT-capable, both bases
+    usable, helicopter leg range) so the answer matches what the airlift
+    planner will accept. Ignores whether the aircraft are free this turn:
+    busy squadrons free up at the next turn start, when waiting transfers are
+    planned again.
+    """
+    from game.ato.flighttype import FlightType
+    from game.transfers import AirliftPlanner
+
+    planner = AirliftPlanner.__new__(AirliftPlanner)
+    planner.transfer = SimpleNamespace(  # type: ignore[assignment]
+        origin=origin, position=origin
+    )
+    planner.next_stop = destination
+    for squadron in game.air_wing_for(origin.captured).iter_squadrons():
+        if (
+            squadron.owned_aircraft > 0
+            and squadron.aircraft.capable_of(FlightType.TRANSPORT)
+            and planner.compatible_with_mission(squadron.aircraft, squadron.location)
+        ):
+            return True
+    return False
+
+
 class RedforSupplyPlanner:
     """Plans automatic ground supply transfers between REDFOR control points.
 
-    Short routes (< 150 km) use land convoys.
-    Long routes (>= 150 km) use airlift if transport aircraft are available.
+    See the module docstring for which transport each distance uses.
     """
 
     def __init__(self, game: Game) -> None:
@@ -53,34 +86,41 @@ class RedforSupplyPlanner:
         if not self._is_enabled():
             return
 
+        from game.logistics.transport_tiers import (
+            Tier,
+            preferred_airlift,
+            road_path,
+            tier_for,
+        )
         from game.transfers import TransferOrder
-        from game.theater.transitnetwork import TransitConnection
 
         now = datetime.utcnow()
         transfers_created = 0
         max_transfers = self._max_convoys()
-        threshold_m = AIRLIFT_DISTANCE_THRESHOLD_KM * 1000.0
 
         settings = getattr(self.game, "settings", None)
-        max_dist_km = getattr(settings, "redfor_resupply_max_distance_km", 200)
+        max_dist_km = getattr(settings, "redfor_resupply_max_distance_km", 400)
         max_dist_m = max_dist_km * 1000.0
 
         red_cps = [
-            cp for cp in self.game.theater.controlpoints
+            cp
+            for cp in self.game.theater.controlpoints
             if cp.captured.is_red and cp.can_deploy_ground_units
         ]
 
         if len(red_cps) < 2:
             return
 
-        # Collect candidate pairs — both road-connected and airlift-capable
-        candidate_pairs: list[tuple[ControlPoint, ControlPoint, float, bool]] = []
+        # Candidate pairs: (source, destination, distance, by_road, preferred airlift)
+        candidate_pairs: list[
+            tuple[ControlPoint, ControlPoint, float, bool, Optional[str]]
+        ] = []
         transit_network = self.red.transit_network
 
         for cp in red_cps:
             if cp not in transit_network.nodes:
                 continue
-            for neighbor, link_type in transit_network.nodes[cp].items():
+            for neighbor in list(transit_network.nodes[cp]):
                 if not neighbor.captured.is_red or not neighbor.can_deploy_ground_units:
                     continue
 
@@ -92,26 +132,32 @@ class RedforSupplyPlanner:
                 if dist_m > max_dist_m:
                     continue
 
-                use_airlift = dist_m >= threshold_m
-
-                # Road pairs: only if road link exists
-                if not use_airlift and link_type != TransitConnection.Road:
-                    continue
+                tier = tier_for(dist_m)
+                by_road = (
+                    tier is Tier.SHORT
+                    and road_path(transit_network, cp, neighbor) is not None
+                )
+                preferred = None if by_road else preferred_airlift(tier)
 
                 pair = tuple(sorted([cp.id, neighbor.id]))
                 existing = [tuple(sorted([p[0].id, p[1].id])) for p in candidate_pairs]
                 if pair not in existing:
-                    candidate_pairs.append((cp, neighbor, dist_m, use_airlift))
+                    candidate_pairs.append((cp, neighbor, dist_m, by_road, preferred))
 
         if not candidate_pairs:
             logger.debug("RedforSupplyPlanner: no eligible REDFOR base pairs found.")
             return
 
-        # Sort: short road routes first (more reliable), then airlift
-        candidate_pairs.sort(key=lambda t: (t[3], t[2]))
-        random.shuffle(candidate_pairs[:max(1, len(candidate_pairs) // 2)])
+        # Road routes first (more reliable), then airlift; nearest first within
+        # each. Shuffle the front half in place so the same pair doesn't win
+        # every turn (slicing and shuffling the copy had no effect).
+        candidate_pairs.sort(key=lambda t: (not t[3], t[2]))
+        half = max(1, len(candidate_pairs) // 2)
+        front = candidate_pairs[:half]
+        random.shuffle(front)
+        candidate_pairs[:half] = front
 
-        for source, destination, dist_m, use_airlift in candidate_pairs:
+        for source, destination, dist_m, by_road, preferred in candidate_pairs:
             if transfers_created >= max_transfers:
                 break
 
@@ -119,32 +165,60 @@ class RedforSupplyPlanner:
             if not units:
                 continue
 
-            mode = "airlift" if use_airlift else "convoy"
+            mode = "convoy" if by_road else f"airlift ({preferred} preferred)"
             dist_km = dist_m / 1000.0
 
             if not has_transfer_route(self.game, source, destination):
                 continue
+            # Every new transfer strips its units from the source base at once
+            # (new_transfer -> commit_losses). Don't stack a second order on a
+            # pair that is still waiting, and don't order an airlift no Red
+            # aircraft can fly: those units would sit in limbo indefinitely.
+            if self._pending_between(source, destination):
+                continue
+            if not by_road and not airlift_possible(self.game, source, destination):
+                logger.debug(
+                    "RedforSupplyPlanner: no Red transport can fly %s -> %s",
+                    source.name,
+                    destination.name,
+                )
+                continue
 
             try:
                 transfer = TransferOrder(source, destination, units)
-                if use_airlift:
+                if not by_road:
                     transfer.request_airflift = True
+                    transfer.preferred_airlift = preferred
                 self.red.transfers.new_transfer(transfer, now)
                 transfers_created += 1
                 logger.info(
                     "RedforSupplyPlanner: %s %s -> %s (%.0f km, %d units)",
-                    mode, source.name, destination.name, dist_km, len(units),
+                    mode,
+                    source.name,
+                    destination.name,
+                    dist_km,
+                    len(units),
                 )
             except Exception as e:
                 logger.warning(
                     "RedforSupplyPlanner: failed to create %s %s->%s: %s",
-                    mode, source.name, destination.name, e,
+                    mode,
+                    source.name,
+                    destination.name,
+                    e,
                 )
 
         if transfers_created:
             logger.info(
-                "RedforSupplyPlanner: created %d transfer(s) this turn.", transfers_created
+                "RedforSupplyPlanner: created %d transfer(s) this turn.",
+                transfers_created,
             )
+
+    def _pending_between(self, source: ControlPoint, destination: ControlPoint) -> bool:
+        return any(
+            t.origin is source and t.destination is destination
+            for t in self.red.transfers
+        )
 
     def _is_enabled(self) -> bool:
         settings = getattr(self.game, "settings", None)
@@ -158,9 +232,7 @@ class RedforSupplyPlanner:
             return MAX_CONVOYS_PER_TURN
         return getattr(settings, "redfor_resupply_max_bases", MAX_CONVOYS_PER_TURN)
 
-    def _select_units(
-        self, cp: ControlPoint, count: int
-    ) -> dict[GroundUnitType, int]:
+    def _select_units(self, cp: ControlPoint, count: int) -> dict[GroundUnitType, int]:
         units: dict[GroundUnitType, int] = {}
         try:
             if not hasattr(cp, "base") or not hasattr(cp.base, "armor"):

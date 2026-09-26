@@ -1,9 +1,10 @@
-"""LOGISTIC flights that carry warehouse transfers.
+"""LOGISTIC flights that carry BLUEFOR warehouse transfers.
 
-A scheduled warehouse transfer is only delivered if a real LOGISTIC flight
-carries it. This module plans that flight (nearest free transport squadron to
-the source base, one aircraft), finds it again later, and removes it when the
-transfer is cancelled. Settlement after the mission lives in
+BLUEFOR supplies are flown by players. A scheduled warehouse transfer is only
+delivered if its LOGISTIC flight comes home: one aircraft from the squadron the
+player picked, with the seat set as a player seat. This module lists the
+squadrons that can fly a transfer, plans the flight, finds it again later, and
+removes it when the transfer is cancelled. Settlement after the mission lives in
 ``LogisticsManager.on_state_processed``.
 
 Modelled on Retribution's own ``AirliftPlanner.create_package_for_airlift``.
@@ -46,31 +47,45 @@ def flight_for_transfer(game: Game, transfer_id: str) -> Optional[Flight]:
     return None
 
 
-def find_transport_squadron(game: Game, source: ControlPoint) -> Optional[Squadron]:
-    """The free LOGISTIC-capable blue squadron based nearest the source base."""
+def transport_squadrons(
+    game: Game, source: ControlPoint, destination: ControlPoint
+) -> list[Squadron]:
+    """Blue squadrons that can fly a warehouse transfer right now, nearest first.
+
+    LOGISTIC-capable and human-flyable (the seat is a player seat), based at a
+    friendly base, with a free aircraft and pilot, and able to operate from both
+    the source and the destination (runway, helipad or FARP).
+    """
     candidates = [
         squadron
         for squadron in game.blue.air_wing.iter_squadrons()
         if squadron.capable_of(FlightType.LOGISTIC)
+        and squadron.aircraft.flyable  # player seat: AI-only types can't have one
         and squadron.location.captured is Player.BLUE
         and squadron.can_fulfill_flight(1)
+        and source.can_operate(squadron.aircraft)
+        and destination.can_operate(squadron.aircraft)
     ]
-    if not candidates:
-        return None
-    return min(
+    return sorted(
         candidates,
         key=lambda s: s.location.position.distance_to_point(source.position),
     )
 
 
 def plan_transfer_flight(
-    game: Game, transfer: LogisticsTransfer, now: datetime
+    game: Game,
+    transfer: LogisticsTransfer,
+    now: datetime,
+    squadron: Optional[Squadron] = None,
 ) -> Optional[Flight]:
     """Create (or return the existing) LOGISTIC flight for a warehouse transfer.
 
-    Returns None when the transfer cannot be flown right now: no free transport
-    aircraft, a base is no longer friendly, or the route could not be planned.
-    The transfer then stays PLANNED and is retried at the start of next turn.
+    BLUEFOR supplies are flown by players: the player picks the squadron when
+    scheduling (remembered on the transfer for later turns) and the flight's
+    seat is a player seat. Returns None when the transfer cannot be flown right
+    now: the squadron has no free aircraft or cannot use both bases, a base is
+    no longer friendly, or the route could not be planned. The transfer then
+    stays PLANNED and is retried at the start of next turn.
     """
     existing = flight_for_transfer(game, transfer.transfer_id)
     if existing is not None:
@@ -83,11 +98,16 @@ def plan_transfer_flight(
     if source.captured is not Player.BLUE or destination.captured is not Player.BLUE:
         return None
 
-    squadron = find_transport_squadron(game, source)
+    if squadron is not None:
+        transfer.squadron = squadron
+    squadron = getattr(transfer, "squadron", None)
     if squadron is None:
+        return None
+    if squadron not in transport_squadrons(game, source, destination):
         logger.info(
-            "Warehouse transfer %s: no free transport aircraft; retrying next turn",
+            "Warehouse transfer %s: %s cannot fly it this turn; retrying next turn",
             transfer.transfer_id[:8],
+            squadron.name,
         )
         return None
 
@@ -98,6 +118,12 @@ def plan_transfer_flight(
     package = Package(destination, game.db.flights, auto_asap=True)
     flight = Flight(package, squadron, 1, FlightType.LOGISTIC, start_type, divert=None)
     flight.transfer_id = transfer.transfer_id
+    # A player seat, as if "Player" were ticked in the flight's slot editor.
+    for member in flight.iter_members():
+        if member.pilot is not None:
+            member.pilot.player = True
+            member.assign_tgp_laser_code(game.laser_code_registry.alloc_laser_code())
+        break
     package.add_flight(flight)
     try:
         flight.recreate_flight_plan()

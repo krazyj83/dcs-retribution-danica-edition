@@ -804,7 +804,7 @@ class Settings:
         "Maximum REDFOR resupply distance (km)",
         page=CAMPAIGN_MANAGEMENT_PAGE,
         section=REDFOR_LOGISTICS_SECTION,
-        default=200,
+        default=400,
         min=50,
         max=800,
         detail=(

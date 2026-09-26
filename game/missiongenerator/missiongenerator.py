@@ -198,7 +198,7 @@ class MissionGenerator:
           clean and avoids coupling it to the logistics module.
         """
         logistics_flights_generated = 0
-        logistics_flights_skipped   = 0
+        logistics_flights_skipped = 0
 
         # Both coalitions can plan LOGISTIC flights (LogisticPlanner runs for
         # blue and red alike — see game/ato/logistic_planner.py), but this
@@ -222,15 +222,14 @@ class MissionGenerator:
                         continue
 
                     try:
-                        gen = LogisticsMissionGenerator(
-                            flight, self.game, self.mission
-                        )
+                        gen = LogisticsMissionGenerator(flight, self.game, self.mission)
                         success = gen.generate()
                         if success:
                             logistics_flights_generated += 1
                             logging.info(
                                 "MissionGenerator: LOGISTICS flight generated "
-                                "(transfer %s)", transfer_id[:8],
+                                "(transfer %s)",
+                                transfer_id[:8],
                             )
                         else:
                             logistics_flights_skipped += 1
@@ -244,8 +243,7 @@ class MissionGenerator:
 
         if logistics_flights_generated or logistics_flights_skipped:
             logging.info(
-                "MissionGenerator: logistics flights — "
-                "generated=%d skipped=%d",
+                "MissionGenerator: logistics flights — " "generated=%d skipped=%d",
                 logistics_flights_generated,
                 logistics_flights_skipped,
             )
@@ -513,7 +511,9 @@ class MissionGenerator:
                     warehouse["coalition"] = "blue"
                 else:
                     warehouse["coalition"] = "red"
-                warehouse["dynamicCargo"] = True  # always on — required by logistics system
+                warehouse["dynamicCargo"] = (
+                    True  # always on — required by logistics system
+                )
                 if tmu.theater_unit.is_ship or tmu.dcs_unit.category == "Heliports":  # type: ignore
                     warehouse["dynamicSpawn"] = settings.dynamic_slots
                     warehouse["allowHotStart"] = settings.dynamic_slots_hot

@@ -77,36 +77,36 @@ logger = logging.getLogger(__name__)
 # ======================================================================
 
 STOCK_CRITICAL_COLOR = QColor("#c0392b")
-STOCK_LOW_COLOR      = QColor("#e67e22")
-STOCK_OK_COLOR       = QColor("#27ae60")
-BLUE_COLOR           = QColor("#3498db")
-RED_COLOR            = QColor("#e74c3c")
-NEUTRAL_COLOR        = QColor("#95a5a6")
+STOCK_LOW_COLOR = QColor("#e67e22")
+STOCK_OK_COLOR = QColor("#27ae60")
+BLUE_COLOR = QColor("#3498db")
+RED_COLOR = QColor("#e74c3c")
+NEUTRAL_COLOR = QColor("#95a5a6")
 
 STATUS_COLORS = {
-    TransferStatus.PLANNED:   QColor("#3498db"),
+    TransferStatus.PLANNED: QColor("#3498db"),
     TransferStatus.IN_FLIGHT: QColor("#f39c12"),
     TransferStatus.DELIVERED: QColor("#27ae60"),
-    TransferStatus.FAILED:    QColor("#c0392b"),
+    TransferStatus.FAILED: QColor("#c0392b"),
 }
 
 CATEGORY_COLORS = {
-    "Air-to-Air":                QColor("#3498db"),
-    "Air-to-Ground Missile":     QColor("#e67e22"),
-    "Bomb":                      QColor("#e74c3c"),
-    "Rocket":                    QColor("#f39c12"),
-    "Fuel Tank":                 QColor("#95a5a6"),
-    "Pod":                       QColor("#9b59b6"),
-    "Gun / Cannon":              QColor("#1abc9c"),
-    "Anti-Ship":                 QColor("#2980b9"),
-    "Armour":                    QColor("#c0392b"),
-    "Air Defence":               QColor("#8e44ad"),
+    "Air-to-Air": QColor("#3498db"),
+    "Air-to-Ground Missile": QColor("#e67e22"),
+    "Bomb": QColor("#e74c3c"),
+    "Rocket": QColor("#f39c12"),
+    "Fuel Tank": QColor("#95a5a6"),
+    "Pod": QColor("#9b59b6"),
+    "Gun / Cannon": QColor("#1abc9c"),
+    "Anti-Ship": QColor("#2980b9"),
+    "Armour": QColor("#c0392b"),
+    "Air Defence": QColor("#8e44ad"),
     "Infantry Fighting Vehicle": QColor("#d35400"),
-    "Artillery":                 QColor("#e74c3c"),
-    "Support Vehicle":           QColor("#7f8c8d"),
-    "Radar / Command":           QColor("#16a085"),
-    "Other Ground":              QColor("#95a5a6"),
-    "Other":                     QColor("#7f8c8d"),
+    "Artillery": QColor("#e74c3c"),
+    "Support Vehicle": QColor("#7f8c8d"),
+    "Radar / Command": QColor("#16a085"),
+    "Other Ground": QColor("#95a5a6"),
+    "Other": QColor("#7f8c8d"),
 }
 
 RESTOCK_STYLE = (
@@ -156,8 +156,8 @@ def cp_faction(cp) -> str:
 def all_control_points(game: Game) -> List:
     try:
         cps = list(game.theater.controlpoints)
-        blue    = [cp for cp in cps if cp_faction(cp) == "blue"]
-        red     = [cp for cp in cps if cp_faction(cp) == "red"]
+        blue = [cp for cp in cps if cp_faction(cp) == "blue"]
+        red = [cp for cp in cps if cp_faction(cp) == "red"]
         neutral = [cp for cp in cps if cp_faction(cp) == "neutral"]
         return blue + red + neutral
     except Exception:
@@ -184,11 +184,19 @@ def _item_restock_cost(item: WeaponStockItem) -> float:
     deficit = item.capacity - item.quantity
     if deficit <= 0:
         return 0.0
-    if item.category in ("Armour", "Air Defence",
-                          "Infantry Fighting Vehicle", "Artillery", "Support"):
+    if item.category in (
+        "Armour",
+        "Air Defence",
+        "Infantry Fighting Vehicle",
+        "Artillery",
+        "Support",
+    ):
         try:
             from game.dcs.groundunittype import GroundUnitType
-            for gut in GroundUnitType._by_name.values():  # each_unit_type() does not exist
+
+            for (
+                gut
+            ) in GroundUnitType._by_name.values():  # each_unit_type() does not exist
                 if getattr(gut, "variant_id", None) == item.clsid:
                     return round(deficit * gut.price, 1)
         except Exception:
@@ -211,12 +219,17 @@ def _aligned_write(f, columns, rows_data):
             col_widths[col] = max(col_widths[col], len(str(row.get(col, ""))))
     f.write(",".join(col.ljust(col_widths[col]) for col in columns) + "\n")
     for row in rows_data:
-        f.write(",".join(str(row.get(col, "")).ljust(col_widths[col]) for col in columns) + "\n")
+        f.write(
+            ",".join(str(row.get(col, "")).ljust(col_widths[col]) for col in columns)
+            + "\n"
+        )
 
 
 def export_warehouse_csv(logistics: LogisticsManager, path: str) -> int:
     rows_data = []
-    for wh in sorted(logistics.warehouses_for_coalition("blue"), key=lambda w: w.cp_name):
+    for wh in sorted(
+        logistics.warehouses_for_coalition("blue"), key=lambda w: w.cp_name
+    ):
         row = {"base": wh.cp_name}
         for cat in WarehouseCategory:
             row[cat.value] = f"{wh.stock[cat].quantity:.1f}"
@@ -229,7 +242,9 @@ def export_warehouse_csv(logistics: LogisticsManager, path: str) -> int:
     return len(rows_data)
 
 
-def import_warehouse_csv(logistics: LogisticsManager, path: str) -> Tuple[int, List[str]]:
+def import_warehouse_csv(
+    logistics: LogisticsManager, path: str
+) -> Tuple[int, List[str]]:
     imported = 0
     warnings: List[str] = []
     with open(path, newline="", encoding="utf-8") as f:
@@ -237,11 +252,16 @@ def import_warehouse_csv(logistics: LogisticsManager, path: str) -> Tuple[int, L
         if reader.fieldnames:
             reader.fieldnames = [n.strip() for n in reader.fieldnames]
         if reader.fieldnames and "base" not in reader.fieldnames:
-            raise ValueError("CSV missing 'base' column. Expected: " + ", ".join(WAREHOUSE_CSV_COLUMNS))
+            raise ValueError(
+                "CSV missing 'base' column. Expected: "
+                + ", ".join(WAREHOUSE_CSV_COLUMNS)
+            )
         for row in reader:
             row = {k.strip(): v.strip() for k, v in row.items() if k}
             base = row.get("base", "").strip()
-            wh = next((w for w in logistics._warehouses.values() if w.cp_name == base), None)
+            wh = next(
+                (w for w in logistics._warehouses.values() if w.cp_name == base), None
+            )
             if wh is None:
                 warnings.append(f"Unknown base '{base}' - skipped")
                 continue
@@ -253,7 +273,9 @@ def import_warehouse_csv(logistics: LogisticsManager, path: str) -> Tuple[int, L
                     wh.stock[cat].quantity = float(val)
                     imported += 1
                 except ValueError:
-                    warnings.append(f"Invalid value for {base}/{cat.value}: '{val}' - skipped")
+                    warnings.append(
+                        f"Invalid value for {base}/{cat.value}: '{val}' - skipped"
+                    )
     return imported, warnings
 
 
@@ -261,11 +283,16 @@ def export_inventory_csv(logistics: LogisticsManager, path: str) -> int:
     rows_data = []
     for inv in sorted(logistics._weapon_inventories.values(), key=lambda i: i.cp_name):
         for item in sorted(inv.items.values(), key=lambda i: (i.category, i.name)):
-            rows_data.append({
-                "base": inv.cp_name, "clsid": item.clsid, "name": item.name,
-                "category": item.category, "quantity": str(item.quantity),
-                "capacity": str(item.capacity),
-            })
+            rows_data.append(
+                {
+                    "base": inv.cp_name,
+                    "clsid": item.clsid,
+                    "name": item.name,
+                    "category": item.category,
+                    "quantity": str(item.quantity),
+                    "capacity": str(item.capacity),
+                }
+            )
     with open(path, "w", newline="", encoding="utf-8") as f:
         if not rows_data:
             f.write(",".join(INVENTORY_CSV_COLUMNS) + "\n")
@@ -274,7 +301,9 @@ def export_inventory_csv(logistics: LogisticsManager, path: str) -> int:
     return len(rows_data)
 
 
-def import_inventory_csv(logistics: LogisticsManager, path: str) -> Tuple[int, List[str]]:
+def import_inventory_csv(
+    logistics: LogisticsManager, path: str
+) -> Tuple[int, List[str]]:
     imported = 0
     warnings: List[str] = []
     inv_by_name = {inv.cp_name: inv for inv in logistics._weapon_inventories.values()}
@@ -283,15 +312,18 @@ def import_inventory_csv(logistics: LogisticsManager, path: str) -> Tuple[int, L
         if reader.fieldnames:
             reader.fieldnames = [n.strip() for n in reader.fieldnames]
         if reader.fieldnames and "base" not in reader.fieldnames:
-            raise ValueError("CSV missing 'base' column. Expected: " + ", ".join(INVENTORY_CSV_COLUMNS))
+            raise ValueError(
+                "CSV missing 'base' column. Expected: "
+                + ", ".join(INVENTORY_CSV_COLUMNS)
+            )
         for row in reader:
             row = {k.strip(): v.strip() for k, v in row.items() if k}
-            base     = row.get("base", "").strip()
-            clsid    = row.get("clsid", "").strip()
-            name     = row.get("name", "").strip()
+            base = row.get("base", "").strip()
+            clsid = row.get("clsid", "").strip()
+            name = row.get("name", "").strip()
             category = row.get("category", "Other").strip()
-            qty_str  = row.get("quantity", "").strip()
-            cap_str  = row.get("capacity", "").strip()
+            qty_str = row.get("quantity", "").strip()
+            cap_str = row.get("capacity", "").strip()
             if not base or not clsid:
                 warnings.append(f"Row missing base or clsid - skipped: {row}")
                 continue
@@ -302,7 +334,9 @@ def import_inventory_csv(logistics: LogisticsManager, path: str) -> Tuple[int, L
             try:
                 qty = int(float(qty_str)) if qty_str else 0
             except ValueError:
-                warnings.append(f"Invalid quantity for {base}/{name}: '{qty_str}' - skipped")
+                warnings.append(
+                    f"Invalid quantity for {base}/{name}: '{qty_str}' - skipped"
+                )
                 continue
             try:
                 cap = int(float(cap_str)) if cap_str else qty
@@ -313,8 +347,11 @@ def import_inventory_csv(logistics: LogisticsManager, path: str) -> Tuple[int, L
                 inv.items[clsid].capacity = cap
             else:
                 inv.items[clsid] = WeaponStockItem(
-                    name=name or clsid, clsid=clsid, category=category,
-                    quantity=qty, capacity=cap,
+                    name=name or clsid,
+                    clsid=clsid,
+                    category=category,
+                    quantity=qty,
+                    capacity=cap,
                 )
             imported += 1
     return imported, warnings
@@ -323,6 +360,7 @@ def import_inventory_csv(logistics: LogisticsManager, path: str) -> Tuple[int, L
 # ======================================================================
 # Map point picker
 # ======================================================================
+
 
 class MapPointPickerDialog(QDialog):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -363,6 +401,7 @@ class MapPointPickerDialog(QDialog):
 # ======================================================================
 # Drop Zone dialog
 # ======================================================================
+
 
 class DropZoneDialog(QDialog):
     def __init__(
@@ -521,8 +560,9 @@ class DropZoneDialog(QDialog):
 # Tab 1 - Drop Zones
 # ======================================================================
 
+
 class DropZonesTab(QWidget):
-    dropZoneAdded   = Signal(object)
+    dropZoneAdded = Signal(object)
     dropZoneRemoved = Signal(str)
     dropZoneUpdated = Signal(object)
 
@@ -551,11 +591,22 @@ class DropZonesTab(QWidget):
         layout.addLayout(toolbar)
         self.table = QTableWidget()
         self.table.setColumnCount(9)
-        self.table.setHorizontalHeaderLabels([
-            "Name", "Type", "Faction", "Base",
-            "Latitude", "Longitude", "Radius (m)", "Active", "Notes"
-        ])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.setHorizontalHeaderLabels(
+            [
+                "Name",
+                "Type",
+                "Faction",
+                "Base",
+                "Latitude",
+                "Longitude",
+                "Radius (m)",
+                "Active",
+                "Notes",
+            ]
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
@@ -575,16 +626,17 @@ class DropZonesTab(QWidget):
             self.table.setItem(row, 0, QTableWidgetItem(dz.name))
             type_item = QTableWidgetItem(dz.dz_type.value.capitalize())
             type_item.setForeground(
-                QColor("#e67e22") if dz.dz_type == DropZoneType.TROOP
+                QColor("#e67e22")
+                if dz.dz_type == DropZoneType.TROOP
                 else QColor("#3498db")
             )
             self.table.setItem(row, 1, type_item)
             faction = getattr(dz, "coalition", "blue")
             faction_item = QTableWidgetItem(faction.upper())
             faction_item.setForeground(
-                BLUE_COLOR if faction == "blue"
-                else RED_COLOR if faction == "red"
-                else NEUTRAL_COLOR
+                BLUE_COLOR
+                if faction == "blue"
+                else RED_COLOR if faction == "red" else NEUTRAL_COLOR
             )
             self.table.setItem(row, 2, faction_item)
             self.table.setItem(row, 3, QTableWidgetItem(getattr(dz, "cp_name", "")))
@@ -600,7 +652,9 @@ class DropZonesTab(QWidget):
     def _selected_dz_id(self) -> Optional[str]:
         if not self.table.selectedItems():
             return None
-        return self.table.item(self.table.currentRow(), 0).data(Qt.ItemDataRole.UserRole)
+        return self.table.item(self.table.currentRow(), 0).data(
+            Qt.ItemDataRole.UserRole
+        )
 
     def _on_selection_changed(self) -> None:
         has = bool(self.table.selectedItems())
@@ -635,7 +689,8 @@ class DropZonesTab(QWidget):
             return
         dz = self.logistics.get_drop_zone(dz_id)
         reply = QMessageBox.question(
-            self, "Delete Drop Zone",
+            self,
+            "Delete Drop Zone",
             f"Delete drop zone '{dz.name}'?\nPlanned transfers will be cancelled.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
@@ -644,10 +699,15 @@ class DropZonesTab(QWidget):
             self.dropZoneRemoved.emit(dz_id)
             self.refresh()
 
-    def add_drop_zone_at(self, lat: float, lon: float, cp_id: Optional[int] = None) -> None:
+    def add_drop_zone_at(
+        self, lat: float, lon: float, cp_id: Optional[int] = None
+    ) -> None:
         dlg = DropZoneDialog(
-            game=self.game, parent=self,
-            preselect_cp_id=cp_id, preset_lat=lat, preset_lon=lon,
+            game=self.game,
+            parent=self,
+            preselect_cp_id=cp_id,
+            preset_lat=lat,
+            preset_lon=lon,
         )
         if dlg.exec() == QDialog.DialogCode.Accepted:
             dz = dlg.get_drop_zone()
@@ -659,6 +719,7 @@ class DropZonesTab(QWidget):
 # ======================================================================
 # Tab 2 - Warehouses
 # ======================================================================
+
 
 class WarehouseTab(QWidget):
     def __init__(self, logistics: LogisticsManager, game: Game) -> None:
@@ -689,7 +750,9 @@ class WarehouseTab(QWidget):
         self.table.setHorizontalHeaderLabels(
             ["Base"] + [c.value.replace("_", " ").title() for c in cats]
         )
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(self.table)
@@ -697,8 +760,8 @@ class WarehouseTab(QWidget):
         transfer_group = QGroupBox("Direct Stock Transfer (instant, no aircraft)")
         exp_layout = QFormLayout()
         self.from_combo = QComboBox()
-        self.to_combo   = QComboBox()
-        self.cat_combo  = QComboBox()
+        self.to_combo = QComboBox()
+        self.cat_combo = QComboBox()
         for cat in WarehouseCategory:
             self.cat_combo.addItem(cat.value.replace("_", " ").title(), cat)
         self.amount_spin = QDoubleSpinBox()
@@ -708,10 +771,10 @@ class WarehouseTab(QWidget):
         self.transfer_btn = QPushButton("Transfer Now")
         self.transfer_btn.clicked.connect(self._on_direct_transfer)
         exp_layout.addRow("From base:", self.from_combo)
-        exp_layout.addRow("To base:",   self.to_combo)
-        exp_layout.addRow("Category:",  self.cat_combo)
-        exp_layout.addRow("Amount:",    self.amount_spin)
-        exp_layout.addRow("",           self.transfer_btn)
+        exp_layout.addRow("To base:", self.to_combo)
+        exp_layout.addRow("Category:", self.cat_combo)
+        exp_layout.addRow("Amount:", self.amount_spin)
+        exp_layout.addRow("", self.transfer_btn)
         transfer_group.setLayout(exp_layout)
         layout.addWidget(transfer_group)
 
@@ -809,7 +872,11 @@ class WarehouseTab(QWidget):
         self.base_filter_combo.clear()
         self.base_filter_combo.addItem("All bases", -1)
         for wh in self.logistics.warehouses_for_coalition("blue"):
-            label = f"[MAIN] {wh.cp_name}" if self.logistics.is_main_base(wh.cp_id) else wh.cp_name
+            label = (
+                f"[MAIN] {wh.cp_name}"
+                if self.logistics.is_main_base(wh.cp_id)
+                else wh.cp_name
+            )
             self.base_filter_combo.addItem(label, wh.cp_id)
         idx = self.base_filter_combo.findData(current)
         if idx >= 0:
@@ -827,12 +894,18 @@ class WarehouseTab(QWidget):
         cats = list(WarehouseCategory)
         self.table.setRowCount(len(warehouses))
         for row, wh in enumerate(warehouses):
-            name = f"[MAIN] {wh.cp_name}" if self.logistics.is_main_base(wh.cp_id) else wh.cp_name
+            name = (
+                f"[MAIN] {wh.cp_name}"
+                if self.logistics.is_main_base(wh.cp_id)
+                else wh.cp_name
+            )
             self.table.setItem(row, 0, QTableWidgetItem(name))
             for col, cat in enumerate(cats, start=1):
                 sd = wh.stock[cat]
                 pct = int(100 * sd.quantity / sd.capacity) if sd.capacity else 0
-                cell = QTableWidgetItem(f"{sd.quantity:.0f} / {sd.capacity:.0f} ({pct}%)")
+                cell = QTableWidgetItem(
+                    f"{sd.quantity:.0f} / {sd.capacity:.0f} ({pct}%)"
+                )
                 cell.setForeground(stock_color(sd.quantity, sd.capacity))
                 self.table.setItem(row, col, cell)
 
@@ -845,9 +918,9 @@ class WarehouseTab(QWidget):
 
     def _on_direct_transfer(self) -> None:
         from_cp_id = self.from_combo.currentData()
-        to_cp_id   = self.to_combo.currentData()
-        category   = self.cat_combo.currentData()
-        amount     = self.amount_spin.value()
+        to_cp_id = self.to_combo.currentData()
+        category = self.cat_combo.currentData()
+        amount = self.amount_spin.value()
         if from_cp_id == to_cp_id:
             self.status_label.setText("Source and destination must differ.")
             return
@@ -869,9 +942,12 @@ class WarehouseTab(QWidget):
     def _on_restock_category(self, category: WarehouseCategory) -> None:
         cp_id = self.base_filter_combo.currentData()
         if cp_id == -1 or not self.logistics.is_main_base(cp_id):
-            QMessageBox.warning(self, "Main base only",
+            QMessageBox.warning(
+                self,
+                "Main base only",
                 "Per-category restock is only available at the designated main base.\n"
-                "Set a main base in the Main Base tab first.")
+                "Set a main base in the Main Base tab first.",
+            )
             return
         wh = self.logistics.get_warehouse(cp_id)
         if wh is None:
@@ -879,15 +955,19 @@ class WarehouseTab(QWidget):
         sd = wh.stock[category]
         deficit = max(0.0, sd.capacity - sd.quantity)
         if deficit <= 0:
-            QMessageBox.information(self, "Already full",
+            QMessageBox.information(
+                self,
+                "Already full",
                 f"{category.value.title()} is already at capacity "
-                f"({sd.quantity:.0f} / {sd.capacity:.0f}).")
+                f"({sd.quantity:.0f} / {sd.capacity:.0f}).",
+            )
             return
         cost = self.logistics.restock_warehouse_category_cost(cp_id, category)
         budget = self.game.blue.budget if self.game else 0
         base_name = self.base_filter_combo.currentText()
         reply = QMessageBox.question(
-            self, f"Restock {category.value.title()}",
+            self,
+            f"Restock {category.value.title()}",
             f"Restock {category.value} at {base_name} to full capacity?\n\n"
             f"  Current:  {sd.quantity:.0f} / {sd.capacity:.0f}\n"
             f"  Deficit:  {deficit:.0f} units\n"
@@ -898,8 +978,11 @@ class WarehouseTab(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
         if budget < cost:
-            QMessageBox.warning(self, "Insufficient funds",
-                f"Cannot afford restock.\nCost: ${cost:.2f}M  Budget: ${budget:.1f}M")
+            QMessageBox.warning(
+                self,
+                "Insufficient funds",
+                f"Cannot afford restock.\nCost: ${cost:.2f}M  Budget: ${budget:.1f}M",
+            )
             return
         self.logistics.restock_warehouse_category(cp_id, category)
         self.game.blue.adjust_budget(-cost)
@@ -913,18 +996,24 @@ class WarehouseTab(QWidget):
     def _on_restock(self) -> None:
         cp_id = self.base_filter_combo.currentData()
         if cp_id == -1 or not self.logistics.is_main_base(cp_id):
-            QMessageBox.warning(self, "Main base only",
+            QMessageBox.warning(
+                self,
+                "Main base only",
                 "Restock is only available at the designated main base.\n"
-                "Set a main base in the Main Base tab first.")
+                "Set a main base in the Main Base tab first.",
+            )
             return
         cost = self.logistics.restock_warehouse_cost(cp_id)
         if cost <= 0:
-            QMessageBox.information(self, "Already full", "Warehouse is already at capacity.")
+            QMessageBox.information(
+                self, "Already full", "Warehouse is already at capacity."
+            )
             return
         budget = self.game.blue.budget if self.game else 0
         base_name = self.base_filter_combo.currentText()
         reply = QMessageBox.question(
-            self, "Confirm Full Restock",
+            self,
+            "Confirm Full Restock",
             f"Restock ALL categories at {base_name} to full capacity?\n\n"
             f"Total cost: ${cost:.1f}M  (rate: $0.05M per unit deficit)\n"
             f"Current budget: ${budget:.1f}M",
@@ -933,8 +1022,11 @@ class WarehouseTab(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
         if budget < cost:
-            QMessageBox.warning(self, "Insufficient funds",
-                f"Cannot afford restock.\nCost: ${cost:.1f}M  Budget: ${budget:.1f}M")
+            QMessageBox.warning(
+                self,
+                "Insufficient funds",
+                f"Cannot afford restock.\nCost: ${cost:.1f}M  Budget: ${budget:.1f}M",
+            )
             return
         self.logistics.restock_warehouse(cp_id)
         self.game.blue.adjust_budget(-cost)
@@ -953,8 +1045,11 @@ class WarehouseTab(QWidget):
         try:
             rows = export_warehouse_csv(self.logistics, path)
             self.status_label.setText(f"Exported {rows} bases to: {path}")
-            QMessageBox.information(self, "Export successful",
-                f"Exported {rows} bases.\n\nColumns: {', '.join(WAREHOUSE_CSV_COLUMNS)}")
+            QMessageBox.information(
+                self,
+                "Export successful",
+                f"Exported {rows} bases.\n\nColumns: {', '.join(WAREHOUSE_CSV_COLUMNS)}",
+            )
         except Exception as e:
             logger.exception("Warehouse CSV export failed")
             QMessageBox.critical(self, "Export failed", str(e))
@@ -985,6 +1080,7 @@ class WarehouseTab(QWidget):
 # ======================================================================
 # Tab 3 - Inventory
 # ======================================================================
+
 
 class InventoryTab(QWidget):
     def __init__(self, logistics: LogisticsManager, game: Game) -> None:
@@ -1026,7 +1122,9 @@ class InventoryTab(QWidget):
         self.items_table.setHorizontalHeaderLabels(
             ["Item", "Category", "Qty", "Cap", "Restock cost"]
         )
-        self.items_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.items_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
         for col in (1, 2, 3, 4):
             self.items_table.horizontalHeader().setSectionResizeMode(
                 col, QHeaderView.ResizeMode.ResizeToContents
@@ -1118,7 +1216,11 @@ class InventoryTab(QWidget):
         self.base_combo.clear()
         self.base_combo.addItem("-- Select base --", -1)
         for wh in self.logistics.warehouses_for_coalition("blue"):
-            label = f"[MAIN] {wh.cp_name}" if self.logistics.is_main_base(wh.cp_id) else wh.cp_name
+            label = (
+                f"[MAIN] {wh.cp_name}"
+                if self.logistics.is_main_base(wh.cp_id)
+                else wh.cp_name
+            )
             self.base_combo.addItem(label, wh.cp_id)
         idx = self.base_combo.findData(current_cp_id)
         if idx >= 0:
@@ -1173,9 +1275,9 @@ class InventoryTab(QWidget):
         inv = self.logistics.get_weapon_inventory(cp_id)
         if inv is None:
             return None
-        clsid = self.items_table.item(
-            self.items_table.currentRow(), 0
-        ).data(Qt.ItemDataRole.UserRole)
+        clsid = self.items_table.item(self.items_table.currentRow(), 0).data(
+            Qt.ItemDataRole.UserRole
+        )
         return inv.items.get(clsid)
 
     def _refresh_view(self) -> None:
@@ -1186,7 +1288,9 @@ class InventoryTab(QWidget):
             return
         inv = self.logistics.get_weapon_inventory(cp_id)
         if inv is None:
-            cp = next((cp for cp in blue_control_points(self.game) if cp.id == cp_id), None)
+            cp = next(
+                (cp for cp in blue_control_points(self.game) if cp.id == cp_id), None
+            )
             if cp:
                 inv = build_weapon_inventory(cp, self.game)
                 self.logistics.set_weapon_inventory(inv)
@@ -1236,9 +1340,13 @@ class InventoryTab(QWidget):
             qty_cell = QTableWidgetItem(str(item.quantity))
             qty_cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             qty_cell.setForeground(
-                STOCK_CRITICAL_COLOR if item.quantity == 0
-                else STOCK_LOW_COLOR if item.quantity < item.capacity * 0.3
-                else STOCK_OK_COLOR
+                STOCK_CRITICAL_COLOR
+                if item.quantity == 0
+                else (
+                    STOCK_LOW_COLOR
+                    if item.quantity < item.capacity * 0.3
+                    else STOCK_OK_COLOR
+                )
             )
             self.items_table.setItem(row, 2, qty_cell)
             cap_cell = QTableWidgetItem(str(item.capacity))
@@ -1252,9 +1360,13 @@ class InventoryTab(QWidget):
             else:
                 cost_cell = QTableWidgetItem(f"${cost:.2f}M")
                 cost_cell.setForeground(
-                    STOCK_CRITICAL_COLOR if deficit > item.capacity * 0.7
-                    else STOCK_LOW_COLOR if deficit > item.capacity * 0.3
-                    else STOCK_OK_COLOR
+                    STOCK_CRITICAL_COLOR
+                    if deficit > item.capacity * 0.7
+                    else (
+                        STOCK_LOW_COLOR
+                        if deficit > item.capacity * 0.3
+                        else STOCK_OK_COLOR
+                    )
                 )
             cost_cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.items_table.setItem(row, 4, cost_cell)
@@ -1268,9 +1380,9 @@ class InventoryTab(QWidget):
         inv = self.logistics.get_weapon_inventory(cp_id)
         if inv is None:
             return
-        clsid = self.items_table.item(
-            self.items_table.currentRow(), 0
-        ).data(Qt.ItemDataRole.UserRole)
+        clsid = self.items_table.item(self.items_table.currentRow(), 0).data(
+            Qt.ItemDataRole.UserRole
+        )
         if clsid in inv.items:
             inv.items[clsid].quantity = self.qty_spin.value()
             self._refresh_view()
@@ -1280,8 +1392,11 @@ class InventoryTab(QWidget):
 
     def _on_restock_item(self) -> None:
         if not self._is_main_base:
-            QMessageBox.warning(self, "Main base only",
-                "Per-item restock is only available at the designated main base.")
+            QMessageBox.warning(
+                self,
+                "Main base only",
+                "Per-item restock is only available at the designated main base.",
+            )
             return
         item = self._selected_item()
         if item is None:
@@ -1289,12 +1404,14 @@ class InventoryTab(QWidget):
         cost = _item_restock_cost(item)
         deficit = item.capacity - item.quantity
         if deficit <= 0:
-            QMessageBox.information(self, "Already full",
-                f"{item.name} is already at capacity.")
+            QMessageBox.information(
+                self, "Already full", f"{item.name} is already at capacity."
+            )
             return
         budget = self.game.blue.budget if self.game else 0
         reply = QMessageBox.question(
-            self, "Confirm Restock Item",
+            self,
+            "Confirm Restock Item",
             f"Restock {item.name}?\n\n"
             f"  Current: {item.quantity}  /  Capacity: {item.capacity}\n"
             f"  Deficit: {deficit} units\n"
@@ -1305,8 +1422,11 @@ class InventoryTab(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
         if budget < cost:
-            QMessageBox.warning(self, "Insufficient funds",
-                f"Cannot afford restock.\nCost: ${cost:.2f}M  Budget: ${budget:.1f}M")
+            QMessageBox.warning(
+                self,
+                "Insufficient funds",
+                f"Cannot afford restock.\nCost: ${cost:.2f}M  Budget: ${budget:.1f}M",
+            )
             return
         item.quantity = item.capacity
         self.game.blue.adjust_budget(-cost)
@@ -1324,7 +1444,8 @@ class InventoryTab(QWidget):
         if inv is None:
             return
         reply = QMessageBox.question(
-            self, "Zero inventory",
+            self,
+            "Zero inventory",
             "Set all weapon and equipment quantities to zero for this base?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
@@ -1336,18 +1457,24 @@ class InventoryTab(QWidget):
     def _on_restock_inventory(self) -> None:
         cp_id = self.base_combo.currentData()
         if cp_id is None or cp_id == -1 or not self.logistics.is_main_base(cp_id):
-            QMessageBox.warning(self, "Main base only",
+            QMessageBox.warning(
+                self,
+                "Main base only",
                 "Restock is only available at the designated main base.\n"
-                "Set a main base in the Main Base tab first.")
+                "Set a main base in the Main Base tab first.",
+            )
             return
         cost = self.logistics.restock_inventory_cost(cp_id)
         if cost <= 0:
-            QMessageBox.information(self, "Already full", "All items are already at capacity.")
+            QMessageBox.information(
+                self, "Already full", "All items are already at capacity."
+            )
             return
         budget = self.game.blue.budget if self.game else 0
         base_name = self.base_combo.currentText()
         reply = QMessageBox.question(
-            self, "Confirm Full Restock",
+            self,
+            "Confirm Full Restock",
             f"Restock ALL items at {base_name} to full capacity?\n\n"
             f"Cost: ${cost:.1f}M\n"
             f"  Weapons/rounds: $0.01M per unit deficit\n"
@@ -1358,8 +1485,11 @@ class InventoryTab(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
         if budget < cost:
-            QMessageBox.warning(self, "Insufficient funds",
-                f"Cannot afford restock.\nCost: ${cost:.1f}M  Budget: ${budget:.1f}M")
+            QMessageBox.warning(
+                self,
+                "Insufficient funds",
+                f"Cannot afford restock.\nCost: ${cost:.1f}M  Budget: ${budget:.1f}M",
+            )
             return
         self.logistics.restock_inventory(cp_id)
         self.game.blue.adjust_budget(-cost)
@@ -1378,9 +1508,12 @@ class InventoryTab(QWidget):
         try:
             rows = export_inventory_csv(self.logistics, path)
             self.status_label.setText(f"Exported {rows} items to: {path}")
-            QMessageBox.information(self, "Export successful",
+            QMessageBox.information(
+                self,
+                "Export successful",
                 f"Exported {rows} weapon/equipment items.\n\n"
-                f"Columns: {', '.join(INVENTORY_CSV_COLUMNS)}")
+                f"Columns: {', '.join(INVENTORY_CSV_COLUMNS)}",
+            )
         except Exception as e:
             logger.exception("Inventory CSV export failed")
             QMessageBox.critical(self, "Export failed", str(e))
@@ -1412,6 +1545,7 @@ class InventoryTab(QWidget):
 # Tab 4 - Transfers
 # ======================================================================
 
+
 class TransfersTab(QWidget):
     transferScheduled = Signal(object)
 
@@ -1439,9 +1573,9 @@ class TransfersTab(QWidget):
         layout = QVBoxLayout(self)
         sched_group = QGroupBox("Schedule New Transfer")
         sched_layout = QFormLayout()
-        self.src_combo  = QComboBox()
-        self.dst_combo  = QComboBox()
-        self.dz_combo   = QComboBox()
+        self.src_combo = QComboBox()
+        self.dst_combo = QComboBox()
+        self.dz_combo = QComboBox()
         self.tcat_combo = QComboBox()
         for cat in WarehouseCategory:
             self.tcat_combo.addItem(cat.value.replace("_", " ").title(), cat)
@@ -1450,31 +1584,42 @@ class TransfersTab(QWidget):
         self.tamt_spin.setSingleStep(50.0)
         self.tamt_spin.setDecimals(0)
         self.tamt_spin.setValue(200.0)
-        self.aircraft_label = QLabel(
-            "Nearest free transport squadron to the source base (1 aircraft)"
-        )
+        # BLUEFOR supplies are flown by players: pick the squadron to fly it.
+        self.squadron_combo = QComboBox()
         self.tnotes_edit = QLineEdit()
         self.tnotes_edit.setPlaceholderText("Optional notes...")
         self.dst_combo.currentIndexChanged.connect(self._on_dst_changed)
+        self.src_combo.currentIndexChanged.connect(self._refresh_squadrons)
         self.schedule_btn = QPushButton("Schedule Transfer")
         self.schedule_btn.clicked.connect(self._on_schedule)
-        sched_layout.addRow("From base:",     self.src_combo)
-        sched_layout.addRow("To base:",       self.dst_combo)
-        sched_layout.addRow("Drop zone:",     self.dz_combo)
-        sched_layout.addRow("Category:",      self.tcat_combo)
-        sched_layout.addRow("Quantity:",      self.tamt_spin)
-        sched_layout.addRow("Flown by:",      self.aircraft_label)
-        sched_layout.addRow("Notes:",         self.tnotes_edit)
-        sched_layout.addRow("",               self.schedule_btn)
+        sched_layout.addRow("From base:", self.src_combo)
+        sched_layout.addRow("To base:", self.dst_combo)
+        sched_layout.addRow("Drop zone:", self.dz_combo)
+        sched_layout.addRow("Category:", self.tcat_combo)
+        sched_layout.addRow("Quantity:", self.tamt_spin)
+        sched_layout.addRow("Flown by:", self.squadron_combo)
+        sched_layout.addRow("Notes:", self.tnotes_edit)
+        sched_layout.addRow("", self.schedule_btn)
         sched_group.setLayout(sched_layout)
         layout.addWidget(sched_group)
         layout.addWidget(QLabel("Transfer log:"))
         self.table = QTableWidget()
         self.table.setColumnCount(8)
-        self.table.setHorizontalHeaderLabels([
-            "ID", "From", "To", "Category", "Planned", "Delivered", "Status", "Turn",
-        ])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.setHorizontalHeaderLabels(
+            [
+                "ID",
+                "From",
+                "To",
+                "Category",
+                "Planned",
+                "Delivered",
+                "Status",
+                "Turn",
+            ]
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(self.table)
@@ -1499,11 +1644,17 @@ class TransfersTab(QWidget):
             src = self.logistics.get_warehouse(t.source_cp_id)
             dst = self.logistics.get_warehouse(t.dest_cp_id)
             self.table.setItem(row, 0, QTableWidgetItem(t.transfer_id[:8]))
-            self.table.setItem(row, 1, QTableWidgetItem(src.cp_name if src else str(t.source_cp_id)))
-            self.table.setItem(row, 2, QTableWidgetItem(dst.cp_name if dst else str(t.dest_cp_id)))
+            self.table.setItem(
+                row, 1, QTableWidgetItem(src.cp_name if src else str(t.source_cp_id))
+            )
+            self.table.setItem(
+                row, 2, QTableWidgetItem(dst.cp_name if dst else str(t.dest_cp_id))
+            )
             self.table.setItem(row, 3, QTableWidgetItem(t.category.value))
             self.table.setItem(row, 4, QTableWidgetItem(f"{t.quantity:.0f}"))
-            self.table.setItem(row, 5, QTableWidgetItem(f"{t.delivered:.0f}" if t.delivered else "-"))
+            self.table.setItem(
+                row, 5, QTableWidgetItem(f"{t.delivered:.0f}" if t.delivered else "-")
+            )
             status_item = QTableWidgetItem(t.status.value.capitalize())
             status_item.setForeground(STATUS_COLORS.get(t.status, QColor("white")))
             self.table.setItem(row, 6, status_item)
@@ -1517,25 +1668,60 @@ class TransfersTab(QWidget):
             for dz in self.logistics.drop_zones_for_cp(dst_cp_id):
                 if dz.active:
                     self.dz_combo.addItem(f"{dz.name} ({dz.dz_type.value})", dz.dz_id)
+        self._refresh_squadrons()
+
+    def _refresh_squadrons(self) -> None:
+        """Squadrons that can fly the selected source -> destination, nearest first."""
+        from game.logistics.transfer_flights import control_point, transport_squadrons
+
+        self.squadron_combo.clear()
+        source = control_point(self.game, self.src_combo.currentData())
+        destination = control_point(self.game, self.dst_combo.currentData())
+        squadrons = (
+            transport_squadrons(self.game, source, destination)
+            if source is not None and destination is not None
+            else []
+        )
+        for sq in squadrons:
+            self.squadron_combo.addItem(
+                f"{sq.name} - {sq.aircraft} @ {sq.location.name} "
+                f"({sq.untasked_aircraft} free)",
+                sq,
+            )
+        if not squadrons:
+            self.squadron_combo.addItem(
+                "No free transport squadron can use both bases", None
+            )
 
     def _on_schedule(self) -> None:
         src_cp_id = self.src_combo.currentData()
         dst_cp_id = self.dst_combo.currentData()
-        dz_id     = self.dz_combo.currentData()
-        category  = self.tcat_combo.currentData()
-        quantity  = self.tamt_spin.value()
-        aircraft  = "pending"  # set to the real type when the flight is planned
-        notes     = self.tnotes_edit.text().strip()
+        dz_id = self.dz_combo.currentData()
+        category = self.tcat_combo.currentData()
+        quantity = self.tamt_spin.value()
+        squadron = self.squadron_combo.currentData()
+        notes = self.tnotes_edit.text().strip()
         if src_cp_id == dst_cp_id:
             self.sched_status.setText("Source and destination must differ.")
             return
+        if squadron is None:
+            self.sched_status.setText(
+                "No free transport squadron can use both bases this turn."
+            )
+            return
+        aircraft = str(squadron.aircraft)
         if not dz_id:
             self.sched_status.setText("No active drop zone at destination.")
             return
         transfer = self.logistics.schedule_transfer(
-            source_cp_id=src_cp_id, dest_cp_id=dst_cp_id, dz_id=dz_id,
-            category=category, quantity=quantity, aircraft_type=aircraft,
-            turn=self.current_turn, notes=notes,
+            source_cp_id=src_cp_id,
+            dest_cp_id=dst_cp_id,
+            dz_id=dz_id,
+            category=category,
+            quantity=quantity,
+            aircraft_type=aircraft,
+            turn=self.current_turn,
+            notes=notes,
         )
         if transfer is None:
             self.sched_status.setText("Insufficient stock at source.")
@@ -1544,19 +1730,20 @@ class TransfersTab(QWidget):
         from game.logistics.transfer_flights import plan_transfer_flight
 
         flight = plan_transfer_flight(
-            self.game, transfer, self.game.conditions.start_time
+            self.game, transfer, self.game.conditions.start_time, squadron=squadron
         )
         if flight is not None:
             self._refresh_ato_panel()
             self.sched_status.setText(
-                f"Transfer {transfer.transfer_id[:8]} scheduled: {flight.unit_type} "
-                f"from {flight.squadron.location.name} added to the ATO."
+                f"Transfer {transfer.transfer_id[:8]} scheduled: player-seat "
+                f"{flight.unit_type} from {flight.squadron.location.name} added "
+                "to the ATO."
             )
         else:
             self.sched_status.setText(
-                f"Transfer {transfer.transfer_id[:8]} scheduled, but no transport "
-                "aircraft is free this turn. It gets first call on transport "
-                "aircraft next turn."
+                f"Transfer {transfer.transfer_id[:8]} scheduled, but its flight "
+                f"could not be planned this turn. {squadron.name} will try again "
+                "next turn."
             )
         self.transferScheduled.emit(transfer)
         self.refresh()
@@ -1588,6 +1775,7 @@ class TransfersTab(QWidget):
 # Tab 5 - Main Base designation
 # ======================================================================
 
+
 class MainBaseTab(QWidget):
     def __init__(self, logistics: LogisticsManager, game: Game) -> None:
         super().__init__()
@@ -1612,7 +1800,9 @@ class MainBaseTab(QWidget):
         layout.addWidget(info)
         layout.addSpacing(12)
         self.current_label = QLabel()
-        self.current_label.setStyleSheet("font-weight: bold; color: #4fc3f7; font-size: 13px;")
+        self.current_label.setStyleSheet(
+            "font-weight: bold; color: #4fc3f7; font-size: 13px;"
+        )
         layout.addWidget(self.current_label)
         layout.addSpacing(8)
         sel_layout = QHBoxLayout()
@@ -1656,11 +1846,14 @@ class MainBaseTab(QWidget):
         cp_name = self.base_combo.currentText().replace("[MAIN] ", "")
         self.logistics.set_main_base(cp_id)
         self.refresh()
-        QMessageBox.information(self, "Main Base Set",
+        QMessageBox.information(
+            self,
+            "Main Base Set",
             f"{cp_name} is now the main supply base.\n\n"
             "You can now restock its warehouse and inventory\n"
             "from the Warehouses and Inventory tabs.\n"
-            "Restock individual categories, individual items, or everything at once.")
+            "Restock individual categories, individual items, or everything at once.",
+        )
 
     def _on_clear(self) -> None:
         self.logistics.set_main_base(None)
@@ -1671,10 +1864,9 @@ class MainBaseTab(QWidget):
 # Main logistics window
 # ======================================================================
 
+
 class QLogisticsWindow(QDialog):
-    def __init__(
-        self, game: Optional[Game], parent: Optional[QWidget] = None
-    ) -> None:
+    def __init__(self, game: Optional[Game], parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.game = game
         self.setWindowTitle("Logistics & Supply Chain")
@@ -1706,6 +1898,7 @@ class QLogisticsWindow(QDialog):
 
         if not hasattr(self.game, "logistics") or self.game.logistics is None:
             from game.logistics import LogisticsManager
+
             self.game.logistics = LogisticsManager()
 
         sync_warehouses_from_game(self.game.logistics, self.game)
@@ -1714,17 +1907,17 @@ class QLogisticsWindow(QDialog):
         turn = getattr(self.game, "turn", 0)
 
         self._tabs = QTabWidget()
-        self.dz_tab  = DropZonesTab(logistics, self.game)
-        self.wh_tab  = WarehouseTab(logistics, self.game)
+        self.dz_tab = DropZonesTab(logistics, self.game)
+        self.wh_tab = WarehouseTab(logistics, self.game)
         self.inv_tab = InventoryTab(logistics, self.game)
-        self.tr_tab  = TransfersTab(logistics, self.game, current_turn=turn)
-        self.mb_tab  = MainBaseTab(logistics, self.game)
+        self.tr_tab = TransfersTab(logistics, self.game, current_turn=turn)
+        self.mb_tab = MainBaseTab(logistics, self.game)
 
-        self._tabs.addTab(self.dz_tab,  "Drop Zones")
-        self._tabs.addTab(self.wh_tab,  "Warehouses")
+        self._tabs.addTab(self.dz_tab, "Drop Zones")
+        self._tabs.addTab(self.wh_tab, "Warehouses")
         self._tabs.addTab(self.inv_tab, "Inventory")
-        self._tabs.addTab(self.tr_tab,  "Transfers")
-        self._tabs.addTab(self.mb_tab,  "Main Base")
+        self._tabs.addTab(self.tr_tab, "Transfers")
+        self._tabs.addTab(self.mb_tab, "Main Base")
         layout.addWidget(self._tabs)
 
         btn_row = QHBoxLayout()

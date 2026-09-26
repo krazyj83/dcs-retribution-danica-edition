@@ -5,15 +5,20 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, Dict, List, TYPE_CHECKING
 
-from game.logistics.custom_airdrop import CustomAirdropTarget, create_custom_airdrop_target
+from game.logistics.custom_airdrop import (
+    CustomAirdropTarget,
+    create_custom_airdrop_target,
+)
 
 if TYPE_CHECKING:
     from game import Game
     from game.debriefing import Debriefing
+    from game.squadrons import Squadron
 
 # ======================================================================
 # Drop Zones
 # ======================================================================
+
 
 class DropZoneType(Enum):
     TROOP = "troop"
@@ -38,6 +43,7 @@ class DropZone:
 # ======================================================================
 # Warehouses - broad supply categories
 # ======================================================================
+
 
 class WarehouseCategory(Enum):
     FUEL = "fuel"
@@ -76,12 +82,14 @@ class StockItem:
 # Weapon / equipment inventory - detailed per-base weapon stocks
 # ======================================================================
 
+
 @dataclass
 class WeaponStockItem:
     """Tracks quantity of a specific weapon or piece of equipment at a base."""
-    name: str        # Human-readable name e.g. "AIM-120C"
-    clsid: str       # DCS CLSID or unit variant_id for ground equipment
-    category: str    # "Air-to-Air", "Air-to-Ground", "Bomb", "Ground Unit", etc.
+
+    name: str  # Human-readable name e.g. "AIM-120C"
+    clsid: str  # DCS CLSID or unit variant_id for ground equipment
+    category: str  # "Air-to-Air", "Air-to-Ground", "Bomb", "Ground Unit", etc.
     quantity: int = 0
     capacity: int = 250
 
@@ -89,16 +97,22 @@ class WeaponStockItem:
 @dataclass
 class WeaponInventory:
     """Full weapon and equipment inventory for one base."""
+
     cp_id: int
     cp_name: str
     items: Dict[str, WeaponStockItem] = field(default_factory=dict)
 
-    def add_item(self, clsid: str, name: str, category: str, quantity: int = 10) -> None:
+    def add_item(
+        self, clsid: str, name: str, category: str, quantity: int = 10
+    ) -> None:
         if clsid in self.items:
             self.items[clsid].quantity += quantity
         else:
             self.items[clsid] = WeaponStockItem(
-                name=name, clsid=clsid, category=category, quantity=quantity,
+                name=name,
+                clsid=clsid,
+                category=category,
+                quantity=quantity,
             )
 
     def zero_all(self) -> None:
@@ -125,6 +139,7 @@ def build_weapon_inventory(cp, game: "Game") -> WeaponInventory:
 
     try:
         from game.data.weapons import Pylon
+
         for coalition in [game.blue, game.red]:
             try:
                 for aircraft_type, squadrons in coalition.air_wing.squadrons.items():
@@ -138,8 +153,10 @@ def build_weapon_inventory(cp, game: "Game") -> WeaponInventory:
                                 for weapon in pylon.allowed:
                                     try:
                                         inv.add_item(
-                                            weapon.clsid, weapon.name,
-                                            _weapon_category(weapon.name), quantity=5,
+                                            weapon.clsid,
+                                            weapon.name,
+                                            _weapon_category(weapon.name),
+                                            quantity=5,
                                         )
                                     except Exception:
                                         pass
@@ -156,12 +173,14 @@ def build_weapon_inventory(cp, game: "Game") -> WeaponInventory:
                 if count <= 0:
                     continue
                 try:
-                    name  = getattr(unit_type, "name", str(unit_type))
-                    vid   = getattr(unit_type, "variant_id", str(unit_type))
+                    name = getattr(unit_type, "name", str(unit_type))
+                    vid = getattr(unit_type, "variant_id", str(unit_type))
                     price = getattr(unit_type, "price", 0)
                     inv.add_item(
-                        vid, f"{name} (${price}M)",
-                        _ground_unit_category(name), quantity=count,
+                        vid,
+                        f"{name} (${price}M)",
+                        _ground_unit_category(name),
+                        quantity=count,
                     )
                 except Exception:
                     pass
@@ -173,22 +192,74 @@ def build_weapon_inventory(cp, game: "Game") -> WeaponInventory:
 
 def _weapon_category(name: str) -> str:
     n = name.upper()
-    if any(x in n for x in ["AIM-", "R-", "AA-", "MICA", "AMRAAM", "SIDEWINDER",
-                              "SPARROW", "ARCHER", "ATOLL", "APHID", "ALAMO"]):
+    if any(
+        x in n
+        for x in [
+            "AIM-",
+            "R-",
+            "AA-",
+            "MICA",
+            "AMRAAM",
+            "SIDEWINDER",
+            "SPARROW",
+            "ARCHER",
+            "ATOLL",
+            "APHID",
+            "ALAMO",
+        ]
+    ):
         return "Air-to-Air"
-    if any(x in n for x in ["AGM-", "KH-", "Kh-", "AS-", "MAVERICK", "HARM",
-                              "HELLFIRE", "PENGUIN", "EXOCET", "HARPOON"]):
+    if any(
+        x in n
+        for x in [
+            "AGM-",
+            "KH-",
+            "Kh-",
+            "AS-",
+            "MAVERICK",
+            "HARM",
+            "HELLFIRE",
+            "PENGUIN",
+            "EXOCET",
+            "HARPOON",
+        ]
+    ):
         return "Air-to-Ground Missile"
-    if any(x in n for x in ["GBU-", "JDAM", "PAVEWAY", "LGB", "MK-8",
-                              "FAB-", "KAB-", "BETAB", "OFAB"]):
+    if any(
+        x in n
+        for x in [
+            "GBU-",
+            "JDAM",
+            "PAVEWAY",
+            "LGB",
+            "MK-8",
+            "FAB-",
+            "KAB-",
+            "BETAB",
+            "OFAB",
+        ]
+    ):
         return "Bomb"
-    if any(x in n for x in ["ROCKET", "S-5", "S-8", "S-13", "S-24", "ZUNI",
-                              "HYDRA", "FFAR"]):
+    if any(
+        x in n
+        for x in ["ROCKET", "S-5", "S-8", "S-13", "S-24", "ZUNI", "HYDRA", "FFAR"]
+    ):
         return "Rocket"
     if any(x in n for x in ["DROP TANK", "FUEL TANK", "PTB-"]):
         return "Fuel Tank"
-    if any(x in n for x in ["POD", "LITENING", "LANTIRN", "FLIR", "SNIPER",
-                              "TARGETING", "ECM", "JAMMER"]):
+    if any(
+        x in n
+        for x in [
+            "POD",
+            "LITENING",
+            "LANTIRN",
+            "FLIR",
+            "SNIPER",
+            "TARGETING",
+            "ECM",
+            "JAMMER",
+        ]
+    ):
         return "Pod"
     if any(x in n for x in ["GUN", "CANNON", "GSH", "M61", "GUNPOD"]):
         return "Gun / Cannon"
@@ -199,21 +270,61 @@ def _weapon_category(name: str) -> str:
 
 def _ground_unit_category(name: str) -> str:
     n = name.upper()
-    if any(x in n for x in ["TANK", "T-", "M1", "LEOPARD", "CHALLENGER",
-                              "ABRAMS", "LECLERC", "TYPE"]):
+    if any(
+        x in n
+        for x in [
+            "TANK",
+            "T-",
+            "M1",
+            "LEOPARD",
+            "CHALLENGER",
+            "ABRAMS",
+            "LECLERC",
+            "TYPE",
+        ]
+    ):
         return "Armour"
-    if any(x in n for x in ["SAM", "SA-", "S-300", "S-400", "PATRIOT", "HAWK",
-                              "ROLAND", "TUNGUSKA", "SHILKA", "ZSU", "GEPARD",
-                              "LINEBACKER", "AVENGER", "MANPAD"]):
+    if any(
+        x in n
+        for x in [
+            "SAM",
+            "SA-",
+            "S-300",
+            "S-400",
+            "PATRIOT",
+            "HAWK",
+            "ROLAND",
+            "TUNGUSKA",
+            "SHILKA",
+            "ZSU",
+            "GEPARD",
+            "LINEBACKER",
+            "AVENGER",
+            "MANPAD",
+        ]
+    ):
         return "Air Defence"
-    if any(x in n for x in ["IFV", "APC", "BTR", "BMP", "BRADLEY", "WARRIOR",
-                              "MARDER", "STRYKER"]):
+    if any(
+        x in n
+        for x in ["IFV", "APC", "BTR", "BMP", "BRADLEY", "WARRIOR", "MARDER", "STRYKER"]
+    ):
         return "Infantry Fighting Vehicle"
-    if any(x in n for x in ["ARTILLERY", "HOWITZER", "MLRS", "BM-", "M109",
-                              "MSTA", "CAESAR", "D-30", "GRAD"]):
+    if any(
+        x in n
+        for x in [
+            "ARTILLERY",
+            "HOWITZER",
+            "MLRS",
+            "BM-",
+            "M109",
+            "MSTA",
+            "CAESAR",
+            "D-30",
+            "GRAD",
+        ]
+    ):
         return "Artillery"
-    if any(x in n for x in ["TRUCK", "UAZ", "HUMVEE", "HMMWV", "TRANSPORT",
-                              "SUPPLY"]):
+    if any(x in n for x in ["TRUCK", "UAZ", "HUMVEE", "HMMWV", "TRANSPORT", "SUPPLY"]):
         return "Support Vehicle"
     if any(x in n for x in ["RADAR", "EWR", "AWACS", "COMMAND"]):
         return "Radar / Command"
@@ -223,6 +334,7 @@ def _ground_unit_category(name: str) -> str:
 # ======================================================================
 # Warehouse - broad supply categories
 # ======================================================================
+
 
 @dataclass
 class Warehouse:
@@ -238,10 +350,10 @@ class Warehouse:
     def export_to(
         self, other: "Warehouse", category: WarehouseCategory, amount: float
     ) -> float:
-        available   = self.stock[category].quantity
-        space       = other.stock[category].capacity - other.stock[category].quantity
+        available = self.stock[category].quantity
+        space = other.stock[category].capacity - other.stock[category].quantity
         transferred = min(amount, available, space)
-        self.stock[category].quantity  -= transferred
+        self.stock[category].quantity -= transferred
         other.stock[category].quantity += transferred
         return transferred
 
@@ -250,26 +362,30 @@ class Warehouse:
 # Transfers
 # ======================================================================
 
+
 class TransferStatus(Enum):
-    PLANNED    = "planned"
-    IN_FLIGHT  = "in_flight"
-    DELIVERED  = "delivered"
-    FAILED     = "failed"
+    PLANNED = "planned"
+    IN_FLIGHT = "in_flight"
+    DELIVERED = "delivered"
+    FAILED = "failed"
 
 
 @dataclass
 class LogisticsTransfer:
-    transfer_id:   str
-    source_cp_id:  int
-    dest_cp_id:    int
-    dz_id:         str
-    category:      WarehouseCategory
-    quantity:      float
+    transfer_id: str
+    source_cp_id: int
+    dest_cp_id: int
+    dz_id: str
+    category: WarehouseCategory
+    quantity: float
     aircraft_type: str
-    turn_planned:  int
-    notes:         str             = ""
-    status:        TransferStatus  = TransferStatus.PLANNED
-    delivered:     Optional[float] = None
+    turn_planned: int
+    notes: str = ""
+    status: TransferStatus = TransferStatus.PLANNED
+    delivered: Optional[float] = None
+    #: Squadron the player picked to fly it (BLUEFOR supplies are player-flown).
+    #: Class-level default keeps transfers pickled before this field loadable.
+    squadron: Optional["Squadron"] = None
 
     def mark_in_flight(self) -> None:
         """Called by LogisticsMissionGenerator once the flight has been
@@ -296,20 +412,21 @@ class LogisticsTransfer:
 # Logistics Manager
 # ======================================================================
 
+
 class LogisticsManager:
 
     #: Fraction of every warehouse category lost each turn (handling, spoilage).
     ATTRITION_PER_TURN = 0.01
 
     def __init__(self) -> None:
-        self._drop_zones:         Dict[str, DropZone]         = {}
-        self._warehouses:         Dict[int, Warehouse]         = {}
-        self._weapon_inventories: Dict[int, WeaponInventory]   = {}
-        self._transfers:          Dict[str, LogisticsTransfer] = {}
-        self._main_base_cp_id:    Optional[int]                = None
+        self._drop_zones: Dict[str, DropZone] = {}
+        self._warehouses: Dict[int, Warehouse] = {}
+        self._weapon_inventories: Dict[int, WeaponInventory] = {}
+        self._transfers: Dict[str, LogisticsTransfer] = {}
+        self._main_base_cp_id: Optional[int] = None
         #: Last turn attrition was applied, so regenerating a mission doesn't
         #: apply it twice.
-        self._last_attrition_turn: Optional[int]                = None
+        self._last_attrition_turn: Optional[int] = None
 
     # ── Drop zones ─────────────────────────────────────────────────────
 
@@ -363,7 +480,8 @@ class LogisticsManager:
                 logger.exception(
                     "inject_into_mission: failed to convert drop zone "
                     "'%s' (%s) to a mission position — skipped",
-                    dz.name, dz.dz_id,
+                    dz.name,
+                    dz.dz_id,
                 )
                 continue
 
@@ -380,12 +498,14 @@ class LogisticsManager:
                 logger.exception(
                     "inject_into_mission: failed to create trigger zone "
                     "for drop zone '%s' (%s) — skipped",
-                    dz.name, dz.dz_id,
+                    dz.name,
+                    dz.dz_id,
                 )
 
         logger.info(
             "inject_into_mission: created %d of %d drop zone trigger zone(s)",
-            created, len(self._drop_zones),
+            created,
+            len(self._drop_zones),
         )
 
     # ── Warehouses ─────────────────────────────────────────────────────
@@ -415,6 +535,7 @@ class LogisticsManager:
                 self._weapon_inventories[cp.id] = inv
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning(
                 f"Failed to sync weapon inventories: {e}"
             )
@@ -508,12 +629,20 @@ class LogisticsManager:
             if deficit <= 0:
                 continue
             if item.category in (
-                "Armour", "Air Defence",
-                "Infantry Fighting Vehicle", "Artillery", "Support",
+                "Armour",
+                "Air Defence",
+                "Infantry Fighting Vehicle",
+                "Artillery",
+                "Support",
             ):
                 try:
                     from game.dcs.groundunittype import GroundUnitType
-                    for gut in GroundUnitType._by_name.values():  # each_unit_type() does not exist
+
+                    for (
+                        gut
+                    ) in (
+                        GroundUnitType._by_name.values()
+                    ):  # each_unit_type() does not exist
                         if getattr(gut, "variant_id", None) == item.clsid:
                             total += deficit * gut.price
                             break
@@ -537,29 +666,29 @@ class LogisticsManager:
 
     def schedule_transfer(
         self,
-        source_cp_id:  int,
-        dest_cp_id:    int,
-        dz_id:         str,
-        category:      WarehouseCategory,
-        quantity:      float,
+        source_cp_id: int,
+        dest_cp_id: int,
+        dz_id: str,
+        category: WarehouseCategory,
+        quantity: float,
         aircraft_type: str,
-        turn:          int,
-        notes:         str = "",
+        turn: int,
+        notes: str = "",
     ) -> Optional[LogisticsTransfer]:
         src = self._warehouses.get(source_cp_id)
         if src is None or src.stock[category].quantity < quantity:
             return None
         src.stock[category].quantity -= quantity
         transfer = LogisticsTransfer(
-            transfer_id   = str(uuid.uuid4()),
-            source_cp_id  = source_cp_id,
-            dest_cp_id    = dest_cp_id,
-            dz_id         = dz_id,
-            category      = category,
-            quantity      = quantity,
-            aircraft_type = aircraft_type,
-            turn_planned  = turn,
-            notes         = notes,
+            transfer_id=str(uuid.uuid4()),
+            source_cp_id=source_cp_id,
+            dest_cp_id=dest_cp_id,
+            dz_id=dz_id,
+            category=category,
+            quantity=quantity,
+            aircraft_type=aircraft_type,
+            turn_planned=turn,
+            notes=notes,
         )
         self._transfers[transfer.transfer_id] = transfer
         return transfer
@@ -586,9 +715,7 @@ class LogisticsManager:
             ):
                 t.mark_in_flight()
 
-    def on_state_processed(
-        self, game: "Game", debriefing: "Debriefing"
-    ) -> List[str]:
+    def on_state_processed(self, game: "Game", debriefing: "Debriefing") -> List[str]:
         """Settle IN_FLIGHT transfers from the mission results.
 
         - Every aircraft of the flight lost: FAILED, cargo lost.

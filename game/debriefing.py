@@ -167,7 +167,7 @@ class Debriefing:
         self.player_country = game.blue.faction.country.name
         self.enemy_country = game.red.faction.country.name
 
-        self.air_losses = self.dead_aircraft()
+        self.air_losses: AirLosses = self.dead_aircraft()
         self.ground_losses = self.dead_ground_units()
         self.base_captures = self.base_capture_events()
 

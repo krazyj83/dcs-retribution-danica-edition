@@ -117,6 +117,11 @@ class TransferOrder:
 
     request_airflift: bool = field(default=False)
 
+    #: "helicopter" or "plane" to prefer that kind of transport when this
+    #: transfer is airlifted (see game/logistics/transport_tiers.py); None for
+    #: no preference.
+    preferred_airlift: Optional[str] = field(default=None)
+
     def __str__(self) -> str:
         """Returns the text that should be displayed for the transfer."""
         count = self.size
@@ -272,8 +277,9 @@ class AirliftPlanner:
     #: Maximum range from for any link in the route of takeoff, pickup, dropoff, and RTB
     #: for a helicopter to be considered for airlift. Total route length is not
     #: considered because the helicopter can refuel at each stop. Cargo planes have no
-    #: maximum range.
-    HELO_MAX_RANGE = nautical_miles(100)
+    #: maximum range. Matches the top of the medium (helicopter) supply band,
+    #: transport_tiers.MEDIUM_MAX_KM (upstream uses 100 nm = 185 km).
+    HELO_MAX_RANGE = meters(220_000)
 
     def __init__(
         self, game: Game, transfer: TransferOrder, next_stop: ControlPoint
@@ -305,7 +311,9 @@ class AirliftPlanner:
 
         home = airfield.position
         pickup = self.transfer.position.position
-        drop_off = self.transfer.position.position
+        # Upstream set this to the pickup too, so the pickup -> drop-off leg was
+        # never range-checked.
+        drop_off = self.next_stop.position
         if meters(home.distance_to_point(pickup)) > self.HELO_MAX_RANGE:
             return False
 
@@ -322,6 +330,7 @@ class AirliftPlanner:
             self.transfer.position
         )
         air_wing = self.game.air_wing_for(self.for_player)
+        candidates: list[Squadron] = []
         for cp in distance_cache.closest_airfields:
             if cp.captured != self.for_player:
                 continue
@@ -329,12 +338,24 @@ class AirliftPlanner:
             squadrons = air_wing.auto_assignable_for_task_at(FlightType.TRANSPORT, cp)
             for squadron in squadrons:
                 if self.compatible_with_mission(squadron.aircraft, cp):
-                    while (
-                        squadron.untasked_aircraft
-                        and squadron.has_available_pilots
-                        and self.transfer.transport is None
-                    ):
-                        self.create_airlift_flight(squadron)
+                    candidates.append(squadron)
+
+        # Nearest first; a preferred kind (helicopter/plane) goes ahead of the
+        # other kind. sort() is stable, so distance order is kept within a kind.
+        preferred = getattr(self.transfer, "preferred_airlift", None)
+        if preferred is not None:
+            wants_helo = preferred == "helicopter"
+            candidates.sort(
+                key=lambda s: s.aircraft.dcs_unit_type.helicopter != wants_helo
+            )
+
+        for squadron in candidates:
+            while (
+                squadron.untasked_aircraft
+                and squadron.has_available_pilots
+                and self.transfer.transport is None
+            ):
+                self.create_airlift_flight(squadron)
         if self.package.flights:
             self.package.set_tot_asap(now)
             self.game.ato_for(self.for_player).add_package(self.package)
