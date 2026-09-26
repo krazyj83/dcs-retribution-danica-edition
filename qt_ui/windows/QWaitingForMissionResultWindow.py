@@ -23,6 +23,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from game import Game
 from game.ato.flightstate import Uninitialized
 from game.debriefing import Debriefing
+from game.theater.player import Player
 from game.profiling import logged_duration
 from game.server import EventStream
 from game.sim import GameUpdateEvents
@@ -136,10 +137,13 @@ class QWaitingForMissionResultWindow(QDialog):
         self.setLayout(self.layout)
 
     @staticmethod
-    def add_update_row(description: str, count: int, layout: QGridLayout) -> None:
+    def add_update_row(
+        description: str, blue: int, red: int, layout: QGridLayout
+    ) -> None:
         row = layout.rowCount()
         layout.addWidget(QLabel(f"<b>{description}</b>"), row, 0)
-        layout.addWidget(QLabel(f"{count}"), row, 1)
+        layout.addWidget(QLabel(f"{blue}"), row, 1)
+        layout.addWidget(QLabel(f"{red}"), row, 2)
 
     def updateLayout(self, debriefing: Debriefing) -> None:
         updateBox = QGroupBox("Mission status")
@@ -147,50 +151,35 @@ class QWaitingForMissionResultWindow(QDialog):
         updateBox.setLayout(update_layout)
         self.debriefing = debriefing
 
-        self.add_update_row(
-            "Aircraft destroyed", len(list(debriefing.air_losses.losses)), update_layout
+        blue = debriefing.loss_counts(Player.BLUE)
+        red = debriefing.loss_counts(Player.RED)
+
+        update_layout.addWidget(
+            QLabel(f"<b>{debriefing.player_country} (OwnFor)</b>"), 0, 1
         )
-        self.add_update_row(
-            "Front line units destroyed",
-            len(list(debriefing.front_line_losses)),
-            update_layout,
+        update_layout.addWidget(
+            QLabel(f"<b>{debriefing.enemy_country} (OpFor)</b>"), 0, 2
         )
-        self.add_update_row(
-            "Convoy units destroyed", len(list(debriefing.convoy_losses)), update_layout
-        )
-        self.add_update_row(
-            "Shipping cargo destroyed",
-            len(list(debriefing.cargo_ship_losses)),
-            update_layout,
-        )
-        self.add_update_row(
-            "Airlift cargo destroyed",
-            sum(len(loss.cargo) for loss in debriefing.airlift_losses),
-            update_layout,
-        )
-        self.add_update_row(
-            "Ground Objects destroyed",
-            len(list(debriefing.ground_object_losses)),
-            update_layout,
-        )
-        self.add_update_row(
-            "Scenery Objects destroyed",
-            len(list(debriefing.scenery_object_losses)),
-            update_layout,
-        )
-        self.add_update_row(
-            "Base capture events", len(debriefing.base_captures), update_layout
-        )
-        self.add_update_row(
-            "Motorpool units destroyed",
-            len(list(debriefing.motorpool_losses)),
-            update_layout,
-        )
-        self.add_update_row(
-            "Player convoy units destroyed",
-            len(list(debriefing.player_drawn_convoy_losses)),
-            update_layout,
-        )
+
+        rows = [
+            ("Aircraft lost", blue.aircraft, red.aircraft),
+            ("Front line units lost", blue.front_line, red.front_line),
+            ("Motorpool units lost", blue.motorpool, red.motorpool),
+            ("Convoy units lost", blue.convoy, red.convoy),
+            (
+                "Player convoy units lost",
+                blue.player_drawn_convoy,
+                red.player_drawn_convoy,
+            ),
+            ("Shipping cargo lost", blue.cargo_ships, red.cargo_ships),
+            ("Airlift cargo lost", blue.airlift_cargo, red.airlift_cargo),
+            ("Ground Objects lost", blue.ground_objects, red.ground_objects),
+            ("Scenery Objects lost", blue.scenery, red.scenery),
+            ("Bases captured", blue.bases_captured, red.bases_captured),
+            ("Runways destroyed", blue.runways_destroyed, red.runways_destroyed),
+        ]
+        for label, blue_count, red_count in rows:
+            self.add_update_row(label, blue_count, red_count, update_layout)
 
         # Clear previous content of the window
         for i in reversed(range(self.gridLayout.count())):

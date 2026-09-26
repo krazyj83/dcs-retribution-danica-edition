@@ -92,6 +92,24 @@ class GroundLosses:
 
 
 @dataclass(frozen=True)
+class SideLossCounts:
+    """One side's losses (and gains) in a mission, for the mission status window."""
+
+    aircraft: int
+    front_line: int
+    motorpool: int
+    convoy: int
+    player_drawn_convoy: int
+    cargo_ships: int
+    airlift_cargo: int
+    ground_objects: int
+    scenery: int
+    bases_captured: int
+    bases_lost: int
+    runways_destroyed: int
+
+
+@dataclass(frozen=True)
 class BaseCaptureEvent:
     control_point: ControlPoint
     captured_by_player: Player
@@ -310,6 +328,53 @@ class Debriefing:
         for loss in losses:
             losses_by_type[loss.trigger_zone.name] += 1
         return losses_by_type
+
+    def loss_counts(self, player: Player) -> SideLossCounts:
+        gl = self.ground_losses
+        if player.is_blue:
+            air = self.air_losses.player
+            front_line = gl.player_front_line
+            motorpool = gl.player_motorpool
+            convoy = gl.player_convoy
+            drawn_convoy = len(gl.player_drawn_convoy)  # always blue
+            cargo_ships = gl.player_cargo_ships
+            airlifts = gl.player_airlifts
+            ground_objects = gl.player_ground_objects
+            scenery = gl.player_scenery
+            airfields = gl.player_airfields
+        else:
+            air = self.air_losses.enemy
+            front_line = gl.enemy_front_line
+            motorpool = gl.enemy_motorpool
+            convoy = gl.enemy_convoy
+            drawn_convoy = 0
+            cargo_ships = gl.enemy_cargo_ships
+            airlifts = gl.enemy_airlifts
+            ground_objects = gl.enemy_ground_objects
+            scenery = gl.enemy_scenery
+            airfields = gl.enemy_airfields
+        return SideLossCounts(
+            aircraft=len(air),
+            front_line=len(front_line),
+            motorpool=len(motorpool),
+            convoy=len(convoy),
+            player_drawn_convoy=drawn_convoy,
+            cargo_ships=len(cargo_ships),
+            airlift_cargo=sum(len(loss.cargo) for loss in airlifts),
+            ground_objects=len(ground_objects),
+            scenery=len(scenery),
+            bases_captured=sum(
+                1
+                for capture in self.base_captures
+                if capture.captured_by_player == player
+            ),
+            bases_lost=sum(
+                1
+                for capture in self.base_captures
+                if capture.captured_by_player == player.opponent
+            ),
+            runways_destroyed=len(airfields),
+        )
 
     def dead_aircraft(self) -> AirLosses:
         player_losses = []
