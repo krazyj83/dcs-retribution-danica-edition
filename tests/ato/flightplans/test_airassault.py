@@ -180,3 +180,30 @@ def test_hercules_keeps_its_layout_shape(monkeypatch: pytest.MonkeyPatch) -> Non
     assert layout.ingress.position == flight.package.waypoints.initial
     assert layout.targets[0].only_for_player is False
     assert layout.targets[0].alt == feet(1000)
+
+
+@pytest.mark.parametrize(
+    "snap_to, expected",
+    [
+        # Target near water: the drop-off moves onto nearby land.
+        (lambda p: _point(p.x + 300, p.y), "snapped"),
+        # Island map: the nearest "land" is a far island -> keep the target.
+        (lambda p: _point(p.x + 400_000, p.y), "target"),
+    ],
+)
+def test_helo_drop_off_is_kept_on_nearby_land(
+    snap_to: Any, expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flight = _flight(is_helo=True, cabin_size=10)
+    flight.coalition.game.theater.nearest_land_pos = snap_to
+    target = flight.package.target.position
+
+    layout = _builder(flight, monkeypatch).layout()
+
+    assert layout.drop_off is not None
+    drop = layout.drop_off.position
+    if expected == "target":
+        assert drop == target
+    else:
+        assert 0 < drop.distance_to_point(target) <= 5000
+        assert drop != target

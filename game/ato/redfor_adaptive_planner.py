@@ -6,7 +6,7 @@ REDFOR priorities to counter the player's strategy.
 
 Pattern → REDFOR response:
   SEAD/DEAD heavy   → Procurement requests for more SAM units
-  BAI heavy         → (logged only, no counter yet)
+  BAI heavy         → Convoys take a SHORAD/AAA escort; buys SHORAD for convoy bases
   OCA heavy         → Procurement requests for more interceptors
   CAS heavy         → More armor sent to frontline bases
   TRANSPORT heavy   → Procurement requests for fighters to intercept
@@ -19,7 +19,7 @@ Wired in game/game.py finish_turn():
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from game.game import Game
@@ -86,7 +86,7 @@ class RedforAdaptivePlanner:
         if sead_count >= THRESHOLD_LOW:
             self._counter_sead(sead_count)
 
-        # BAI heavy → protect convoys with SHORAD
+        # BAI heavy → escort convoys with SHORAD
         bai_count = counts.get(FlightType.BAI, 0)
         if bai_count >= THRESHOLD_LOW:
             self._counter_bai(bai_count)
@@ -159,14 +159,80 @@ class RedforAdaptivePlanner:
             )
 
     def _counter_bai(self, count: int) -> None:
-        """REDFOR detects heavy BAI. Logged only: no counter is wired up yet
-        (convoy SHORAD escorts were planned but never implemented)."""
+        """REDFOR detects heavy BAI → escorts its convoys and buys SHORAD for them.
+
+        The escort itself happens in RedforSupplyPlanner (it reads the same
+        BAI history): each road convoy takes one SHORAD/AAA vehicle from the
+        sending base. Here REDFOR buys SHORAD (AAA if the faction has none)
+        for the bases that send convoys but have no air-defence vehicle, so
+        the next convoys have an escort to take: 1 base for moderate BAI,
+        2 for heavy, paid from Red's budget.
+        """
+        from game.ato.redfor_supply_planner import is_air_defence
+
         strength = "heavy" if count >= THRESHOLD_HIGH else "moderate"
         logger.info(
-            "RedforAdaptivePlanner: %s BAI detected (%d), no counter implemented",
+            "RedforAdaptivePlanner: %s BAI detected (%d) → escorting convoys",
             strength,
             count,
         )
+
+        candidates = self._air_defence_units()
+        if not candidates:
+            return
+
+        rear_target = 6
+        settings = getattr(self.game, "settings", None)
+        if settings is not None:
+            rear_target = getattr(settings, "redfor_resupply_rear_target", 6)
+
+        def has_air_defence(cp: Any) -> bool:
+            on_base = any(n > 0 and is_air_defence(t) for t, n in cp.base.armor.items())
+            on_order = any(
+                n > 0 and is_air_defence(t)
+                for t, n in getattr(cp.ground_unit_orders, "units", {}).items()
+            )
+            return on_base or on_order
+
+        # Bases with units to spare are the ones sending convoys.
+        senders = sorted(
+            (
+                cp
+                for cp in self.game.theater.controlpoints
+                if cp.captured.is_red
+                and cp.can_deploy_ground_units
+                and cp.base.total_armor > rear_target
+                and not has_air_defence(cp)
+            ),
+            key=lambda cp: -cp.base.total_armor,
+        )
+        wanted = 2 if count >= THRESHOLD_HIGH else 1
+        for cp in senders[:wanted]:
+            affordable = [u for u in candidates if u.price <= self.red.budget]
+            if not affordable:
+                logger.debug("RedforAdaptivePlanner: no budget left for escorts")
+                break
+            unit = min(affordable, key=lambda u: u.price)
+            self.red.adjust_budget(-unit.price)
+            cp.ground_unit_orders.order({unit: 1})
+            logger.info(
+                "RedforAdaptivePlanner: ordered convoy escort %s for %s (%dM)",
+                unit,
+                cp.name,
+                unit.price,
+            )
+
+    def _air_defence_units(self) -> list[Any]:
+        """The faction's SHORAD units, or its AAA if it has no SHORAD."""
+        from game.data.units import UnitClass
+
+        faction_units = self.red.faction.frontline_units
+        candidates = [u for u in faction_units if u.unit_class is UnitClass.SHORAD]
+        if not candidates:
+            candidates = [u for u in faction_units if u.unit_class is UnitClass.AAA]
+        if not candidates:
+            logger.debug("RedforAdaptivePlanner: faction has no SHORAD/AAA units")
+        return candidates
 
     def _counter_oca(self, count: int) -> None:
         """REDFOR detects heavy OCA → requests interceptors at threatened airbases."""

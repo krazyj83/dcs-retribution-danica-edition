@@ -865,9 +865,10 @@ class Settings:
         section=REDFOR_LOGISTICS_SECTION,
         default=True,
         detail=(
-            "When enabled, REDFOR will automatically designate its largest "
-            "airbase as the primary supply hub. All resupply flights "
-            "originate from this base."
+            "When enabled, REDFOR picks a rear base as its main supply base "
+            "(one with a factory if it can, furthest from the front). Rear "
+            "bases send their spare ground units there, and frontline bases "
+            "that run short are resupplied from it first."
         ),
     )
 

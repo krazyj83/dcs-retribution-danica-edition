@@ -192,9 +192,13 @@ def test_sync_keeps_weapon_stock_but_rereads_ground_units(
 
 
 def test_old_category_transfers_still_label() -> None:
+    from uuid import uuid4
+
     from game.logistics import LogisticsTransfer, WarehouseCategory
 
-    t = LogisticsTransfer("id", 1, 2, "", WarehouseCategory.FUEL, 200, "UH-1H", 1)
+    t = LogisticsTransfer(
+        "id", uuid4(), uuid4(), "", WarehouseCategory.FUEL, 200, "UH-1H", 1
+    )
     assert t.cargo_label == "200 fuel"
 
 
