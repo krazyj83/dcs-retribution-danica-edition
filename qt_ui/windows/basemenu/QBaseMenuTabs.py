@@ -6,6 +6,7 @@ from qt_ui.windows.basemenu.DepartingConvoysMenu import DepartingConvoysMenu
 from qt_ui.windows.basemenu.airfield.QAirfieldCommand import QAirfieldCommand
 from qt_ui.windows.basemenu.ground_forces.QGroundForcesHQ import QGroundForcesHQ
 from qt_ui.windows.basemenu.intel.QIntelInfo import QIntelInfo
+from qt_ui.windows.basemenu.inventory.QBaseInventory import QBaseInventory
 
 
 class QBaseMenuTabs(QTabWidget):
@@ -35,3 +36,7 @@ class QBaseMenuTabs(QTabWidget):
             if cp.can_deploy_ground_units:
                 self.ground_forces_hq = QGroundForcesHQ(cp, game_model)
                 self.addTab(self.ground_forces_hq, "Ground Forces HQ")
+
+        # Friendly bases: weapon stores and warehouse stock.
+        self.base_inventory = QBaseInventory(cp, game_model)
+        self.addTab(self.base_inventory, "Base Inventory")
