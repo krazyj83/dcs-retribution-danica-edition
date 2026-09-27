@@ -174,7 +174,21 @@ write_state_error_handling = function()
 end
 
 activeWeapons = {}
+-- Units being replaced by a respawn in place (ship_weapons rearm): unit name ->
+-- time until which their removal is not a loss.
+retribution_respawning = retribution_respawning or {}
+local function being_respawned(event)
+    local unit = event.initiator or event.target
+    if not unit or not unit.getName then return false end
+    local ok, name = pcall(unit.getName, unit)
+    local until_t = ok and retribution_respawning[name]
+    return until_t ~= nil and until_t ~= false and timer.getTime() <= until_t
+end
+
 local function onEvent(event)
+    if being_respawned(event) then
+        return
+    end
     if event.id == world.event.S_EVENT_CRASH and event.initiator then
         crash_events[#crash_events + 1] = event.initiator.getName(event.initiator)
         dirty_state = true

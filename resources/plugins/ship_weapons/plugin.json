@@ -1,11 +1,11 @@
 {
-    "nameInUI": "Ship Weapons Management",
+    "nameInUI": "Ship rearming at sea (helicopter)",
     "defaultValue": true,
     "skipUI": false,
     "specificOptions": [
         {
-            "nameInUI": "Persist ammo depletion across turns",
-            "mnemonic": "persistentDepletion",
+            "nameInUI": "REDFOR ships rearm automatically",
+            "mnemonic": "redforAutoRearm",
             "defaultValue": true
         }
     ],

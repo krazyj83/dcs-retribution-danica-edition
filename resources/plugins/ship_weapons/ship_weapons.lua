@@ -1,554 +1,623 @@
 -- =============================================================================
--- ship_weapons.lua  –  DCS Retribution Ship Weapons Management Plugin
+-- ship_weapons.lua  -  DCS Retribution: ship weapons status and rearming at sea
 -- =============================================================================
--- Part of the ship_weapons plugin.  Drop the whole folder into:
---   <Retribution repo>\resources\plugins\ship_weapons\
--- Then add "ship_weapons" to resources\plugins\plugins.json.
+-- F10 > Ship Weapons > <ship> > Ammo Status shows each weapon's rounds left,
+-- a load bar and the rearm state.
 --
--- Settings exposed in the Retribution UI (via plugin.json):
---   • Enable / disable the plugin entirely          (main plugin checkbox)
---   • Persist ammo depletion across turns           (persistentDepletion)
+-- A helicopter that lands on a friendly ship and stays on the deck for
+-- CFG.load_time (15 min) delivers one rearm load: 20% of every weapon's full
+-- load. A ship group accepts one load per CFG.cooldown (30 min).
 --
--- These are injected by Retribution before this script runs as:
---   dcsRetribution.plugins.ship_weapons.persistentDepletion  (bool)
+-- How a load reaches the ship depends on the DCS version:
+--   * If DCS offers trigger.action.setAmmo, the load is added straight away
+--     (+20% on every weapon, capped at full).
+--   * Otherwise DCS scripts can read ammo but not add it, and the only way to
+--     give it back is to respawn the ship, which gives a full load. Loads are
+--     then counted, and once enough have been delivered to refill the most
+--     depleted weapon, the group is respawned in place (same names, position,
+--     heading and remaining route) fully armed, as soon as no helicopter is
+--     standing on any of its decks.
+-- The mode in use is written to dcs.log at mission start.
 --
--- PERSISTENCE
---   When enabled, ship ammo ratios are saved to:
---     <DCS Saved Games>\Scripts\RetributionShipWeapons.lua
---   On the next mission start the script reads that file and reduces each
---   ship's starting ammo to match where the last mission left off.
---   The file is written every CFG.state_save_interval seconds AND on the
---   S_EVENT_MISSION_END event as a belt-and-suspenders approach.
+--   * Damaged ships are not rearmed (a respawn would repair them for free).
+--   * Groups with an aircraft carrier or LHA are not rearmed at sea (a respawn
+--     would destroy the aircraft on their decks).
+--   * Ammo does not carry over to the next mission: DCS starts every ship full.
+--   * REDFOR ships rearm on their own (option "REDFOR ships rearm
+--     automatically"): a group with a weapon below CFG.redfor_threshold gets
+--     one load per cooldown until it is full.
+--
+-- Needs MIST (loaded by the base plugin).
 -- =============================================================================
 
-
--- ──────────────────────────────────────────────────────────────────────────────
--- PLUGIN SETTINGS  –  read values injected by Retribution
--- ──────────────────────────────────────────────────────────────────────────────
--- Retribution injects these before this script runs; we default to true so
--- the feature is active even if the dcsRetribution global isn't present
--- (e.g. when testing in a standalone mission outside Retribution).
-
-local PERSISTENT_DEPLETION = true
-
-if dcsRetribution
-   and dcsRetribution.plugins
-   and dcsRetribution.plugins.ship_weapons then
-    local p = dcsRetribution.plugins.ship_weapons
-    if p.persistentDepletion ~= nil then
-        PERSISTENT_DEPLETION = p.persistentDepletion
-    end
-end
-
-
--- ──────────────────────────────────────────────────────────────────────────────
--- STATIC CONFIGURATION  –  tune these to suit your campaign
--- ──────────────────────────────────────────────────────────────────────────────
 local CFG = {
-    -- How long (seconds) before BLUEFOR can rearm the same ship again (30 min)
-    bluefor_rearm_cooldown  = 1800,
-
-    -- Simulated logistics delay (seconds) before ammo is actually restored
-    bluefor_rearm_delay     = 120,
-
-    -- Fraction of full load restored per rearm visit (0.20 = +20% each visit)
-    -- Both BLUEFOR and REDFOR use this; 5 visits are needed to reach 100%
-    rearm_increment         = 0.20,
-
-    -- How often (seconds) REDFOR ships are checked for low ammo (25 min)
-    redfor_check_interval   = 1500,
-
-    -- REDFOR ships are auto-rearmed when ammo drops below this fraction
-    redfor_rearm_threshold  = 0.25,
-
-    -- Set true to log REDFOR rearm events server-wide (useful for debugging)
-    redfor_rearm_verbose    = false,
-
-    -- How often (seconds) the state file is written during a mission (5 min)
-    -- This is in addition to the S_EVENT_MISSION_END save.
-    state_save_interval     = 300,
+    load_time         = 15 * 60,  -- seconds on the deck for one load
+    load_fraction     = 0.20,     -- one load = 20% of each weapon's full load
+    cooldown          = 30 * 60,  -- seconds between loads for one group
+    max_deck_distance = 150,      -- metres from the ship's centre
+    poll              = 15,       -- seconds between deck checks
+    respawn_check     = 10,       -- seconds between pending-respawn checks
+    redfor_interval   = 30 * 60,  -- one REDFOR load per cooldown
+    redfor_threshold  = 0.25,
 }
 
+local REDFOR_AUTO = true
+if dcsRetribution and dcsRetribution.plugins and dcsRetribution.plugins.ship_weapons then
+    local p = dcsRetribution.plugins.ship_weapons
+    if p.redforAutoRearm ~= nil then
+        REDFOR_AUTO = p.redforAutoRearm
+    end
+end
 
--- ──────────────────────────────────────────────────────────────────────────────
--- MODULE  –  internal state
--- ──────────────────────────────────────────────────────────────────────────────
-local SW = {
-    snapshots = {},   -- [unitName] = ammo table at mission start (= full load)
-    lastRearm = {},   -- [unitName] = timer.getTime() of last successful rearm
-    rearming  = {},   -- [unitName] = true while rearm delay is counting down
+ShipWeapons = {
+    CFG = CFG,
+    full = {},        -- [unitName] = {order = {key...}, [key] = {name, count, desc}}
+    groups = {},      -- [groupName] = {delivered, lastLoad, pending}
+    landed = {},      -- [heliName] = shipName
+    sessions = {},    -- [heliName] = {ship, group, started}
 }
+local SW = ShipWeapons
 
-
--- ──────────────────────────────────────────────────────────────────────────────
--- STATE FILE PATH
--- ──────────────────────────────────────────────────────────────────────────────
--- Resolves to <DCS Saved Games>/Scripts/RetributionShipWeapons.lua.
--- Returns nil if lfs is not available in this DCS environment.
-
-local function getStatePath()
-    local ok, lfs = pcall(require, "lfs")
-    if not ok or not lfs then return nil end
-    local dir = lfs.writedir() or ""
-    if dir ~= "" and dir:sub(-1) ~= "/" and dir:sub(-1) ~= "\\" then
-        dir = dir .. "/"
-    end
-    return dir .. "Scripts/RetributionShipWeapons.lua"
+local function log(msg)
+    env.info("DCSRetribution|Ship weapons: " .. msg)
 end
 
-
--- ──────────────────────────────────────────────────────────────────────────────
--- UTILITIES
--- ──────────────────────────────────────────────────────────────────────────────
-
---- Shallow copy of an ammo table.  Preserves the desc reference DCS uses
---- internally; only duplicates the count so the snapshot stays immutable.
-local function copyAmmo(src)
-    if not src then return {} end
-    local dst = {}
-    for i, slot in ipairs(src) do
-        dst[i] = { desc = slot.desc, count = slot.count }
-    end
-    return dst
+--- True when this DCS can add ammo to a unit directly.
+function SW.canSetAmmo()
+    return trigger and trigger.action and type(trigger.action.setAmmo) == "function"
 end
 
---- Sum all rounds/missiles in an ammo table.
-local function totalAmmo(ammoTable)
-    local n = 0
-    if ammoTable then
-        for _, slot in ipairs(ammoTable) do
-            n = n + (slot.count or 0)
+-- ── Ammo bookkeeping ────────────────────────────────────────────────────────
+-- Weapons are matched by type name: DCS returns new desc tables on every
+-- getAmmo() call, and drops a weapon from the list when it reaches zero.
+
+local function slotKey(slot)
+    local d = slot.desc or {}
+    return d.typeName or d.displayName or "?"
+end
+
+local function slotName(slot)
+    local d = slot.desc or {}
+    return d.displayName or d.typeName or "Unknown weapon"
+end
+
+local function currentCounts(unit)
+    local counts = {}
+    for _, slot in ipairs(unit:getAmmo() or {}) do
+        local k = slotKey(slot)
+        counts[k] = (counts[k] or 0) + (slot.count or 0)
+    end
+    return counts
+end
+
+--- Remember the most of each weapon a unit has been seen with: its full load.
+local function noteFull(unit)
+    local name = unit:getName()
+    local full = SW.full[name]
+    if not full then
+        full = {order = {}}
+        SW.full[name] = full
+    end
+    local seen = {}
+    for _, slot in ipairs(unit:getAmmo() or {}) do
+        local k = slotKey(slot)
+        seen[k] = (seen[k] or 0) + (slot.count or 0)
+        if not full[k] then
+            full[k] = {name = slotName(slot), count = 0, desc = slot.desc}
+            full.order[#full.order + 1] = k
         end
     end
-    return n
+    for k, n in pairs(seen) do
+        if n > full[k].count then
+            full[k].count = n
+        end
+    end
+    return full
 end
 
---- Current ammo as a fraction of the mission-start snapshot (0 – 1).
-local function ammoRatio(unitName)
-    local unit = Unit.getByName(unitName)
-    if not unit or not unit:isExist() then return 0 end
-    local snapTotal = totalAmmo(SW.snapshots[unitName])
-    if snapTotal == 0 then return 1 end   -- no weapons recorded → treat as full
-    return totalAmmo(unit:getAmmo()) / snapTotal
+--- Fractions of full for one unit: mean over its weapons, and the lowest.
+local function unitFractions(unit)
+    local full = noteFull(unit)
+    local cur = currentCounts(unit)
+    local sum, n, low = 0, 0, 1
+    for _, k in ipairs(full.order) do
+        if full[k].count > 0 then
+            local f = math.min(1, (cur[k] or 0) / full[k].count)
+            sum, n = sum + f, n + 1
+            if f < low then low = f end
+        end
+    end
+    if n == 0 then return nil, nil end
+    return sum / n, low
 end
 
---- Collect all ship units for a coalition side.
-local function getShips(side)
-    local ships = {}
-    local groups = coalition.getGroups(side, Group.Category.SHIP)
-    if groups then
-        for _, grp in ipairs(groups) do
-            if grp and grp:isExist() then
-                for _, u in ipairs(grp:getUnits()) do
-                    if u and u:isExist() then
-                        ships[#ships + 1] = u
-                    end
-                end
+local function aliveUnits(group)
+    local units = {}
+    if group and group:isExist() then
+        for _, u in ipairs(group:getUnits() or {}) do
+            if u and u:isExist() then
+                units[#units + 1] = u
             end
         end
     end
-    return ships
+    return units
 end
 
---- Number of +20% rearm visits still needed to reach full load.
-local function visitsToFull(unitName)
-    local ratio = ammoRatio(unitName)
-    if ratio >= 1.0 then return 0 end
-    return math.ceil((1.0 - ratio) / CFG.rearm_increment)
-end
-
-
--- ──────────────────────────────────────────────────────────────────────────────
--- PERSISTENCE  –  save / load ammo ratios across Retribution turns
--- ──────────────────────────────────────────────────────────────────────────────
-
---- Serialize {unitName = ratio} as a Lua source file (return statement).
---- The file can be loaded back with loadstring() on the next mission start.
-local function serializeState(ratios)
-    local lines = {
-        "-- DCS Retribution Ship Weapons State",
-        "-- Auto-generated by ship_weapons plugin – do not edit by hand",
-        "return {",
-    }
-    for unitName, ratio in pairs(ratios) do
-        -- Escape backslashes and double-quotes inside the unit name string
-        local escaped = unitName:gsub("\\", "\\\\"):gsub('"', '\\"')
-        lines[#lines + 1] = string.format('    ["%s"] = %.6f,', escaped, ratio)
+--- Group ammo: mean fraction over all weapons, and the most depleted weapon.
+--- nil if the group has no weapons.
+function SW.ratio(group)
+    local sum, n, low = 0, 0, 1
+    for _, u in ipairs(aliveUnits(group)) do
+        local mean, l = unitFractions(u)
+        if mean then
+            sum, n = sum + mean, n + 1
+            if l < low then low = l end
+        end
     end
-    lines[#lines + 1] = "}"
+    if n == 0 then return nil, nil end
+    return sum / n, low
+end
+
+--- Loads needed to refill the most depleted weapon.
+function SW.loadsNeeded(lowest)
+    if lowest == nil or lowest >= 0.999 then return 0 end
+    return math.ceil((1 - lowest) / CFG.load_fraction - 1e-6)
+end
+
+local function isDamaged(group)
+    for _, u in ipairs(aliveUnits(group)) do
+        local life0 = u:getLife0()
+        if life0 and life0 > 0 and u:getLife() < life0 then
+            return true
+        end
+    end
+    return false
+end
+
+local function isCarrierGroup(group)
+    for _, u in ipairs(aliveUnits(group)) do
+        if u:hasAttribute("AircraftCarrier") or u:hasAttribute("Aircraft Carriers") then
+            return true
+        end
+    end
+    return false
+end
+
+local function state(groupName)
+    local s = SW.groups[groupName]
+    if not s then
+        s = {delivered = 0, lastLoad = nil, pending = false}
+        SW.groups[groupName] = s
+    end
+    return s
+end
+
+local function cooldownLeft(s)
+    if not s.lastLoad then return 0 end
+    return math.max(0, CFG.cooldown - (timer.getTime() - s.lastLoad))
+end
+
+local function minutes(seconds)
+    return math.ceil(seconds / 60)
+end
+
+local function pct(f)
+    return math.floor((f or 1) * 100 + 0.5)
+end
+
+-- ── Respawn in place (when DCS cannot add ammo) ─────────────────────────────
+
+local function dist2(a, b)
+    local dx, dy = a.x - b.x, a.y - b.y
+    return dx * dx + dy * dy
+end
+
+--- Waypoints still ahead of pos: the ones after the closest route leg.
+function SW.remainingRoute(points, pos)
+    if not points or #points < 2 then return {} end
+    local best, bestD = 1, math.huge
+    for i = 1, #points - 1 do
+        local a, b = points[i], points[i + 1]
+        local abx, aby = b.x - a.x, b.y - a.y
+        local len2 = abx * abx + aby * aby
+        local t = 0
+        if len2 > 0 then
+            t = math.max(0, math.min(1, ((pos.x - a.x) * abx + (pos.y - a.y) * aby) / len2))
+        end
+        local d = dist2(pos, {x = a.x + t * abx, y = a.y + t * aby})
+        if d < bestD then
+            best, bestD = i, d
+        end
+    end
+    local rest = {}
+    for i = best + 1, #points do
+        rest[#rest + 1] = points[i]
+    end
+    return rest
+end
+
+function SW.respawn(groupName)
+    local group = Group.getByName(groupName)
+    if not group or not group:isExist() then return false end
+    local data = mist.getCurrentGroupData(groupName)
+    if not data or not data.units or #data.units == 0 then return false end
+
+    local lead = data.units[1]
+    local here = {x = lead.x, y = lead.y}
+    local route = mist.getGroupRoute(groupName, true) or {}
+    local ahead = SW.remainingRoute(route, here)
+    local speed = (ahead[1] and ahead[1].speed) or lead.speed or 0
+    local points = {{
+        x = here.x, y = here.y, alt = 0, type = "Turning Point",
+        action = "Turning Point", speed = speed, task = {id = "ComboTask", params = {tasks = {}}},
+    }}
+    for _, p in ipairs(ahead) do
+        points[#points + 1] = p
+    end
+    data.route = {points = points}
+    data.clone = nil
+
+    -- Replacing the group removes the old units. Tell dcs_retribution.lua
+    -- not to count them as lost.
+    retribution_respawning = retribution_respawning or {}
+    for _, u in ipairs(data.units) do
+        retribution_respawning[u.unitName or u.name] = timer.getTime() + 10
+    end
+
+    local ok, err = pcall(mist.dynAdd, data)
+    if not ok then
+        log("respawn of " .. groupName .. " failed: " .. tostring(err))
+        return false
+    end
+    log("rearmed " .. groupName .. " (respawned in place)")
+    return true
+end
+
+local function deckClear(groupName)
+    for heli, ship in pairs(SW.landed) do
+        local h = Unit.getByName(heli)
+        local s = Unit.getByName(ship)
+        if h and h:isExist() and s and s:isExist() and s:getGroup():getName() == groupName then
+            return false
+        end
+    end
+    return true
+end
+
+local function finishRearm(groupName)
+    local group = Group.getByName(groupName)
+    local s = state(groupName)
+    if not group or not group:isExist() then
+        SW.groups[groupName] = nil
+        return
+    end
+    if isDamaged(group) then
+        if not s.damageWarned then
+            trigger.action.outTextForCoalition(group:getCoalition(),
+                "[Ship Weapons] " .. groupName .. " was damaged before rearming finished - rearm on hold.", 15)
+            s.damageWarned = true
+        end
+        return
+    end
+    if not deckClear(groupName) then return end
+    local side = group:getCoalition()
+    if SW.respawn(groupName) then
+        SW.groups[groupName] = {delivered = 0, lastLoad = s.lastLoad, pending = false}
+        trigger.action.outTextForCoalition(side, "[Ship Weapons] " .. groupName .. " is fully rearmed.", 15)
+    end
+end
+
+local function checkPending(_, time)
+    for groupName, s in pairs(SW.groups) do
+        if s.pending then
+            finishRearm(groupName)
+        end
+    end
+    return time + CFG.respawn_check
+end
+
+-- ── Delivering a load ───────────────────────────────────────────────────────
+
+--- +20% of every weapon's full load on one unit, capped at full.
+local function topUp(unit)
+    local full = noteFull(unit)
+    local cur = currentCounts(unit)
+    local ammo = {}
+    for _, k in ipairs(full.order) do
+        local f = full[k]
+        if f.count > 0 then
+            local add = math.max(1, math.floor(f.count * CFG.load_fraction))
+            ammo[#ammo + 1] = {desc = f.desc, count = math.min((cur[k] or 0) + add, f.count)}
+        end
+    end
+    trigger.action.setAmmo(unit:getName(), ammo)
+end
+
+--- One load delivered to a group. Returns a message for the pilot.
+function SW.deliverLoad(groupName)
+    local group = Group.getByName(groupName)
+    local s = state(groupName)
+    s.lastLoad = timer.getTime()
+
+    if SW.canSetAmmo() then
+        for _, u in ipairs(aliveUnits(group)) do
+            topUp(u)
+        end
+        local mean, low = SW.ratio(group)
+        local left = SW.loadsNeeded(low)
+        if left == 0 then
+            return string.format("[Ship Weapons] %s: load delivered - fully loaded (%d%%).", groupName, pct(mean))
+        end
+        return string.format("[Ship Weapons] %s: load delivered - now %d%%, %d more load(s) to full. Next load in %d min.",
+            groupName, pct(mean), left, minutes(CFG.cooldown))
+    end
+
+    s.delivered = s.delivered + 1
+    local _, low = SW.ratio(group)
+    local needed = SW.loadsNeeded(low)
+    if s.delivered >= needed then
+        s.pending = true
+        s.damageWarned = false
+        return "[Ship Weapons] " .. groupName .. ": final load delivered - the ship rearms fully once the deck is clear."
+    end
+    return string.format("[Ship Weapons] %s: load delivered (%d/%d). Next load in %d min.",
+        groupName, s.delivered, needed, minutes(CFG.cooldown))
+end
+
+--- Why this ship group can't take a load now, or nil if it can.
+function SW.refusal(groupName, group)
+    local s = state(groupName)
+    if isCarrierGroup(group) then
+        return "Carrier groups cannot be rearmed at sea."
+    end
+    local mean, low = SW.ratio(group)
+    if mean == nil then
+        return groupName .. " has no weapons to rearm."
+    end
+    if isDamaged(group) then
+        return groupName .. " is damaged - cannot rearm at sea."
+    end
+    if s.pending then
+        return groupName .. " has all its loads - it rearms once the deck is clear."
+    end
+    if SW.loadsNeeded(low) == 0 then
+        return groupName .. " is fully loaded."
+    end
+    local cd = cooldownLeft(s)
+    if cd > 0 then
+        return string.format("%s: next rearm load in %d min.", groupName, minutes(cd))
+    end
+    return nil
+end
+
+--- The "Rearm:" line of the status display.
+local function rearmLine(groupName, group)
+    local s = state(groupName)
+    if isCarrierGroup(group) then
+        return "Rearm: not possible at sea (carrier group)"
+    end
+    if isDamaged(group) then
+        return "Rearm: DAMAGED - not possible at sea"
+    end
+    if s.pending then
+        return "Rearm: all loads delivered - completes when the deck is clear"
+    end
+    local _, low = SW.ratio(group)
+    local needed = SW.loadsNeeded(low)
+    local cd = cooldownLeft(s)
+    local text
+    if needed == 0 then
+        text = "Rearm: not needed"
+    elseif SW.canSetAmmo() then
+        text = string.format("Rearm: %d helicopter load(s) to full", needed)
+    else
+        text = string.format("Rearm: loads %d/%d delivered", math.min(s.delivered, needed), needed)
+    end
+    if cd > 0 then
+        local m, sec = math.floor(cd / 60), math.ceil(cd % 60)
+        return text .. string.format(" - next load in %d m %02d s", m, sec)
+    end
+    if needed > 0 then
+        return text .. string.format(" - READY (%d min on deck per load)", minutes(CFG.load_time))
+    end
+    return text
+end
+
+-- ── Helicopter loads ────────────────────────────────────────────────────────
+
+local function toPilot(heli, text)
+    local g = heli:getGroup()
+    if g then
+        trigger.action.outTextForGroup(g:getID(), text, 15)
+    end
+end
+
+local function endSession(heliName)
+    SW.sessions[heliName] = nil
+end
+
+local function pollSession(heliName, time)
+    local session = SW.sessions[heliName]
+    if not session then return nil end
+    local heli = Unit.getByName(heliName)
+    local ship = Unit.getByName(session.ship)
+    if not heli or not heli:isExist() or not ship or not ship:isExist() then
+        endSession(heliName)
+        return nil
+    end
+    local hp, sp = heli:getPoint(), ship:getPoint()
+    local dx, dz = hp.x - sp.x, hp.z - sp.z
+    if heli:inAir() or dx * dx + dz * dz > CFG.max_deck_distance ^ 2 then
+        toPilot(heli, "[Ship Weapons] Rearm load cancelled - you left the deck of " .. session.ship .. ".")
+        endSession(heliName)
+        return nil
+    end
+    if timer.getTime() - session.started < CFG.load_time then
+        return time + CFG.poll
+    end
+    endSession(heliName)
+    local group = ship:getGroup()
+    local why = SW.refusal(session.group, group)
+    if why then
+        toPilot(heli, "[Ship Weapons] Rearm load not delivered: " .. why)
+        return nil
+    end
+    toPilot(heli, SW.deliverLoad(session.group))
+    return nil
+end
+
+function SW.onLanding(heli, place)
+    local shipName = place:getName()
+    local ship = Unit.getByName(shipName)
+    if not ship or not ship:isExist() then return end
+    if ship:getCoalition() ~= heli:getCoalition() then return end
+    local heliName = heli:getName()
+    SW.landed[heliName] = shipName
+    local group = ship:getGroup()
+    local groupName = group:getName()
+    local why = SW.refusal(groupName, group)
+    if why then
+        toPilot(heli, "[Ship Weapons] " .. why)
+        return
+    end
+    SW.sessions[heliName] = {ship = shipName, group = groupName, started = timer.getTime()}
+    local mean = SW.ratio(group)
+    toPilot(heli, string.format(
+        "[Ship Weapons] Rearming %s (%d%%): stay on the deck for %d min to deliver one load.",
+        groupName, pct(mean), minutes(CFG.load_time)))
+    timer.scheduleFunction(pollSession, heliName, timer.getTime() + CFG.poll)
+end
+
+local handler = {}
+function handler:onEvent(event)
+    local ok, err = pcall(function()
+        local unit = event.initiator
+        if not unit or not unit.getName then return end
+        if event.id == world.event.S_EVENT_LAND then
+            if not event.place or not event.place.getDesc then return end
+            local desc = unit:getDesc()
+            if not desc or desc.category ~= Unit.Category.HELICOPTER then return end
+            local placeDesc = event.place:getDesc()
+            if not placeDesc or placeDesc.category ~= Airbase.Category.SHIP then return end
+            SW.onLanding(unit, event.place)
+        elseif event.id == world.event.S_EVENT_TAKEOFF
+            or event.id == world.event.S_EVENT_DEAD
+            or event.id == world.event.S_EVENT_CRASH
+            or event.id == world.event.S_EVENT_PILOT_DEAD
+            or event.id == world.event.S_EVENT_PLAYER_LEAVE_UNIT then
+            local name = unit:getName()
+            SW.landed[name] = nil
+            if SW.sessions[name] and event.id == world.event.S_EVENT_TAKEOFF then
+                toPilot(unit, "[Ship Weapons] Rearm load cancelled - you took off.")
+            end
+            SW.sessions[name] = nil
+        end
+    end)
+    if not ok then
+        log("event error: " .. tostring(err))
+    end
+end
+
+-- ── REDFOR logistics ────────────────────────────────────────────────────────
+
+local function shipGroups(side)
+    return coalition.getGroups(side, Group.Category.SHIP) or {}
+end
+
+local function redforRearm(_, time)
+    for _, group in ipairs(shipGroups(coalition.side.RED)) do
+        local groupName = group:getName()
+        local mean, low = SW.ratio(group)
+        local s = state(groupName)
+        local started = s.delivered > 0 or (s.lastLoad ~= nil and SW.loadsNeeded(low) > 0)
+        if mean and not s.pending and (started or low < CFG.redfor_threshold)
+            and SW.refusal(groupName, group) == nil then
+            SW.deliverLoad(groupName)
+        end
+    end
+    return time + CFG.redfor_interval
+end
+
+-- ── F10 status ──────────────────────────────────────────────────────────────
+
+--- The weapons status of one ship, for the F10 menu.
+function SW.statusText(unitName)
+    local unit = Unit.getByName(unitName)
+    if not unit or not unit:isExist() then
+        return "[Ship Weapons] " .. unitName .. " - not found or destroyed."
+    end
+    local group = unit:getGroup()
+    local full = noteFull(unit)
+    local cur = currentCounts(unit)
+    local lines = {"=== " .. unitName .. " - Weapons Status ==="}
+    local any = false
+    for _, k in ipairs(full.order) do
+        local f = full[k]
+        if f.count > 0 then
+            lines[#lines + 1] = string.format("  %-28s %d / %d", f.name, cur[k] or 0, f.count)
+            any = true
+        end
+    end
+    if not any then
+        lines[#lines + 1] = "  (no weapons)"
+        return table.concat(lines, "\n")
+    end
+    local mean, low = unitFractions(unit)
+    local filled = math.floor(pct(mean) / 10)
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = string.format("  Load:  [%s%s] %d%%", string.rep("#", filled), string.rep("-", 10 - filled), pct(mean))
+    if SW.loadsNeeded(low) == 0 then
+        lines[#lines + 1] = "  Status: FULLY LOADED"
+    else
+        lines[#lines + 1] = string.format("  Status: lowest weapon at %d%%", pct(low))
+    end
+    lines[#lines + 1] = "  " .. rearmLine(group:getName(), group)
     return table.concat(lines, "\n")
 end
 
---- Write current ammo ratios to the state file.
---- Only ships that are still alive are saved; destroyed units are skipped
---- because Retribution will not place them in the next mission anyway.
-local function saveState()
-    if not PERSISTENT_DEPLETION then return end
-    local path = getStatePath()
-    if not path then return end
-
-    local ratios = {}
-    for unitName in pairs(SW.snapshots) do
-        local unit = Unit.getByName(unitName)
-        if unit and unit:isExist() then
-            ratios[unitName] = ammoRatio(unitName)
-        end
-    end
-
-    local f = io.open(path, "w")
-    if not f then
-        trigger.action.outText("[Ship Weapons] WARNING: could not write state file to:\n" .. path, 12)
-        return
-    end
-    f:write(serializeState(ratios))
-    f:close()
+local function showStatus(args)
+    trigger.action.outTextForCoalition(args.side, SW.statusText(args.unit), 25)
 end
 
---- Load the state file written by the previous mission.
---- Returns an empty table on first run or if the file cannot be parsed.
-local function loadState()
-    if not PERSISTENT_DEPLETION then return {} end
-    local path = getStatePath()
-    if not path then return {} end
-
-    local f = io.open(path, "r")
-    if not f then return {} end          -- no file yet (first ever run)
-
-    local content = f:read("*all")
-    f:close()
-
-    -- loadstring is Lua 5.1 / LuaJIT compatible (DCS uses LuaJIT)
-    local fn = loadstring(content)
-    if not fn then return {} end
-
-    local ok, result = pcall(fn)
-    if not ok or type(result) ~= "table" then return {} end
-
-    return result
-end
-
---- Apply saved ratios at mission start.
---- For each ship that has a matching saved ratio, we reduce its DCS-default
---- full load to that ratio before play begins.
-local function applyPersistedState(savedRatios)
-    local applied = 0
-    for unitName, ratio in pairs(savedRatios) do
-        local snap = SW.snapshots[unitName]
-        if snap then
-            local reducedAmmo = {}
-            for i, slot in ipairs(snap) do
-                reducedAmmo[i] = {
-                    desc  = slot.desc,
-                    count = math.max(0, math.floor(slot.count * ratio)),
-                }
-            end
-            trigger.action.setAmmo(unitName, reducedAmmo)
-            applied = applied + 1
-        end
-    end
-    if applied > 0 then
-        trigger.action.outText(
-            string.format("[Ship Weapons] Carry-over depletion applied to %d ship(s) from last turn.",
-                          applied), 15)
-    end
-end
-
-
--- ──────────────────────────────────────────────────────────────────────────────
--- CORE REARM  –  adds one increment (+20%) per visit, capped at snapshot max
--- ──────────────────────────────────────────────────────────────────────────────
-
---- Add CFG.rearm_increment of the full snapshot to the unit's current ammo.
---- Returns (true, newPct) on success or (false, errorString) on failure.
-local function doRearm(unitName)
-    local unit = Unit.getByName(unitName)
-    if not unit or not unit:isExist() then
-        return false, "unit destroyed or not found"
-    end
-    local snap = SW.snapshots[unitName]
-    if not snap or #snap == 0 then
-        return false, "no ammo snapshot available"
-    end
-
-    -- Index current ammo by desc reference so we can look it up per weapon type
-    local currentCounts = {}
-    for _, slot in ipairs(unit:getAmmo() or {}) do
-        currentCounts[slot.desc] = slot.count
-    end
-
-    local newAmmo   = {}
-    local newTotal  = 0
-    local snapTotal = 0
-    for i, snapSlot in ipairs(snap) do
-        -- math.max(1, ...) ensures at least 1 round is added even for small magazines
-        local increment = math.max(1, math.floor(snapSlot.count * CFG.rearm_increment))
-        local cur       = currentCounts[snapSlot.desc] or 0
-        local newCount  = math.min(cur + increment, snapSlot.count)
-        newAmmo[i]      = { desc = snapSlot.desc, count = newCount }
-        newTotal        = newTotal  + newCount
-        snapTotal       = snapTotal + snapSlot.count
-    end
-
-    trigger.action.setAmmo(unitName, newAmmo)
-    SW.lastRearm[unitName] = timer.getTime()
-
-    local pct = snapTotal > 0 and math.floor(newTotal / snapTotal * 100) or 100
-    return true, pct
-end
-
-
--- ──────────────────────────────────────────────────────────────────────────────
--- BLUEFOR  –  F10 RADIO MENU
--- ──────────────────────────────────────────────────────────────────────────────
-
---- Handler: player checks ammo status of a ship.
-local function onStatusRequest(unitName)
-    local unit = Unit.getByName(unitName)
-    if not unit or not unit:isExist() then
-        trigger.action.outTextForCoalition(coalition.side.BLUE,
-            "[Ship Weapons] " .. unitName .. " – unit not found or destroyed.", 10)
-        return
-    end
-
-    local lines   = { "═══ " .. unitName .. " – Weapons Status ═══" }
-    local current = unit:getAmmo()
-    local snap    = SW.snapshots[unitName]
-
-    if current and #current > 0 then
-        for _, slot in ipairs(current) do
-            local name      = (slot.desc and slot.desc.displayName) or "Unknown Weapon"
-            local snapCount = 0
-            if snap then
-                for _, sslot in ipairs(snap) do
-                    if sslot.desc == slot.desc then snapCount = sslot.count; break end
-                end
-            end
-            lines[#lines + 1] = string.format("  %-30s %d / %d", name, slot.count, snapCount)
-        end
-    else
-        lines[#lines + 1] = "  (No ammunition data available)"
-    end
-
-    -- Visual load bar
-    local pct    = math.floor(ammoRatio(unitName) * 100)
-    local filled = math.floor(pct / 10)
-    local bar    = string.rep("█", filled) .. string.rep("░", 10 - filled)
-    lines[#lines + 1] = string.format("\n  Load:  [%s] %d%%", bar, pct)
-
-    -- Visits remaining to full load
-    local visits = visitsToFull(unitName)
-    if visits == 0 then
-        lines[#lines + 1] = "  Status: FULLY LOADED"
-    else
-        lines[#lines + 1] = string.format(
-            "  Visits to full load: %d × rearm needed (+%d%% each)",
-            visits, math.floor(CFG.rearm_increment * 100))
-    end
-
-    -- Rearm cooldown display (minutes + seconds)
-    local last = SW.lastRearm[unitName]
-    if SW.rearming[unitName] then
-        lines[#lines + 1] = "  Rearm: IN PROGRESS …"
-    elseif last then
-        local remaining = CFG.bluefor_rearm_cooldown - (timer.getTime() - last)
-        if remaining > 0 then
-            local mins = math.floor(remaining / 60)
-            local secs = math.ceil(remaining % 60)
-            lines[#lines + 1] = string.format("  Rearm cooldown: %d m %02d s remaining", mins, secs)
-        else
-            lines[#lines + 1] = "  Rearm: READY"
-        end
-    else
-        lines[#lines + 1] = "  Rearm: READY"
-    end
-
-    if PERSISTENT_DEPLETION then
-        lines[#lines + 1] = "  [Depletion carries over to next turn]"
-    end
-
-    trigger.action.outTextForCoalition(coalition.side.BLUE, table.concat(lines, "\n"), 25)
-end
-
---- Handler: player triggers a rearm for a ship.
-local function onRearmRequest(unitName)
-    local unit = Unit.getByName(unitName)
-    if not unit or not unit:isExist() then
-        trigger.action.outTextForCoalition(coalition.side.BLUE,
-            "[Ship Weapons] " .. unitName .. " – not found or destroyed.", 10)
-        return
-    end
-
-    if SW.rearming[unitName] then
-        trigger.action.outTextForCoalition(coalition.side.BLUE,
-            "[Ship Weapons] " .. unitName .. " – rearm already in progress.", 10)
-        return
-    end
-
-    local last = SW.lastRearm[unitName]
-    if last then
-        local remaining = CFG.bluefor_rearm_cooldown - (timer.getTime() - last)
-        if remaining > 0 then
-            local mins = math.floor(remaining / 60)
-            local secs = math.ceil(remaining % 60)
-            trigger.action.outTextForCoalition(coalition.side.BLUE,
-                string.format("[Ship Weapons] %s – rearm on cooldown.  Ready in %d m %02d s.",
-                              unitName, mins, secs), 12)
-            return
-        end
-    end
-
-    -- Begin rearm
-    SW.rearming[unitName] = true
-    trigger.action.outTextForCoalition(coalition.side.BLUE,
-        string.format("[Ship Weapons] %s – rearm initiated.  ETA: %d s.",
-                      unitName, CFG.bluefor_rearm_delay), 15)
-
-    -- Complete after the logistics delay
-    timer.scheduleFunction(function()
-        SW.rearming[unitName] = nil
-        local ok, result = doRearm(unitName)
-        if ok then
-            local visits = visitsToFull(unitName)
-            local suffix = visits == 0
-                and "Ship is at full load."
-                or  string.format("%d more visit(s) needed to reach full load.", visits)
-            trigger.action.outTextForCoalition(coalition.side.BLUE,
-                string.format("[Ship Weapons] %s – rearm COMPLETE.  Load now %d%%.  %s",
-                              unitName, result, suffix), 18)
-        else
-            trigger.action.outTextForCoalition(coalition.side.BLUE,
-                "[Ship Weapons] " .. unitName .. " – rearm FAILED: " .. result, 12)
-        end
-    end, nil, timer.getTime() + CFG.bluefor_rearm_delay)
-end
-
---- Build the F10 radio menu tree for BLUEFOR ships.
-local function buildBlueforMenu()
-    local root  = missionCommands.addSubMenuForCoalition(coalition.side.BLUE, "Ship Weapons", nil)
-    local ships = getShips(coalition.side.BLUE)
-
-    if #ships == 0 then
-        missionCommands.addCommandForCoalition(
-            coalition.side.BLUE, "(no ships detected)", root, function() end)
-        return
-    end
-
-    for _, unit in ipairs(ships) do
-        local uName = unit:getName()
-        local gName = unit:getGroup():getName()
-        local label = gName ~= uName and (gName .. " / " .. uName) or uName
-
-        local shipMenu = missionCommands.addSubMenuForCoalition(coalition.side.BLUE, label, root)
-
-        missionCommands.addCommandForCoalition(
-            coalition.side.BLUE, "Rearm Ship",   shipMenu, onRearmRequest, uName)
-        missionCommands.addCommandForCoalition(
-            coalition.side.BLUE, "Ammo Status",  shipMenu, onStatusRequest, uName)
-    end
-end
-
-
--- ──────────────────────────────────────────────────────────────────────────────
--- REDFOR  –  AUTOMATIC AI REARM
--- ──────────────────────────────────────────────────────────────────────────────
-
---- Scheduled function: applies one rearm increment to any REDFOR ship below
---- the threshold.  One increment per cycle means a depleted ship needs multiple
---- cycles (up to 5 × 25 min = 2 h 5 min) to return to full readiness.
-local function redforAutoRearm(_, time)
-    local ships = getShips(coalition.side.RED)
-    for _, unit in ipairs(ships) do
-        local uName = unit:getName()
-        if ammoRatio(uName) <= CFG.redfor_rearm_threshold then
-            local ok, pct = doRearm(uName)
-            if ok and CFG.redfor_rearm_verbose then
-                trigger.action.outText(
-                    string.format("[Ship Weapons] REDFOR %s auto-rearmed +%d%%.  Load now %d%%.",
-                                  uName,
-                                  math.floor(CFG.rearm_increment * 100),
-                                  pct), 8)
+local function buildMenu(side)
+    local root = missionCommands.addSubMenuForCoalition(side, "Ship Weapons")
+    local count = 0
+    for _, group in ipairs(shipGroups(side)) do
+        for _, u in ipairs(aliveUnits(group)) do
+            local mean = unitFractions(u)
+            if mean then
+                local uName, gName = u:getName(), group:getName()
+                local label = gName ~= uName and (gName .. " / " .. uName) or uName
+                local menu = missionCommands.addSubMenuForCoalition(side, label, root)
+                missionCommands.addCommandForCoalition(side, "Ammo Status", menu, showStatus,
+                    {side = side, unit = uName})
+                count = count + 1
             end
         end
     end
-    return time + CFG.redfor_check_interval
-end
-
-
--- ──────────────────────────────────────────────────────────────────────────────
--- MISSION END EVENT  –  save state before DCS closes the session
--- ──────────────────────────────────────────────────────────────────────────────
-
-local missionEndHandler = {}
-function missionEndHandler:onEvent(event)
-    if event.id == world.event.S_EVENT_MISSION_END then
-        saveState()
+    if count == 0 then
+        missionCommands.addCommandForCoalition(side, "(no armed ships)", root, function() end)
     end
 end
-
-
--- ──────────────────────────────────────────────────────────────────────────────
--- PERIODIC STATE SAVE  –  belt-and-suspenders: also save on a timer
--- S_EVENT_MISSION_END is not always fired reliably in DCS; this ensures
--- we have a recent state snapshot even if the event is missed.
--- ──────────────────────────────────────────────────────────────────────────────
-
-local function periodicSave(_, time)
-    saveState()
-    return time + CFG.state_save_interval
-end
-
-
--- ──────────────────────────────────────────────────────────────────────────────
--- INITIALISATION
--- ──────────────────────────────────────────────────────────────────────────────
 
 local function init()
-    -- 1. Snapshot full ammo for every ship on both sides.
-    --    This always reflects the DCS-default full load regardless of persistence.
-    local function snapshotSide(side)
-        for _, unit in ipairs(getShips(side)) do
-            SW.snapshots[unit:getName()] = copyAmmo(unit:getAmmo() or {})
+    for _, side in ipairs({coalition.side.BLUE, coalition.side.RED}) do
+        for _, group in ipairs(shipGroups(side)) do
+            SW.ratio(group) -- remember the full loads
         end
+        buildMenu(side)
     end
-    snapshotSide(coalition.side.BLUE)
-    snapshotSide(coalition.side.RED)
-
-    -- 2. If persistent depletion is enabled, load the state saved by the
-    --    previous mission and reduce each ship's starting ammo accordingly.
-    if PERSISTENT_DEPLETION then
-        local savedRatios = loadState()
-        applyPersistedState(savedRatios)
+    world.addEventHandler(handler)
+    timer.scheduleFunction(checkPending, nil, timer.getTime() + CFG.respawn_check)
+    if REDFOR_AUTO then
+        timer.scheduleFunction(redforRearm, nil, timer.getTime() + CFG.redfor_interval)
     end
-
-    -- 3. Build the BLUEFOR F10 radio menu.
-    buildBlueforMenu()
-
-    -- 4. Start the REDFOR auto-rearm scheduler.
-    timer.scheduleFunction(redforAutoRearm, nil,
-        timer.getTime() + CFG.redfor_check_interval)
-
-    -- 5. Register state-save systems (only when persistence is on).
-    if PERSISTENT_DEPLETION then
-        world.addEventHandler(missionEndHandler)
-        timer.scheduleFunction(periodicSave, nil,
-            timer.getTime() + CFG.state_save_interval)
-    end
-
-    -- Startup banner
-    trigger.action.outText(
-        string.format(
-            "[Ship Weapons] Plugin loaded.\n" ..
-            "BLUEFOR : F10 → Ship Weapons | +%d%% per rearm | %d-min cooldown\n" ..
-            "REDFOR  : auto-rearm every %d min when below %d%% | +%d%% per cycle\n" ..
-            "Persistence: %s",
-            math.floor(CFG.rearm_increment        * 100),
-            math.floor(CFG.bluefor_rearm_cooldown / 60),
-            math.floor(CFG.redfor_check_interval  / 60),
-            math.floor(CFG.redfor_rearm_threshold  * 100),
-            math.floor(CFG.rearm_increment         * 100),
-            PERSISTENT_DEPLETION and "ON  (state saved to Scripts/RetributionShipWeapons.lua)"
-                                 or  "OFF (ammo resets each mission)"),
-        18)
+    log("ready - rearm mode: " .. (SW.canSetAmmo() and "setAmmo (+20% per load)" or "respawn when all loads are delivered"))
 end
 
-init()
+timer.scheduleFunction(function()
+    local ok, err = pcall(init)
+    if not ok then
+        log("init failed: " .. tostring(err))
+    end
+end, nil, timer.getTime() + 5)

@@ -14,6 +14,7 @@
 * **[Data]** Added the F-100D Super Sabre (DCS module) to the USA 1955-1975 and Vietnam War factions, and the F-14A Tomcat (Block 95-GR Export).
 * **[Data]** Weapons data updated to upstream: 74 new weapon groups and wider CLSID coverage (Super Hornet, JAS-39, CH packs and more), with introduction years for date-restricted loadouts.
 * **[Logistics]** UH-60L and MH-60L DAP cargo loads are now weight-checked (mod data: 3622 kg at full fuel).
+* **[Plugins]** Ship rearming at sea: a helicopter that stays 15 min on a friendly ship's deck delivers a 20% rearm load (one per 30 min per group); when the loads cover what the group has fired it respawns in place fully armed. Damaged ships and carrier groups are not rearmed; REDFOR ships rearm on their own (option). F10 > Ship Ammo > Status.
 * **[Mission Generator]** Native DTC data cartridges for the F/A-18C and F-16C: every blue client flight spawns with its steerpoints and push times, recovery TACAN/ICLS/ACLS and the SA/HSD picture already loaded, and multiplayer clients receive the cartridge with the mission download. Campaign setting `Pre-load DTC data cartridges`, on by default.
 * **[Campaigns]** Ability to define motor pool objects which spawn reserve armor
 * **[Campaigns]** Motorpool placement is Garage_A-anchored and empty reserve pools are excluded from attack planning

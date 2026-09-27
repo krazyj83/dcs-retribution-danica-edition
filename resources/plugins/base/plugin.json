@@ -21,7 +21,7 @@
             "mnemonic": "retribution_cargo"
         },
         {
-            "file": "moose.lua",
+            "file": "Moose.lua",
             "mnemonic": "moose"
         }
     ],
