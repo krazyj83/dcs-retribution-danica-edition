@@ -1,14 +1,35 @@
-[![Logo](https://github.com/dcs-retribution/dcs-retribution/raw/main/resources/ui/splash_screen.png)](https://shdwp.github.io/ukraine/)
+[![Logo](resources/ui/splash_screen.png)](https://shdwp.github.io/ukraine/)
 
 (Github Readme Banner and Splash screen Artwork by Andriy Dankovych, CC BY-SA 4.0)
 
-[![Download](https://img.shields.io/github/downloads/dcs-retribution/dcs-retribution/total?label=Download)](https://github.com/dcs-retribution/dcs-retribution/releases)
+# DCS Retribution - Danica Edition
+
+This is the **Danica Edition** fork of [DCS Retribution](https://github.com/dcs-retribution/dcs-retribution), maintained for a weekly
+multiplayer campaign. It tracks upstream Retribution and adds its own features on top.
+
+[![GitHub issues](https://img.shields.io/github/issues/krazyj83/dcs-retribution-danica-edition)](https://github.com/krazyj83/dcs-retribution-danica-edition/issues)
+[![GitHub pull requests](https://img.shields.io/github/issues-pr/krazyj83/dcs-retribution-danica-edition)](https://github.com/krazyj83/dcs-retribution-danica-edition/pulls)
+[![Build](https://github.com/krazyj83/dcs-retribution-danica-edition/actions/workflows/build.yml/badge.svg?branch=dev)](https://github.com/krazyj83/dcs-retribution-danica-edition/actions)
+
+### What this fork adds
+
+* **Logistics**: base warehouses and weapon inventories; weapon cargo planned per LOGISTIC flight
+  (Cargo tab, weight-checked, kneeboard load sheet, crates next to the aircraft, F10 cargo orders,
+  crate-based delivery).
+* **REDFOR AI**: need-based resupply by convoy or airlift, a main supply base, SHORAD convoy
+  escorts after heavy BAI, and adaptive counters to the player's mission mix.
+* **Naval**: ship weapons status and rearming at sea with naval munitions crates flown by
+  helicopter.
+* **Campaign**: player-drawn convoys that cost real units, strikeable motor pools, movable ships,
+  frontline combat clusters and more. See the [changelog](changelog.md).
+
+### Upstream DCS Retribution
 
 [![Discord](https://img.shields.io/discord/1015931619187621999?label=Discord&logo=discord)](https://discord.gg/b4x34Bg4We)
-
-[![GitHub pull requests](https://img.shields.io/github/issues-pr/dcs-retribution/dcs-retribution)](https://github.com/dcs-retribution/dcs-retribution/pulls)
-[![GitHub issues](https://img.shields.io/github/issues/dcs-retribution/dcs-retribution)](https://github.com/dcs-retribution/dcs-retribution/issues)
 ![GitHub stars](https://img.shields.io/github/stars/dcs-retribution/dcs-retribution?style=social)
+
+The sections below describe upstream DCS Retribution. Its Discord, wiki and releases are for
+upstream builds, not this fork.
 
 ## About DCS Retribution 
 (Last update: 2026-03-22)
@@ -39,13 +60,14 @@ version, unless it's a minor patch which doesn't require any changes on our end.
 Over the years we've extended the original DCS Liberation with a lot of features, 
 such as support for road-bases, neutral bases, weapon-settings, additional mission types, etc.
 For a more complete overview of our features, check the
-[changelog](https://github.com/dcs-retribution/dcs-retribution/blob/main/changelog.md).
+[changelog](https://github.com/dcs-retribution/dcs-retribution/blob/dev/changelog.md).
 
 ## Downloads
 
-Latest release is available here : https://github.com/dcs-retribution/dcs-retribution/releases
+This fork: builds come from this repository's [GitHub Actions](https://github.com/krazyj83/dcs-retribution-danica-edition/actions)
+(the `build-app` artifact of a green run on `dev`) and [releases](https://github.com/krazyj83/dcs-retribution-danica-edition/releases).
 
-To download preview builds of the next version of DCS Retribution, see https://github.com/dcs-retribution/dcs-retribution/wiki/Betas.
+Upstream Retribution: https://github.com/dcs-retribution/dcs-retribution/releases, preview builds: https://github.com/dcs-retribution/dcs-retribution/wiki/Betas.
 
 ## DCS bugs
 
@@ -62,26 +84,24 @@ especially with older SAM systems.
 
 ## Bugs and feature requests
 
-If you need to report a bug or want to suggest a new feature, you can do this on our 
-[bug tracker](https://github.com/dcs-retribution/dcs-retribution/issues).
-In either case, please use the search bar at the top of the page to see if it has already been reported.
-Note that you may need to remove the filter for open bugs if it's something we've recently fixed.
+For this fork, report bugs and ideas on the
+[Danica Edition issue tracker](https://github.com/krazyj83/dcs-retribution-danica-edition/issues).
+Problems that also happen in upstream Retribution belong on the
+[upstream bug tracker](https://github.com/dcs-retribution/dcs-retribution/issues).
+In either case, please search first to see if it has already been reported.
 
 ## Roadmap
 
-Our plans for future releases can be found on our
-[Projects page](https://github.com/dcs-retribution/dcs-retribution/projects).
-Each planned release has a Project, and the page for that project has columns for to do,
-in progress, and done. Items in the Done column are in the
-[preview build](https://github.com/dcs-retribution/dcs-retribution/wiki/Preview-builds)
-for that release. Items in the To do column are planned to be added to that release.
+Upstream Retribution plans its work on its
+[issue tracker](https://github.com/dcs-retribution/dcs-retribution/issues).
+Features of this fork are listed in the [changelog](changelog.md).
 
 ## Resources
 
-Tutorials, contributors and developer's guides are available in the project's
+Tutorials, contributors and developer's guides are available in upstream Retribution's
 [Wiki](https://github.com/dcs-retribution/dcs-retribution/wiki/)
 
-(Some historical information is also availabe on
+(Some historical information is also available on
 [Liberation's Wiki](https://github.com/dcs-liberation/dcs_liberation/wiki/))
 
 ## Special Thanks

@@ -1,5 +1,5 @@
 import { LatLng, DivIcon } from "leaflet";
-import React, { useRef, useState } from "react";
+import React, { useState } from "react";
 import { CircleMarker, Marker, Polyline, Popup, Tooltip, useMapEvents } from "react-leaflet";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import { DropZone, createDropZone, deleteDropZone, selectDropZones, serverBase } from "../../api/dropZonesSlice";

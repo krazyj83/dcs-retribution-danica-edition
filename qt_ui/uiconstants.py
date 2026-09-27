@@ -7,10 +7,10 @@ from .liberation_theme import get_theme_icons
 
 URLS: Dict[str, str] = {
     "Manual": "https://github.com/dcs-retribution/dcs-retribution/wiki",
-    "Repository": "https://github.com/dcs-retribution/dcs-retribution",
+    "Repository": "https://github.com/krazyj83/dcs-retribution-danica-edition",
     "ForumThread": "https://forum.dcs.world/topic/368593-dcs-retribution-dynamic-campaign-generator/",
-    "Issues": "https://github.com/dcs-retribution/dcs-retribution/issues",
-    "Releases": "https://github.com/dcs-retribution/dcs-retribution/releases",
+    "Issues": "https://github.com/krazyj83/dcs-retribution-danica-edition/issues",
+    "Releases": "https://github.com/krazyj83/dcs-retribution-danica-edition/releases",
 }
 
 LABELS_OPTIONS = ["Full", "Abbreviated", "Dot Only", "Neutral Dot", "Off"]
