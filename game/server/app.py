@@ -18,6 +18,7 @@ from . import (
     iadsnetwork,
 )
 from .settings import ServerSettings
+
 app = FastAPI()
 app.include_router(controlpoints.router)
 app.include_router(convoyroutes.router)

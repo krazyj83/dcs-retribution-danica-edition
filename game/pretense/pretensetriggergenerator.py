@@ -107,7 +107,9 @@ class PretenseTriggerGenerator:
         for airport in self.mission.terrain.airport_list():
             if airport.id not in airport_ids:
                 airport.unlimited_fuel = True
-                airport.unlimited_munitions = False  # hardcoded OFF — managed by warehouse system
+                airport.unlimited_munitions = (
+                    False  # hardcoded OFF — managed by warehouse system
+                )
                 airport.unlimited_aircrafts = True
 
         for airfield in airfields:

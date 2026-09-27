@@ -6,6 +6,7 @@ from game.server.leaflet import LeafletPoint
 
 class DropZoneJs(BaseModel):
     """A player-placed drop zone on the campaign map."""
+
     id: UUID
     name: str
     position: LeafletPoint

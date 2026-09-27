@@ -126,16 +126,16 @@ class MizCampaignLoader:
     #   Group name "ARMOR-Checkpoint1" with a BMP-2 inside → routes to armor_groups
     #   Group name "EWR-Valley" with any unit → routes to ewrs
     NAME_PREFIX_ROUTES: dict[str, str] = {
-        "SAM-LR-":  "long_range_sams",
-        "SAM-MR-":  "medium_range_sams",
-        "SAM-SR-":  "short_range_sams",
-        "AAA-":     "aaa",
-        "EWR-":     "ewrs",
-        "ARMOR-":   "armor_groups",
+        "SAM-LR-": "long_range_sams",
+        "SAM-MR-": "medium_range_sams",
+        "SAM-SR-": "short_range_sams",
+        "AAA-": "aaa",
+        "EWR-": "ewrs",
+        "ARMOR-": "armor_groups",
         "MISSILE-": "missile_sites",
         "COASTAL-": "coastal_defenses",
-        "SHIP-":    "ships",
-        "STRIKE-":  "strike_locations",
+        "SHIP-": "ships",
+        "STRIKE-": "strike_locations",
     }
 
     # Unit types used internally that must never be treated as custom ground objects.
@@ -161,13 +161,15 @@ class MizCampaignLoader:
         # Build the set of internal unit type IDs that must never become custom
         # ground objects. We do this here so subclasses can override the class-level
         # constants before __init__ runs.
-        self._skip_unit_types: frozenset[str] = frozenset({
-            self.FRONT_LINE_UNIT_TYPE,
-            self.CP_CONVOY_SPAWN_TYPE,
-            self.FOB_UNIT_TYPE,
-            self.INVISIBLE_FOB_UNIT_TYPE,
-            self.NEUTRAL_FOB_UNIT_TYPE,
-        })
+        self._skip_unit_types: frozenset[str] = frozenset(
+            {
+                self.FRONT_LINE_UNIT_TYPE,
+                self.CP_CONVOY_SPAWN_TYPE,
+                self.FOB_UNIT_TYPE,
+                self.INVISIBLE_FOB_UNIT_TYPE,
+                self.NEUTRAL_FOB_UNIT_TYPE,
+            }
+        )
 
     def control_point_from_airport(
         self, airport: Airport, ctld_zones: List[Tuple[Point, float]]
@@ -700,8 +702,7 @@ class MizCampaignLoader:
             preset_list.append(PresetLocation.from_group(group))
             claimed_vehicle_ids.add(id(group))
             logging.debug(
-                f"Name-prefix routed '{group.name}' → {list_name} "
-                f"at {closest.name}"
+                f"Name-prefix routed '{group.name}' → {list_name} " f"at {closest.name}"
             )
 
         # ── Pass 2: unit-type matching (backward-compatible) ──────────────────

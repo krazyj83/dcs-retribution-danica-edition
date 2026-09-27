@@ -69,7 +69,7 @@ def friendly_base_at(game: Game, x: float, z: float) -> Optional[ControlPoint]:
         distance = cp.position.distance_to_point(point)
         inside = distance <= base_radius_m(cp)
         if not inside:
-            for dz in game.logistics.drop_zones_for_cp(cp.id):  # type: ignore[arg-type]
+            for dz in game.logistics.drop_zones_for_cp(cp.id):
                 if not dz.active:
                     continue
                 try:

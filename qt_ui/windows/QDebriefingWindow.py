@@ -120,6 +120,7 @@ class QDebriefingWindow(QDialog):
         """Run the logistics debrief hook and display a summary if anything changed."""
         try:
             from game.logistics.debrief_hook import update_logistics_from_debriefing
+
             self._logistics_log = update_logistics_from_debriefing(self.debriefing)
         except Exception as e:
             logging.warning(f"Logistics debrief hook failed: {e}")

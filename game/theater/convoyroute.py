@@ -9,10 +9,11 @@ independent mission type — not subject to the "only escort flights" validation
 The target position is set to the route midpoint so the flight plan builder
 places the orbit over the centre of the route.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Any, Iterator, Optional
 
 from dcs.mapping import Point
 from game.theater.missiontarget import MissionTarget
@@ -35,10 +36,10 @@ class ConvoyRouteTarget(MissionTarget):
     """
 
     name: str
-    position: Point          # midpoint — used by flight plan builder
-    start: Point = field(default=None)
-    end: Point = field(default=None)
-    _coalition: object = field(default=None, repr=False)
+    position: Point  # midpoint — used by flight plan builder
+    start: Optional[Point] = None
+    end: Optional[Point] = None
+    _coalition: Any = field(default=None, repr=False)
 
     def is_friendly(self, to_player: Player) -> bool:
         # The convoy route is always a friendly asset — it's the player's supply line.
@@ -56,6 +57,7 @@ class ConvoyRouteTarget(MissionTarget):
         CAS and BARCAP are offered as alternatives.
         """
         from game.ato.flighttype import FlightType
+
         yield FlightType.CONVOY_ESCORT
         yield FlightType.CAS
         yield FlightType.BARCAP

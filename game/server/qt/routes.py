@@ -107,15 +107,8 @@ def new_drop_zone_package(
             status.HTTP_404_NOT_FOUND,
             detail=f"No drop zone with id {dz_id}",
         )
-    # dz is a raw logistics.DropZone with .lat/.lon attributes
-    try:
-        lat = dz.lat
-        lon = dz.lon
-    except AttributeError:
-        lat = dz.position.lat
-        lon = dz.position.lng
     position = Point.from_latlng(
-        LatLng(lat, lon),
+        LatLng(dz.lat, dz.lon),
         game.theater.terrain,
     )
     target = CustomAirdropTarget(name=dz.name, position=position, _coalition=game.blue)
@@ -141,12 +134,8 @@ def new_convoy_route_package(
             detail=f"No convoy route with id {route_id}",
         )
     terrain = game.theater.terrain
-    start_point = Point.from_latlng(
-        LatLng(route.start.lat, route.start.lng), terrain
-    )
-    end_point = Point.from_latlng(
-        LatLng(route.end.lat, route.end.lng), terrain
-    )
+    start_point = Point.from_latlng(LatLng(route.start.lat, route.start.lng), terrain)
+    end_point = Point.from_latlng(LatLng(route.end.lat, route.end.lng), terrain)
     mid_point = Point(
         (start_point.x + end_point.x) / 2,
         (start_point.y + end_point.y) / 2,

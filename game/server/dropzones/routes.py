@@ -5,8 +5,10 @@ Drop zone API routes. Reads and writes directly from/to
 game.logistics.LogisticsManager so the map and the Logistics window
 always share the same data.
 """
+
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -16,10 +18,13 @@ from game.server.dependencies import GameContext
 from game.server.leaflet import LeafletPoint
 from .models import CreateDropZoneRequest, DropZoneJs
 
+if TYPE_CHECKING:
+    from game.logistics import DropZone, LogisticsManager
+
 router: APIRouter = APIRouter(prefix="/drop-zones")
 
 
-def _get_logistics():
+def _get_logistics() -> Optional[LogisticsManager]:
     """Return the LogisticsManager from the current game, or None."""
     game = GameContext.get()
     if game is None:
@@ -27,7 +32,7 @@ def _get_logistics():
     return getattr(game, "logistics", None)
 
 
-def _to_js(dz) -> DropZoneJs:
+def _to_js(dz: DropZone) -> DropZoneJs:
     """Convert a logistics.DropZone to the API model."""
     return DropZoneJs(
         id=UUID(dz.dz_id),
@@ -43,7 +48,7 @@ def get_all() -> list[DropZoneJs]:
     return [_to_js(dz) for dz in logistics._drop_zones.values()]
 
 
-def get_by_id(dz_id: UUID):
+def get_by_id(dz_id: UUID) -> Optional[DropZone]:
     """Return the raw DropZone dataclass by id, or None."""
     logistics = _get_logistics()
     if logistics is None:
@@ -61,6 +66,7 @@ def clear_all() -> None:
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
 
 @router.get("/", operation_id="list_drop_zones", response_model=list[DropZoneJs])
 def list_drop_zones() -> list[DropZoneJs]:
@@ -101,6 +107,7 @@ def create_drop_zone(body: CreateDropZoneRequest) -> DropZoneJs:
             # was silently swallowed by this try/except, meaning this entire
             # nearest-CP lookup never ran. Removed; nothing here needs Point.
             from dcs.mapping import LatLng
+
             nearest = None
             nearest_dist = float("inf")
             for cp in game.theater.controlpoints:

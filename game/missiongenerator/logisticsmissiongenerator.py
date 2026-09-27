@@ -19,12 +19,8 @@ Concept — how pydcs flight generation works:
     3. Set task via group.task = dcs.task.Transport (or similar)
   We follow exactly the same pattern here.
 
-Concept — why the transfer_id goes in the unit name:
-  DCS unit names are visible to Lua scripts at runtime.
-  The existing retribution_logistics.lua tracks units by name.
-  Embedding the transfer_id (first 8 chars) in the group name
-  lets the Lua delivery handler know which LogisticsTransfer
-  to report back on when it sees a delivery event.
+Cargo itself is placed and reported by transfercargogenerator.py and
+resources/plugins/base/retribution_cargo.lua.
 """
 
 from __future__ import annotations
@@ -34,6 +30,7 @@ from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     import dcs
+    from dcs.mission import Mission
     from game import Game
     from game.ato.flight import Flight
 
@@ -41,15 +38,27 @@ logger = logging.getLogger(__name__)
 
 # Aircraft types that use sling load (CTLD crate drop) vs paradrop/landing
 SLING_LOAD_TYPES = {
-    "UH-1H", "Mi-8MT", "Mi-8MSB", "Mi-8MSB-2",
-    "SA342M", "SA342L", "OH-6A", "UH-60L",
-    "CH-47D", "Mi-26",
+    "UH-1H",
+    "Mi-8MT",
+    "Mi-8MSB",
+    "Mi-8MSB-2",
+    "SA342M",
+    "SA342L",
+    "OH-6A",
+    "UH-60L",
+    "CH-47D",
+    "Mi-26",
 }
 
 # Aircraft types that use paradrop (troops only)
 PARADROP_TYPES = {
-    "C-130",  "An-26B", "An-26", "IL-76MD",
-    "C-17A",  "C-5",    "Tu-134",
+    "C-130",
+    "An-26B",
+    "An-26",
+    "IL-76MD",
+    "C-17A",
+    "C-5",
+    "Tu-134",
 }
 
 
@@ -61,9 +70,9 @@ class LogisticsMissionGenerator:
         LogisticsMissionGenerator(flight, game, mission).generate()
     """
 
-    def __init__(self, flight: Flight, game: Game, mission) -> None:
-        self.flight  = flight
-        self.game    = game
+    def __init__(self, flight: Flight, game: Game, mission: Mission) -> None:
+        self.flight = flight
+        self.game = game
         self.mission = mission
 
     def generate(self) -> bool:
@@ -85,18 +94,20 @@ class LogisticsMissionGenerator:
 
         transfer = self.game.logistics._transfers.get(transfer_id)
         if transfer is None:
-            logger.warning(
-                "LOGISTICS flight: transfer %s not found", transfer_id
-            )
+            logger.warning("LOGISTICS flight: transfer %s not found", transfer_id)
             return False
 
         # Get source and destination control points
-        source_cp = self.game.theater.find_control_point_by_id(transfer.source_cp_id)
-        dest_cp   = self.game.theater.find_control_point_by_id(transfer.dest_cp_id)
-        if source_cp is None or dest_cp is None:
+        try:
+            source_cp = self.game.theater.find_control_point_by_id(
+                transfer.source_cp_id
+            )
+            dest_cp = self.game.theater.find_control_point_by_id(transfer.dest_cp_id)
+        except KeyError:
             logger.error(
-                "LOGISTICS: could not find source CP %d or dest CP %d",
-                transfer.source_cp_id, transfer.dest_cp_id,
+                "LOGISTICS: could not find source base %s or destination base %s",
+                transfer.source_cp_id,
+                transfer.dest_cp_id,
             )
             return False
 
@@ -112,9 +123,7 @@ class LogisticsMissionGenerator:
                     pass
             return True
         if dz is None:
-            logger.error(
-                "LOGISTICS: drop zone %s not found", transfer.dz_id
-            )
+            logger.error("LOGISTICS: drop zone %s not found", transfer.dz_id)
             return False
 
         try:

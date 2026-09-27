@@ -6,7 +6,7 @@ REDFOR priorities to counter the player's strategy.
 
 Pattern → REDFOR response:
   SEAD/DEAD heavy   → Procurement requests for more SAM units
-  BAI heavy         → Convoys include SHORAD units; more ground escorts
+  BAI heavy         → (logged only, no counter yet)
   OCA heavy         → Procurement requests for more interceptors
   CAS heavy         → More armor sent to frontline bases
   TRANSPORT heavy   → Procurement requests for fighters to intercept
@@ -15,6 +15,7 @@ Wired in game/game.py finish_turn():
     1. RedforAdaptivePlanner(self).observe()   ← snapshots BLUEFOR ATO
     2. RedforAdaptivePlanner(self).adapt()     ← adjusts REDFOR priorities
 """
+
 from __future__ import annotations
 
 import logging
@@ -27,8 +28,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # How many of a mission type in the window triggers a response
-THRESHOLD_LOW  = 2   # subtle adjustment
-THRESHOLD_HIGH = 4   # strong adjustment
+THRESHOLD_LOW = 2  # subtle adjustment
+THRESHOLD_HIGH = 4  # strong adjustment
 
 
 class RedforAdaptivePlanner:
@@ -44,6 +45,7 @@ class RedforAdaptivePlanner:
         # Ensure the history object exists (migration safety)
         if not hasattr(game, "bluefor_mission_history"):
             from game.models.game_stats import BlueforMissionHistory
+
             game.bluefor_mission_history = BlueforMissionHistory()
         self.history = game.bluefor_mission_history
 
@@ -62,7 +64,8 @@ class RedforAdaptivePlanner:
             summary = ", ".join(f"{ft.value}×{n}" for ft, n in top)
             logger.info(
                 "RedforAdaptivePlanner: BLUEFOR pattern (last %d turns): %s",
-                self.history.turns_recorded, summary,
+                self.history.turns_recorded,
+                summary,
             )
 
     # ── Adaptation ────────────────────────────────────────────────────────────
@@ -89,9 +92,8 @@ class RedforAdaptivePlanner:
             self._counter_bai(bai_count)
 
         # OCA heavy → reinforce air defenses at airfields
-        oca_count = (
-            counts.get(FlightType.OCA_AIRCRAFT, 0)
-            + counts.get(FlightType.OCA_RUNWAY, 0)
+        oca_count = counts.get(FlightType.OCA_AIRCRAFT, 0) + counts.get(
+            FlightType.OCA_RUNWAY, 0
         )
         if oca_count >= THRESHOLD_LOW:
             self._counter_oca(oca_count)
@@ -102,11 +104,8 @@ class RedforAdaptivePlanner:
             self._counter_cas(cas_count)
 
         # TRANSPORT/LOGISTIC heavy → intercept supply corridors
-        transport_count = (
-            counts.get(FlightType.TRANSPORT, 0)
-            + counts.get(getattr(FlightType, "LOGISTIC", None), 0)
-            if hasattr(FlightType, "LOGISTIC") else
-            counts.get(FlightType.TRANSPORT, 0)
+        transport_count = counts.get(FlightType.TRANSPORT, 0) + counts.get(
+            FlightType.LOGISTIC, 0
         )
         if transport_count >= THRESHOLD_LOW:
             self._counter_transport(transport_count)
@@ -126,7 +125,8 @@ class RedforAdaptivePlanner:
         strength = "heavy" if count >= THRESHOLD_HIGH else "moderate"
         logger.info(
             "RedforAdaptivePlanner: %s SEAD detected (%d) → reinforcing SAM coverage",
-            strength, count,
+            strength,
+            count,
         )
 
         faction_units = self.red.faction.frontline_units
@@ -153,18 +153,20 @@ class RedforAdaptivePlanner:
             ordered += 1
             logger.info(
                 "RedforAdaptivePlanner: ordered %s for %s (%dM)",
-                unit, cp.name, unit.price,
+                unit,
+                cp.name,
+                unit.price,
             )
 
     def _counter_bai(self, count: int) -> None:
-        """REDFOR detects heavy BAI → signals convoy planner to add SHORAD escort."""
+        """REDFOR detects heavy BAI. Logged only: no counter is wired up yet
+        (convoy SHORAD escorts were planned but never implemented)."""
         strength = "heavy" if count >= THRESHOLD_HIGH else "moderate"
         logger.info(
-            "RedforAdaptivePlanner: %s BAI detected (%d) → flagging convoy SHORAD escort",
-            strength, count,
+            "RedforAdaptivePlanner: %s BAI detected (%d), no counter implemented",
+            strength,
+            count,
         )
-        # Set a flag on the game object that RedforSupplyPlanner reads
-        self.game.redfor_convoy_shorad_escort = True
 
     def _counter_oca(self, count: int) -> None:
         """REDFOR detects heavy OCA → requests interceptors at threatened airbases."""
@@ -174,7 +176,8 @@ class RedforAdaptivePlanner:
         strength = "heavy" if count >= THRESHOLD_HIGH else "moderate"
         logger.info(
             "RedforAdaptivePlanner: %s OCA detected (%d) → requesting interceptors",
-            strength, count,
+            strength,
+            count,
         )
 
         # Find red airbases with squadrons and request fighter replenishment
@@ -210,7 +213,8 @@ class RedforAdaptivePlanner:
         strength = "heavy" if count >= THRESHOLD_HIGH else "moderate"
         logger.info(
             "RedforAdaptivePlanner: %s CAS detected (%d) → reinforcing frontline armor",
-            strength, count,
+            strength,
+            count,
         )
 
         now = datetime.utcnow()
@@ -253,7 +257,9 @@ class RedforAdaptivePlanner:
                     reinforced += 1
                     logger.info(
                         "RedforAdaptivePlanner: reinforcing frontline %s from %s (%d units)",
-                        cp.name, source.name, sum(units.values()),
+                        cp.name,
+                        source.name,
+                        sum(units.values()),
                     )
                     break
                 except Exception as e:
@@ -269,7 +275,8 @@ class RedforAdaptivePlanner:
         strength = "heavy" if count >= THRESHOLD_HIGH else "moderate"
         logger.info(
             "RedforAdaptivePlanner: %s TRANSPORT detected (%d) → contesting supply corridors",
-            strength, count,
+            strength,
+            count,
         )
 
         requested = 0

@@ -5,6 +5,8 @@ from typing import Deque, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from game import Game
+    from game.ato.airtaaskingorder import AirTaskingOrder
+    from game.ato.flighttype import FlightType
 
 
 class FactionTurnMetadata:
@@ -70,9 +72,10 @@ class GameStats:
 
 class BlueforTurnMissions:
     """Snapshot of BLUEFOR mission types planned in one turn."""
+
     def __init__(self, turn: int) -> None:
         self.turn = turn
-        self.mission_counts: Counter = Counter()
+        self.mission_counts: Counter[FlightType] = Counter()
 
 
 class BlueforMissionHistory:
@@ -82,6 +85,7 @@ class BlueforMissionHistory:
     RedforAdaptivePlanner to detect player strategy patterns and
     adjust REDFOR priorities accordingly.
     """
+
     WINDOW: int = 3
 
     def __init__(self) -> None:
@@ -95,18 +99,18 @@ class BlueforMissionHistory:
                 snapshot.mission_counts[flight.flight_type] += 1
         self._turns.append(snapshot)
 
-    def total_counts(self) -> Counter:
+    def total_counts(self) -> Counter[FlightType]:
         """Sum of mission type counts across all stored turns."""
-        total: Counter = Counter()
+        total: Counter[FlightType] = Counter()
         for turn in self._turns:
             total += turn.mission_counts
         return total
 
-    def count(self, flight_type) -> int:
+    def count(self, flight_type: FlightType) -> int:
         """Total count of a specific flight type across the window."""
         return self.total_counts().get(flight_type, 0)
 
-    def dominant(self, threshold: int = 2) -> list:
+    def dominant(self, threshold: int = 2) -> list[FlightType]:
         """Flight types that appear at least threshold times in the window."""
         return [ft for ft, n in self.total_counts().items() if n >= threshold]
 

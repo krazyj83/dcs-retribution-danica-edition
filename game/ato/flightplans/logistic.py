@@ -53,8 +53,8 @@ class Builder(AirliftBuilder):
         if transfer is None:
             raise PlanningError(f"Warehouse transfer {transfer_id} not found.")
         try:
-            origin = game.theater.find_control_point_by_id(transfer.source_cp_id)  # type: ignore[arg-type]
-            destination = game.theater.find_control_point_by_id(transfer.dest_cp_id)  # type: ignore[arg-type]
+            origin = game.theater.find_control_point_by_id(transfer.source_cp_id)
+            destination = game.theater.find_control_point_by_id(transfer.dest_cp_id)
         except KeyError as ex:
             raise PlanningError(str(ex)) from ex
         return LogisticStops(origin, destination)

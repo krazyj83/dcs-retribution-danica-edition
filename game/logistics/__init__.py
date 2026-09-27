@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from uuid import UUID
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional, Dict, List, Tuple, TYPE_CHECKING
@@ -11,8 +12,11 @@ from game.logistics.custom_airdrop import (
 )
 
 if TYPE_CHECKING:
+    from dcs.mission import Mission
+
     from game import Game
     from game.debriefing import Debriefing
+    from game.theater import ControlPoint
     from game.squadrons import Squadron
 
 # ======================================================================
@@ -31,7 +35,7 @@ class DropZone:
     dz_type: DropZoneType
     lat: float
     lon: float
-    cp_id: int
+    cp_id: Optional[UUID]
     coalition: str
     cp_name: str = ""
     radius_m: float = 500.0
@@ -98,7 +102,7 @@ class WeaponStockItem:
 class WeaponInventory:
     """Full weapon and equipment inventory for one base."""
 
-    cp_id: int
+    cp_id: UUID
     cp_name: str
     items: Dict[str, WeaponStockItem] = field(default_factory=dict)
 
@@ -129,7 +133,7 @@ class WeaponInventory:
         return dict(sorted(result.items()))
 
 
-def build_weapon_inventory(cp, game: "Game") -> WeaponInventory:
+def build_weapon_inventory(cp: "ControlPoint", game: "Game") -> WeaponInventory:
     """
     Build a WeaponInventory for a control point by inspecting:
     1. Squadrons based there - their aircraft pylons/allowed weapons
@@ -338,11 +342,11 @@ def _ground_unit_category(name: str) -> str:
 
 @dataclass
 class Warehouse:
-    cp_id: int
+    cp_id: UUID
     cp_name: str
     stock: Dict[WarehouseCategory, StockItem] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for cat in WarehouseCategory:
             if cat not in self.stock:
                 self.stock[cat] = StockItem(quantity=500.0, capacity=1000.0)
@@ -373,8 +377,8 @@ class TransferStatus(Enum):
 @dataclass
 class LogisticsTransfer:
     transfer_id: str
-    source_cp_id: int
-    dest_cp_id: int
+    source_cp_id: UUID
+    dest_cp_id: UUID
     dz_id: str
     category: WarehouseCategory
     quantity: float
@@ -434,10 +438,10 @@ class LogisticsManager:
 
     def __init__(self) -> None:
         self._drop_zones: Dict[str, DropZone] = {}
-        self._warehouses: Dict[int, Warehouse] = {}
-        self._weapon_inventories: Dict[int, WeaponInventory] = {}
+        self._warehouses: Dict[UUID, Warehouse] = {}
+        self._weapon_inventories: Dict[UUID, WeaponInventory] = {}
         self._transfers: Dict[str, LogisticsTransfer] = {}
-        self._main_base_cp_id: Optional[int] = None
+        self._main_base_cp_id: Optional[UUID] = None
         #: Last turn attrition was applied, so regenerating a mission doesn't
         #: apply it twice.
         self._last_attrition_turn: Optional[int] = None
@@ -459,13 +463,13 @@ class LogisticsManager:
     def active_drop_zones(self, coalition: str) -> List[DropZone]:
         return list(self._drop_zones.values())
 
-    def drop_zones_for_cp(self, cp_id: int) -> List[DropZone]:
+    def drop_zones_for_cp(self, cp_id: UUID) -> List[DropZone]:
         return [dz for dz in self._drop_zones.values() if dz.cp_id == cp_id]
 
-    def inject_into_mission(self, mission) -> None:
+    def inject_into_mission(self, mission: "Mission") -> None:
         """
         Create a real DCS trigger zone for every active drop zone, so the
-        Lua handler (logistic_supply.lua) can locate them at runtime.
+        cargo script can locate them at runtime.
 
         This method didn't exist before — missiongenerator.py has been
         calling game.logistics.inject_into_mission(self.mission) since it
@@ -524,7 +528,7 @@ class LogisticsManager:
 
     # ── Warehouses ─────────────────────────────────────────────────────
 
-    def get_warehouse(self, cp_id: int) -> Optional[Warehouse]:
+    def get_warehouse(self, cp_id: UUID) -> Optional[Warehouse]:
         return self._warehouses.get(cp_id)
 
     def add_warehouse(self, warehouse: Warehouse) -> None:
@@ -535,7 +539,7 @@ class LogisticsManager:
 
     # ── Weapon inventories ─────────────────────────────────────────────
 
-    def get_weapon_inventory(self, cp_id: int) -> Optional[WeaponInventory]:
+    def get_weapon_inventory(self, cp_id: UUID) -> Optional[WeaponInventory]:
         return self._weapon_inventories.get(cp_id)
 
     def set_weapon_inventory(self, inv: WeaponInventory) -> None:
@@ -553,7 +557,7 @@ class LogisticsManager:
         try:
             for cp in game.theater.player_points():
                 fresh = build_weapon_inventory(cp, game)
-                current = self._weapon_inventories.get(cp.id)  # type: ignore[call-overload]
+                current = self._weapon_inventories.get(cp.id)
                 if current is not None:
                     for clsid, item in current.items.items():
                         if clsid in weapon_ids:
@@ -569,15 +573,15 @@ class LogisticsManager:
     # ── Main Base ──────────────────────────────────────────────────────
 
     @property
-    def main_base_cp_id(self) -> Optional[int]:
+    def main_base_cp_id(self) -> Optional[UUID]:
         """The cp_id of the designated main supply base, or None."""
         return self._main_base_cp_id
 
-    def set_main_base(self, cp_id: Optional[int]) -> None:
+    def set_main_base(self, cp_id: Optional[UUID]) -> None:
         """Designate a base as the main supply hub (or clear with None)."""
         self._main_base_cp_id = cp_id
 
-    def is_main_base(self, cp_id: int) -> bool:
+    def is_main_base(self, cp_id: UUID) -> bool:
         return self._main_base_cp_id == cp_id
 
     # ── Restock helpers ────────────────────────────────────────────────
@@ -585,7 +589,7 @@ class LogisticsManager:
     # Cost rate used by all warehouse restock methods.
     _WAREHOUSE_COST_PER_UNIT = 0.05  # $M per unit of deficit
 
-    def restock_warehouse_cost(self, cp_id: int) -> float:
+    def restock_warehouse_cost(self, cp_id: UUID) -> float:
         """Cost ($M) to fully restock ALL warehouse categories to capacity.
 
         Sums the per-category cost across every WarehouseCategory.
@@ -602,7 +606,7 @@ class LogisticsManager:
         return round(total, 1)
 
     def restock_warehouse_category_cost(
-        self, cp_id: int, category: WarehouseCategory
+        self, cp_id: UUID, category: WarehouseCategory
     ) -> float:
         """Cost ($M) to restock a SINGLE warehouse category to capacity.
 
@@ -619,7 +623,7 @@ class LogisticsManager:
         )
         return round(deficit * self._WAREHOUSE_COST_PER_UNIT, 2)
 
-    def restock_warehouse(self, cp_id: int) -> None:
+    def restock_warehouse(self, cp_id: UUID) -> None:
         """Fill ALL warehouse categories to capacity."""
         wh = self.get_warehouse(cp_id)
         if wh is None:
@@ -628,7 +632,7 @@ class LogisticsManager:
             wh.stock[cat].quantity = wh.stock[cat].capacity
 
     def restock_warehouse_category(
-        self, cp_id: int, category: WarehouseCategory
+        self, cp_id: UUID, category: WarehouseCategory
     ) -> None:
         """Fill ONE warehouse category to capacity.
 
@@ -639,7 +643,7 @@ class LogisticsManager:
             return
         wh.stock[category].quantity = wh.stock[category].capacity
 
-    def restock_inventory_cost(self, cp_id: int) -> float:
+    def restock_inventory_cost(self, cp_id: UUID) -> float:
         """Cost ($M) to refill ALL weapon/equipment inventory to capacity.
 
         Weapons/rounds: $0.1M per unit deficit.
@@ -680,7 +684,7 @@ class LogisticsManager:
                 total += deficit * WEAPON_COST
         return round(total, 1)
 
-    def restock_inventory(self, cp_id: int) -> None:
+    def restock_inventory(self, cp_id: UUID) -> None:
         """Fill ALL weapon/equipment inventory items to capacity."""
         inv = self.get_weapon_inventory(cp_id)
         if inv is None:
@@ -692,8 +696,8 @@ class LogisticsManager:
 
     def schedule_transfer(
         self,
-        source_cp_id: int,
-        dest_cp_id: int,
+        source_cp_id: UUID,
+        dest_cp_id: UUID,
         dz_id: str,
         category: WarehouseCategory,
         quantity: float,
@@ -721,8 +725,8 @@ class LogisticsManager:
 
     def schedule_weapon_transfer(
         self,
-        source_cp_id: int,
-        dest_cp_id: int,
+        source_cp_id: UUID,
+        dest_cp_id: UUID,
         dz_id: str,
         cargo: Dict[str, int],
         aircraft_type: str,
@@ -765,8 +769,8 @@ class LogisticsManager:
 
     def create_flight_transfer(
         self,
-        source_cp_id: int,
-        dest_cp_id: int,
+        source_cp_id: UUID,
+        dest_cp_id: UUID,
         dz_id: str,
         aircraft_type: str,
         turn: int,
@@ -818,7 +822,7 @@ class LogisticsManager:
             transfer.quantity = float(sum(transfer.cargo.values()))
         return removed
 
-    def change_pickup(self, transfer: LogisticsTransfer, source_cp_id: int) -> None:
+    def change_pickup(self, transfer: LogisticsTransfer, source_cp_id: UUID) -> None:
         """Pick up somewhere else: loaded cargo goes back to the old base."""
         if transfer.status is not TransferStatus.PLANNED:
             return
@@ -828,7 +832,7 @@ class LogisticsManager:
         transfer.quantity = 0.0
         transfer.source_cp_id = source_cp_id
 
-    def _take_weapons(self, cp_id: int, cargo: Dict[str, int]) -> None:
+    def _take_weapons(self, cp_id: UUID, cargo: Dict[str, int]) -> None:
         """Remove weapons from a base's stock (never below zero)."""
         inv = self._weapon_inventories.get(cp_id)
         if inv is None:
@@ -859,7 +863,7 @@ class LogisticsManager:
                 overflow[clsid] = count - fits
         return overflow
 
-    def _return_weapons(self, cp_id: int, cargo: Dict[str, int]) -> None:
+    def _return_weapons(self, cp_id: UUID, cargo: Dict[str, int]) -> None:
         """Put weapons back into a base's inventory (cancel or overflow)."""
         inv = self._weapon_inventories.get(cp_id)
         if inv is None:
@@ -875,7 +879,7 @@ class LogisticsManager:
                 item.quantity += count
 
     def _deliver_weapons(
-        self, t: LogisticsTransfer, source_cp_id: int, dest_cp_id: int, dest_name: str
+        self, t: LogisticsTransfer, source_cp_id: UUID, dest_cp_id: UUID, dest_name: str
     ) -> Tuple[Dict[str, int], Dict[str, int]]:
         """Add a weapon transfer's cargo to the destination inventory.
 

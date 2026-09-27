@@ -212,10 +212,8 @@ class MissionGenerator:
         logistics_flights_generated = 0
         logistics_flights_skipped = 0
 
-        # Both coalitions can plan LOGISTIC flights (LogisticPlanner runs for
-        # blue and red alike — see game/ato/logistic_planner.py), but this
-        # loop only ever checked game.blue.ato.packages. Red LOGISTIC flights
-        # were silently never generated or marked in-flight as a result.
+        # Both coalitions' ATOs can hold LOGISTIC flights (red ones can be
+        # planned with "Show/Plan OPFOR's ATO"), so check both.
         for coalition_ato in (self.game.blue.ato, self.game.red.ato):
             for package in coalition_ato.packages:
                 for flight in package.flights:

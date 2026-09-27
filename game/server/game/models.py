@@ -18,8 +18,11 @@ from game.server.mapzones.models import (
 from game.server.navmesh.models import NavMeshesJs
 from game.server.supplyroutes.models import SupplyRouteJs
 from game.server.tgos.models import TgoJs
+
 if TYPE_CHECKING:
     from game import Game
+
+
 class GameJs(BaseModel):
     control_points: list[ControlPointJs]
     tgos: list[TgoJs]
@@ -34,8 +37,10 @@ class GameJs(BaseModel):
     map_zones: MapZonesJs
     drop_zones: list[DropZoneJs]
     convoy_routes: list[ConvoyRouteJs]
+
     class Config:
         title = "Game"
+
     @staticmethod
     def from_game(game: Game) -> GameJs:
         return GameJs(

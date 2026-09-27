@@ -153,7 +153,7 @@ class TransferCargoGenerator:
                     "radius": base_radius_m(cp),
                 }
             )
-            inv = logistics.get_weapon_inventory(cp.id)  # type: ignore[arg-type]
+            inv = logistics.get_weapon_inventory(cp.id)
             if inv is None:
                 inv = build_weapon_inventory(cp, self.game)
                 logistics.set_weapon_inventory(inv)
