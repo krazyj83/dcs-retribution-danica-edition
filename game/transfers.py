@@ -127,7 +127,7 @@ class TransferOrder:
         count = self.size
         origin = self.origin.name
         destination = self.destination.name
-        description = "Transfer" if self.player else "Enemy transfer"
+        description = "Transfer" if self.player.is_blue else "Enemy transfer"
         return f"{description} of {count} units from {origin} to {destination}"
 
     def __post_init__(self) -> None:

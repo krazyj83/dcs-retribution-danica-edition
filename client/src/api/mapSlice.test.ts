@@ -1,4 +1,10 @@
 import mapReducer, {
+  EMITTER_HIGHLIGHT_OVERLAY,
+  selectHighlightEmitters,
+  selectHoveredEmitter,
+  selectHoveredEmitterSource,
+  setHighlightEmitters,
+  setHoveredEmitter,
   setActiveBaseMap,
   setOverlayState,
   selectMapCenter,
@@ -22,6 +28,9 @@ describe("mapSlice", () => {
       const state = mapReducer(undefined, { type: "@@INIT" });
       expect(state).toEqual({
         center: { lat: 0, lng: 0 },
+        hoveredEmitterId: null,
+        hoveredEmitterSource: null,
+        highlightEmitters: true,
         activeBaseMap: null,
         overlayStates: {},
       });
@@ -178,6 +187,52 @@ describe("mapSlice", () => {
         selectOverlayChecked("unknown_layer", false)(mockRootState)
       ).toBe(false);
       expect(selectOverlayChecked("unknown_layer")(mockRootState)).toBe(false);
+    });
+  });
+
+  describe("Emitter hover highlight", () => {
+    const root = (map: any) => ({ map } as RootState);
+
+    it("tracks the hovered emitter and where the hover came from", () => {
+      let state = mapReducer(
+        undefined,
+        setHoveredEmitter({ id: "tgo-1", source: "ring" })
+      );
+      expect(selectHoveredEmitter(root(state))).toBe("tgo-1");
+      expect(selectHoveredEmitterSource(root(state))).toBe("ring");
+      state = mapReducer(state, setHoveredEmitter(null));
+      expect(selectHoveredEmitter(root(state))).toBeNull();
+      expect(selectHoveredEmitterSource(root(state))).toBeNull();
+    });
+
+    it("can be switched off and on", () => {
+      let state = mapReducer(undefined, setHighlightEmitters(false));
+      expect(selectHighlightEmitters(root(state))).toBe(false);
+      state = mapReducer(state, setHighlightEmitters(true));
+      expect(selectHighlightEmitters(root(state))).toBe(true);
+    });
+
+    it("forgets the hover when the game is unloaded", () => {
+      let state = mapReducer(
+        undefined,
+        setHoveredEmitter({ id: "tgo-1", source: "emitter" })
+      );
+      state = mapReducer(state, gameUnloaded());
+      expect(selectHoveredEmitter(root(state))).toBeNull();
+    });
+
+    it("starts off when its overlay was left unchecked last time", () => {
+      // An earlier test spies on Storage.setItem; use the real one here.
+      jest.restoreAllMocks();
+      localStorage.setItem(
+        OVERLAYS_STORAGE_KEY,
+        JSON.stringify({ [EMITTER_HIGHLIGHT_OVERLAY]: false })
+      );
+      jest.isolateModules(() => {
+        const fresh = require("./mapSlice");
+        const state = fresh.default(undefined, { type: "@@INIT" });
+        expect(state.highlightEmitters).toBe(false);
+      });
     });
   });
 });

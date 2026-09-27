@@ -6,6 +6,12 @@ import {
   useOpenTgoInfoDialogMutation,
   useSetTgoDestinationMutation,
 } from "../../api/liberationApi";
+import {
+  selectHighlightEmitters,
+  selectHoveredEmitter,
+  setHoveredEmitter,
+} from "../../api/mapSlice";
+import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import SplitLines from "../splitlines/SplitLines";
 import { MovementPath, MovementPathHandle } from "../controlpoints/MovementPath";
 import { TgoTooltip, iconForTgo } from "./shared";
@@ -106,6 +112,14 @@ function PrimaryMarker(props: PrimaryMarkerProps) {
 
   const [openInfoDialog] = useOpenTgoInfoDialogMutation();
   const [openNewPackageDialog] = useOpenNewTgoPackageDialogMutation();
+  const dispatch = useAppDispatch();
+  // Raised above other icons while this emitter (or its ring) is hovered,
+  // matching the static TGO marker's behavior (#750).
+  const raised = useAppSelector(
+    (state) =>
+      selectHighlightEmitters(state) &&
+      selectHoveredEmitter(state) === props.tgo.id
+  );
 
   // Set the tooltip content imperatively against the empty <Tooltip/> rendered
   // below.  Rendering React children inside the Tooltip crashes on the
@@ -135,7 +149,7 @@ function PrimaryMarker(props: PrimaryMarkerProps) {
         icon={icon}
         draggable={!isLoading}
         autoPan
-        zIndexOffset={1000}
+        zIndexOffset={raised ? 10000 : 1000}
         // Opacity (and the right-click branch below) follow the backend
         // destination, not local drag state, exactly like the carrier marker.
         // A rejected (e.g. out-of-range) release leaves props.destination null,
@@ -162,6 +176,9 @@ function PrimaryMarker(props: PrimaryMarkerProps) {
               openNewPackageDialog({ tgoId: props.tgo.id });
             }
           },
+          mouseover: () =>
+            dispatch(setHoveredEmitter({ id: props.tgo.id, source: "emitter" })),
+          mouseout: () => dispatch(setHoveredEmitter(null)),
           drag: (event) => {
             const dest = event.target.getLatLng() as LatLng;
             backend
@@ -220,15 +237,21 @@ interface SecondaryMarkerProps {
 /**
  * The secondary (origin) marker for a mobile TGO.  Only rendered when a
  * destination is queued.  Handles the normal click → info and
- * right-click → new package interactions, so
+ * right-click → new package interactions as well as emitter hover, so
  * those behaviors remain reachable while the primary marker is off at
  * the destination.
  */
 function SecondaryMarker(props: SecondaryMarkerProps) {
+  const dispatch = useAppDispatch();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const icon = useMemo(() => iconForTgo(props.tgo), [props.tgo.sidc]);
   const [openInfoDialog] = useOpenTgoInfoDialogMutation();
   const [openNewPackageDialog] = useOpenNewTgoPackageDialogMutation();
+  const raised = useAppSelector(
+    (state) =>
+      selectHighlightEmitters(state) &&
+      selectHoveredEmitter(state) === props.tgo.id
+  );
 
   if (!props.destination) {
     return <></>;
@@ -238,7 +261,7 @@ function SecondaryMarker(props: SecondaryMarkerProps) {
     <Marker
       position={props.tgo.position}
       icon={icon}
-      zIndexOffset={0}
+      zIndexOffset={raised ? 10000 : 0}
       eventHandlers={{
         click: () => {
           openInfoDialog({ tgoId: props.tgo.id });
@@ -246,6 +269,9 @@ function SecondaryMarker(props: SecondaryMarkerProps) {
         contextmenu: () => {
           openNewPackageDialog({ tgoId: props.tgo.id });
         },
+        mouseover: () =>
+          dispatch(setHoveredEmitter({ id: props.tgo.id, source: "emitter" })),
+        mouseout: () => dispatch(setHoveredEmitter(null)),
       }}
     >
       <TgoTooltip tgo={props.tgo} />

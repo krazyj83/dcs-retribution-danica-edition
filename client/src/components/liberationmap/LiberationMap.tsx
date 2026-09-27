@@ -1,7 +1,8 @@
-import { selectMapCenter } from "../../api/mapSlice";
+import { EMITTER_HIGHLIGHT_OVERLAY, selectMapCenter } from "../../api/mapSlice";
 import { useAppSelector } from "../../app/hooks";
 import AircraftLayer from "../aircraftlayer";
 import AirDefenseRangeLayer from "../airdefenserangelayer";
+import EmitterHighlightToggle from "../airdefenserangelayer/EmitterHighlightToggle";
 import CombatLayer from "../combatlayer";
 import ControlPointsLayer from "../controlpointslayer";
 import CullingExclusionZones from "../cullingexclusionzones/CullingExclusionZones";
@@ -148,6 +149,9 @@ export default function LiberationMap() {
         </MapOverlay>
         <MapOverlay name="Allied SAM detection range">
           <AirDefenseRangeLayer blue={true} detection />
+        </MapOverlay>
+        <MapOverlay name={EMITTER_HIGHLIGHT_OVERLAY} defaultChecked={true}>
+          <EmitterHighlightToggle />
         </MapOverlay>
         <MapOverlay name="Allied IADS Network">
           <Iadsnetworklayer blue={true} />

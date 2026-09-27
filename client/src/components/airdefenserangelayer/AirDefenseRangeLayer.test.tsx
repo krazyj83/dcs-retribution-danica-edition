@@ -104,7 +104,6 @@ describe("AirDefenseRangeLayer", () => {
         },
         radius: 10,
         color: colorFor(true, false),
-        interactive: false,
       })
     );
   });
@@ -145,7 +144,6 @@ describe("AirDefenseRangeLayer", () => {
         },
         radius: 20,
         color: colorFor(true, true),
-        interactive: false,
       })
     );
   });

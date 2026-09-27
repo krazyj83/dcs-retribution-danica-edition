@@ -37,6 +37,9 @@ const renderWithRedux = (
     preloadedState: {
       map: {
         center: { lat: 0, lng: 0 },
+        hoveredEmitterId: null,
+        hoveredEmitterSource: null,
+        highlightEmitters: true,
         overlayStates: {},
         activeBaseMap: initialState?.activeBaseMap ?? null, // Guarantees string | null
       },

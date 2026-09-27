@@ -13,6 +13,7 @@ from game.ato.flightplans.waypointbuilder import WaypointBuilder
 from game.ato.packagewaypoints import PackageWaypoints
 from game.data.doctrine import MODERN_DOCTRINE, COLDWAR_DOCTRINE, WWII_DOCTRINE
 from game.theater import ParkingType, SeasonalConditions, Airfield
+from game.theater.player import Player
 from game.theater.theatergroundobject import ShipGroundObject, TheaterGroundObject
 
 if TYPE_CHECKING:
@@ -39,6 +40,7 @@ class Migrator:
         self._update_factions()
         self._update_flights()
         self._update_squadrons()
+        self._update_transfers()
         self._release_untasked_flights()
         self._update_weather()
         self._update_tgos()
@@ -56,6 +58,24 @@ class Migrator:
 
         populator = MotorpoolPopulator(self.game)
         populator._rehome_motorpools()
+
+    def _update_transfers(self) -> None:
+        """Old saves stored a transfer's side as a bool (upstream #759)."""
+        for coalition in self.game.coalitions:
+            transfers = coalition.transfers
+            for transfer in transfers.pending_transfers:
+                self._normalize_transfer_player(transfer)
+            for convoy in transfers.convoys:
+                for transfer in convoy.transfers:
+                    self._normalize_transfer_player(transfer)
+            for cargo_ship in transfers.cargo_ships:
+                for transfer in cargo_ship.transfers:
+                    self._normalize_transfer_player(transfer)
+
+    @staticmethod
+    def _normalize_transfer_player(transfer: Any) -> None:
+        if hasattr(transfer, "player") and isinstance(transfer.player, bool):
+            transfer.player = Player.BLUE if transfer.player else Player.RED
 
     def _update_doctrine(self) -> None:
         doctrines = [

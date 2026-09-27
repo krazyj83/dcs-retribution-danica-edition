@@ -92,6 +92,9 @@ const renderWithRedux = (ui: React.ReactElement, initialMapState = {}) => {
     preloadedState: {
       map: {
         center: { lat: 42.0, lng: 43.0 },
+        hoveredEmitterId: null,
+        hoveredEmitterSource: null,
+        highlightEmitters: true,
         activeBaseMap: null,
         overlayStates: {},
         ...initialMapState,

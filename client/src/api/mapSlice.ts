@@ -36,24 +36,58 @@ const loadSavedOverlays = (): Record<string, boolean> => {
   }
 };
 
+// Where a hover originated: the emitter's icon, or one of its range rings. The
+// highlight is symmetric (hovering either lights up the other), but hovering a
+// ring also marks its emitter with a blob so you can find it; hovering the
+// emitter does not blob the icon you're already pointing at.
+export type EmitterHoverSource = "emitter" | "ring";
+
+// Name of the layer-control overlay that switches the emitter highlight.
+export const EMITTER_HIGHLIGHT_OVERLAY = "Highlight radar emitter on hover";
+
 interface MapState {
   center: LatLngLiteral;
+  // Id of the TGO whose air-defense ring (or icon) is currently hovered, so its
+  // icon can be raised above overlapping ones while highlighted.
+  hoveredEmitterId: string | null;
+  // What was hovered to set hoveredEmitterId (icon vs. ring).
+  hoveredEmitterSource: EmitterHoverSource | null;
+  // Whether the hover highlight (ring <-> emitter) is enabled. Toggled from
+  // the map's layer control.
+  highlightEmitters: boolean;
   // Persistent map type
   activeBaseMap: string | null;
   // Persistent map options
   overlayStates: Record<string, boolean>;
 }
 
+const savedOverlays = loadSavedOverlays();
+
 const initialState: MapState = {
   center: { lat: 0, lng: 0 },
+  hoveredEmitterId: null,
+  hoveredEmitterSource: null,
+  // Follows the remembered overlay check box: an unchecked overlay is never
+  // added to the map, so its "remove" event would not fire to turn this off.
+  highlightEmitters: savedOverlays[EMITTER_HIGHLIGHT_OVERLAY] ?? true,
   activeBaseMap: safeGetItem(BASEMAP_STORAGE_KEY),
-  overlayStates: loadSavedOverlays(),
+  overlayStates: savedOverlays,
 };
 
 const mapSlice = createSlice({
   name: "map",
   initialState: initialState,
   reducers: {
+    setHoveredEmitter(
+      state,
+      action: PayloadAction<{ id: string; source: EmitterHoverSource } | null>
+    ) {
+      state.hoveredEmitterId = action.payload?.id ?? null;
+      state.hoveredEmitterSource = action.payload?.source ?? null;
+    },
+    setHighlightEmitters(state, action: PayloadAction<boolean>) {
+      state.highlightEmitters = action.payload;
+    },
     setActiveBaseMap(state, action: PayloadAction<string>) {
       state.activeBaseMap = action.payload;
       safeSetItem(BASEMAP_STORAGE_KEY, action.payload);
@@ -75,13 +109,26 @@ const mapSlice = createSlice({
     });
     builder.addCase(gameUnloaded, (state) => {
       state.center = { lat: 0, lng: 0 };
+      state.hoveredEmitterId = null;
+      state.hoveredEmitterSource = null;
     });
   },
 });
 
-export const { setActiveBaseMap, setOverlayState } = mapSlice.actions;
+export const {
+  setActiveBaseMap,
+  setOverlayState,
+  setHoveredEmitter,
+  setHighlightEmitters,
+} = mapSlice.actions;
 
 export const selectMapCenter = (state: RootState) => state.map.center;
+export const selectHoveredEmitter = (state: RootState) =>
+  state.map.hoveredEmitterId;
+export const selectHoveredEmitterSource = (state: RootState) =>
+  state.map.hoveredEmitterSource;
+export const selectHighlightEmitters = (state: RootState) =>
+  state.map.highlightEmitters;
 export const selectActiveBaseMap = (state: RootState) =>
   state.map.activeBaseMap;
 export const selectOverlayChecked =
