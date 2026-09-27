@@ -1,5 +1,5 @@
-import { LatLng, DivIcon } from "leaflet";
-import React, { useState } from "react";
+import { LatLng, DivIcon, DomEvent } from "leaflet";
+import React, { useEffect, useRef, useState } from "react";
 import { CircleMarker, Marker, Polyline, Popup, Tooltip, useMapEvents } from "react-leaflet";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import { DropZone, createDropZone, deleteDropZone, selectDropZones, serverBase } from "../../api/dropZonesSlice";
@@ -74,55 +74,149 @@ function makeDiamondIcon(color: string, size: number = 18) {
   });
 }
 
-type MenuState = { latlng: LatLng };
-type RouteState =
-  | { step: "start"; latlng: LatLng }
-  | { step: "end"; start: LatLng; end: LatLng; name: string };
+// What the right-click workflow is doing right now.
+//  menu        - the "Map actions" popup is open
+//  dz-name     - asking for the name of a new drop zone
+//  route-start - start point placed, waiting for a right-click on the end point
+//  route-name  - both points placed, asking for the route name
+type Pending =
+  | { kind: "menu"; latlng: LatLng }
+  | { kind: "dz-name"; latlng: LatLng }
+  | { kind: "route-start"; start: LatLng }
+  | { kind: "route-name"; start: LatLng; end: LatLng };
+
+const inputStyle: React.CSSProperties = {
+  display: "block",
+  width: "100%",
+  marginTop: 8,
+  background: "#1a252f",
+  color: "#ecf0f1",
+  border: "1px solid #3d566e",
+  borderRadius: 3,
+  padding: "5px 7px",
+  fontSize: 12,
+  boxSizing: "border-box",
+};
+
+const errorStyle: React.CSSProperties = {
+  color: "#e74c3c",
+  fontSize: 11,
+  marginTop: 6,
+};
+
+function errorText(err: unknown): string {
+  if (err && typeof err === "object" && "message" in err) {
+    return String((err as { message: unknown }).message);
+  }
+  return String(err);
+}
+
+// A small name form shown inside a map popup. It replaces window.prompt,
+// which goes through Qt's javaScriptPrompt and does not reliably hand the
+// typed text back to the page.
+export function NameForm(props: {
+  title: string;
+  defaultName: string;
+  onSave: (name: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const { title, defaultName, onSave, onCancel } = props;
+  const [name, setName] = useState(defaultName);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const cancelRef = useRef(onCancel);
+  cancelRef.current = onCancel;
+
+  useEffect(() => {
+    const el = formRef.current;
+    if (!el) return;
+    // Keep typing, clicks and scrolling inside the form away from the map
+    // (otherwise "+"/"-" zoom the map and a click closes the popup).
+    DomEvent.disableClickPropagation(el);
+    DomEvent.disableScrollPropagation(el);
+    const onKey = (e: KeyboardEvent) => {
+      e.stopPropagation();
+      if (e.key === "Escape") cancelRef.current();
+    };
+    el.addEventListener("keydown", onKey);
+    return () => el.removeEventListener("keydown", onKey);
+  }, []);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onSave(name.trim() || defaultName);
+    } catch (err) {
+      console.error(`${title} failed: ${errorText(err)}`);
+      setError(errorText(err));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form ref={formRef} style={popupWrap} onSubmit={submit}>
+      <strong style={{ fontSize: 13, color: "#ecf0f1" }}>{title}</strong>
+      <input
+        autoFocus
+        aria-label="Name"
+        style={inputStyle}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onFocus={(e) => e.target.select()}
+      />
+      {error && <div style={errorStyle}>Could not save: {error}</div>}
+      <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+        <button type="submit" style={btn} disabled={busy}>
+          ✔ Save
+        </button>
+        <button type="button" style={btn} onClick={onCancel}>
+          ✖ Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
 
 function MapRightClickHandler() {
   const dispatch = useAppDispatch();
-  const [menu, setMenu] = useState<MenuState | null>(null);
-  const [route, setRoute] = useState<RouteState | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const cancel = () => setPending(null);
 
   useMapEvents({
     contextmenu(e) {
       e.originalEvent.preventDefault();
-      if (route?.step === "start") {
-        setRoute({ step: "end", start: route.latlng, end: e.latlng, name: "" });
-        return;
-      }
-      setMenu({ latlng: e.latlng });
+      setPending((p) =>
+        p?.kind === "route-start"
+          ? { kind: "route-name", start: p.start, end: e.latlng }
+          : { kind: "menu", latlng: e.latlng }
+      );
     },
     click() {
-      setTimeout(() => setMenu(null), 50);
+      // A left-click on the map closes the menu; a route in progress stays.
+      setPending((p) => (p?.kind === "menu" ? null : p));
+    },
+    keydown(e) {
+      if (e.originalEvent.key === "Escape") setPending(null);
     },
   });
 
-  if (menu && !route) {
-    const onAddDropZone = () => {
-      const name = window.prompt("Drop zone name (e.g. DZ Alpha):", "Drop Zone");
-      if (name === null) { setMenu(null); return; }
-      dispatch(createDropZone({
-        name: name.trim() || "Drop Zone",
-        lat: menu.latlng.lat,
-        lng: menu.latlng.lng,
-      }));
-      setMenu(null);
-    };
-    const onAddConvoyRoute = () => {
-      const startLatlng = menu.latlng;
-      setMenu(null);
-      setTimeout(() => setRoute({ step: "start", latlng: startLatlng }), 100);
-    };
+  if (pending === null) return null;
+
+  if (pending.kind === "menu") {
+    const latlng = pending.latlng;
     return (
-      <Popup position={menu.latlng} eventHandlers={{ remove: () => setMenu(null) }} closeButton={false}>
+      <Popup position={latlng} eventHandlers={{ remove: () => setPending((p) => (p?.kind === "menu" ? null : p)) }} closeButton={false}>
         <div style={menuWrap}>
           <div style={menuTitle}>Map actions</div>
           <button
             style={menuItem}
             onMouseEnter={(e) => (e.currentTarget.style.background = "#2c3e50")}
             onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            onClick={onAddDropZone}
+            onClick={() => setPending({ kind: "dz-name", latlng })}
           >
             🎯 Add Drop Zone
           </button>
@@ -131,7 +225,7 @@ function MapRightClickHandler() {
             style={menuItem}
             onMouseEnter={(e) => (e.currentTarget.style.background = "#2c3e50")}
             onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            onClick={onAddConvoyRoute}
+            onClick={() => setPending({ kind: "route-start", start: latlng })}
           >
             🚛 Add Convoy Route
           </button>
@@ -140,32 +234,48 @@ function MapRightClickHandler() {
     );
   }
 
-  if (route?.step === "start") {
-    return (
-      <CircleMarker center={route.latlng} radius={8} pathOptions={{ color: PENDING_COLOR, fillColor: PENDING_COLOR, fillOpacity: 0.9, weight: 2 }}>
-        <Tooltip permanent direction="top" offset={[0, -12]}>Route start — right-click to set end point</Tooltip>
-      </CircleMarker>
-    );
-  }
-
-  if (route?.step === "end") {
-    const confirm = () => {
-      const name = window.prompt("Name this convoy route:", "Convoy Route");
-      if (name !== null) {
-        dispatch(createConvoyRoute({ name: name.trim() || "Convoy Route", start_lat: route.start.lat, start_lng: route.start.lng, end_lat: route.end.lat, end_lng: route.end.lng }));
-      }
-      setRoute(null);
+  if (pending.kind === "dz-name") {
+    const latlng = pending.latlng;
+    const save = async (name: string) => {
+      await dispatch(createDropZone({ name, lat: latlng.lat, lng: latlng.lng })).unwrap();
+      setPending(null);
     };
-    confirm();
     return (
       <>
-        <Polyline positions={[route.start, route.end]} pathOptions={{ color: PENDING_COLOR, weight: 2, dashArray: "6 4", opacity: 0.7 }} />
-        <CircleMarker center={route.start} radius={6} pathOptions={{ color: PENDING_COLOR, fillColor: PENDING_COLOR, fillOpacity: 1 }} />
+        <Marker position={latlng} icon={makeDiamondIcon(PENDING_COLOR, 20)} />
+        <Popup position={latlng} eventHandlers={{ remove: () => setPending((p) => (p?.kind === "dz-name" ? null : p)) }} closeButton={false}>
+          <NameForm title="🎯 New Drop Zone" defaultName="Drop Zone" onSave={save} onCancel={cancel} />
+        </Popup>
       </>
     );
   }
 
-  return null;
+  if (pending.kind === "route-start") {
+    return (
+      <CircleMarker center={pending.start} radius={8} pathOptions={{ color: PENDING_COLOR, fillColor: PENDING_COLOR, fillOpacity: 0.9, weight: 2 }}>
+        <Tooltip permanent direction="top" offset={[0, -12]}>
+          Route start — right-click to set end point (Esc cancels)
+        </Tooltip>
+      </CircleMarker>
+    );
+  }
+
+  const { start, end } = pending;
+  const save = async (name: string) => {
+    await dispatch(
+      createConvoyRoute({ name, start_lat: start.lat, start_lng: start.lng, end_lat: end.lat, end_lng: end.lng })
+    ).unwrap();
+    setPending(null);
+  };
+  return (
+    <>
+      <Polyline positions={[start, end]} pathOptions={{ color: PENDING_COLOR, weight: 2, dashArray: "6 4", opacity: 0.7 }} />
+      <CircleMarker center={start} radius={6} pathOptions={{ color: PENDING_COLOR, fillColor: PENDING_COLOR, fillOpacity: 1 }} />
+      <Popup position={end} eventHandlers={{ remove: () => setPending((p) => (p?.kind === "route-name" ? null : p)) }} closeButton={false}>
+        <NameForm title="🚛 New Convoy Route" defaultName="Convoy Route" onSave={save} onCancel={cancel} />
+      </Popup>
+    </>
+  );
 }
 
 function DropZoneMarkers() {
