@@ -6,6 +6,7 @@ stock based on what happened in the mission:
 
 - Destroyed fuel depots  → reduce fuel stock at that base
 - Destroyed ammo depots  → reduce ammunition stock at that base
+- SAM site knocked out   → reduce ammunition stock at its base, once per site
 - Base captures by RED   → zero all stock except fuel
 - Base captures by BLUE  → add base to warehouse network with salvage stock
 - Logistic flight landed → add delivered fuel/ammo to destination warehouse
@@ -16,7 +17,7 @@ Called from QDebriefingWindow.closeEvent after the mission ends.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, Any, Dict, List
 
 from game.ato.flighttype import FlightType
 
@@ -27,9 +28,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Stock lost per destroyed depot unit — tune to taste
-FUEL_LOSS_PER_DEPOT_UNIT   = 150.0
-AMMO_LOSS_PER_DEPOT_UNIT   = 100.0
-SUPPLY_LOSS_PER_DEPOT_UNIT =  50.0
+FUEL_LOSS_PER_DEPOT_UNIT = 150.0
+AMMO_LOSS_PER_DEPOT_UNIT = 100.0
+SUPPLY_LOSS_PER_DEPOT_UNIT = 50.0
+
+# Ammunition lost when a SAM site is knocked out (no working air defence left).
+# Charged once per site, however many of its vehicles were destroyed.
+SAM_SITE_AMMO_LOSS = 100.0
 
 # Salvage stock added when blue captures a red base
 CAPTURE_SALVAGE_STOCK = 200.0
@@ -53,49 +58,99 @@ def update_logistics_from_debriefing(debriefing: "Debriefing") -> List[str]:
     # ------------------------------------------------------------------
     # 1. Destroyed ground objects — fuel and ammo depots
     # ------------------------------------------------------------------
+    # SAM sites that lost units this mission, keyed by object so each site
+    # is looked at once however many of its vehicles died.
+    sam_sites_hit: Dict[int, Any] = {}
+
     for mapping in debriefing.ground_object_losses:
         try:
             tgo = mapping.theater_unit.ground_object
-            cp  = tgo.control_point
+            cp = tgo.control_point
             cat = getattr(tgo, "category", None)
-            wh  = logistics.get_warehouse(cp.id)
+
+            if cat == "aa":
+                sam_sites_hit[id(tgo)] = tgo
+                continue
+
+            # Base ids are UUIDs, despite the int annotations in LogisticsManager.
+            cp_id: Any = cp.id
+            wh = logistics.get_warehouse(cp_id)
             if wh is None:
                 continue
 
             if cat == "fuel":
-                _reduce(wh, WarehouseCategory.FUEL, FUEL_LOSS_PER_DEPOT_UNIT, log,
-                        f"{cp.name}: fuel depot destroyed")
-                _reduce(wh, WarehouseCategory.SUPPLIES, SUPPLY_LOSS_PER_DEPOT_UNIT, log,
-                        f"{cp.name}: supplies lost from fuel depot destruction")
+                _reduce(
+                    wh,
+                    WarehouseCategory.FUEL,
+                    FUEL_LOSS_PER_DEPOT_UNIT,
+                    log,
+                    f"{cp.name}: fuel depot destroyed",
+                )
+                _reduce(
+                    wh,
+                    WarehouseCategory.SUPPLIES,
+                    SUPPLY_LOSS_PER_DEPOT_UNIT,
+                    log,
+                    f"{cp.name}: supplies lost from fuel depot destruction",
+                )
 
-            elif cat == "aa" or _is_ammo_depot(tgo):
-                _reduce(wh, WarehouseCategory.AMMUNITION, AMMO_LOSS_PER_DEPOT_UNIT, log,
-                        f"{cp.name}: ammo depot destroyed")
+            elif _is_ammo_depot(tgo):
+                _reduce(
+                    wh,
+                    WarehouseCategory.AMMUNITION,
+                    AMMO_LOSS_PER_DEPOT_UNIT,
+                    log,
+                    f"{cp.name}: ammo depot destroyed",
+                )
 
         except Exception as e:
             logger.debug(f"Logistics debrief: error processing ground object loss: {e}")
+
+    # A SAM site costs its base munitions only when it is knocked out: no
+    # working air-defence unit left. Losses are already applied to the units
+    # when this runs (the debrief window opens after the results are processed).
+    for tgo in sam_sites_hit.values():
+        try:
+            if tgo.has_aa:
+                continue
+            cp = tgo.control_point
+            sam_cp_id: Any = cp.id
+            wh = logistics.get_warehouse(sam_cp_id)
+            if wh is None:
+                continue
+            _reduce(
+                wh,
+                WarehouseCategory.AMMUNITION,
+                SAM_SITE_AMMO_LOSS,
+                log,
+                f"{cp.name}: SAM site {tgo.name} knocked out, munitions lost",
+            )
+        except Exception as e:
+            logger.debug(f"Logistics debrief: error processing SAM site loss: {e}")
 
     # ------------------------------------------------------------------
     # 2. Base captures
     # ------------------------------------------------------------------
     for capture in debriefing.base_captures:
-        cp               = capture.control_point
+        cp = capture.control_point
         captured_by_player = capture.captured_by_player
+        capture_cp_id: Any = cp.id
         try:
             if captured_by_player.is_blue:
                 # Blue captured a red base — add to warehouse network with salvage
                 from game.logistics import Warehouse
-                new_wh = Warehouse(cp_id=cp.id, cp_name=cp.name)
+
+                new_wh = Warehouse(cp_id=capture_cp_id, cp_name=cp.name)
                 for cat in WarehouseCategory:
                     new_wh.stock[cat].quantity = CAPTURE_SALVAGE_STOCK
-                logistics._warehouses[cp.id] = new_wh
+                logistics._warehouses[capture_cp_id] = new_wh
                 log.append(
                     f"{cp.name} captured by blue — added to warehouse network "
                     f"with {CAPTURE_SALVAGE_STOCK:.0f} salvage stock per category"
                 )
             else:
                 # Red captured a blue base — zero everything EXCEPT fuel
-                wh = logistics.get_warehouse(cp.id)
+                wh = logistics.get_warehouse(capture_cp_id)
                 if wh is not None:
                     for cat in WarehouseCategory:
                         if cat == WarehouseCategory.FUEL:
@@ -111,7 +166,7 @@ def update_logistics_from_debriefing(debriefing: "Debriefing") -> List[str]:
                                 f"{cp.name} captured by red — "
                                 f"{lost:.0f} {cat.value} lost"
                             )
-                    logistics._warehouses.pop(cp.id, None)
+                    logistics._warehouses.pop(capture_cp_id, None)
 
         except Exception as e:
             logger.debug(f"Logistics debrief: error processing capture event: {e}")
@@ -140,16 +195,17 @@ def update_logistics_from_debriefing(debriefing: "Debriefing") -> List[str]:
     logistic_deliveries = getattr(debriefing, "logistic_deliveries", [])
     for delivery in logistic_deliveries:
         try:
-            dest_cp_id   = delivery["dest_cp_id"]
+            dest_cp_id = delivery["dest_cp_id"]
             dest_cp_name = delivery.get("dest_cp_name", f"CP {dest_cp_id}")
-            fuel_amt     = delivery.get("fuel_delivered", 0.0)
-            ammo_amt     = delivery.get("ammo_delivered", 0.0)
+            fuel_amt = delivery.get("fuel_delivered", 0.0)
+            ammo_amt = delivery.get("ammo_delivered", 0.0)
 
             wh = logistics.get_warehouse(dest_cp_id)
             if wh is None:
                 logger.warning(
                     "Logistic delivery to %s but no warehouse found (cp_id=%s)",
-                    dest_cp_name, dest_cp_id,
+                    dest_cp_name,
+                    dest_cp_id,
                 )
                 continue
 
@@ -191,7 +247,7 @@ def _reduce(
         log.append(f"{description} (-{lost:.0f} {category.value})")
 
 
-def _is_ammo_depot(tgo) -> bool:
+def _is_ammo_depot(tgo: Any) -> bool:
     try:
         return tgo.is_ammo_depot
     except AttributeError:
