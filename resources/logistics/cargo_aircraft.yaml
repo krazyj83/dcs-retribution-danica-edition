@@ -22,3 +22,11 @@ CH-47Fbl1:
 C-130J-30:
   empty_kg: 39099.6
   max_kg: 79379
+# UH-60L mod (Kinkkujuustovoileipa): both variants share the same airframe data
+# in the mod's UH-60L.lua (makeH60L). At 100% fuel: 10659 - 5675 - 1362 = 3622 kg.
+UH-60L:
+  empty_kg: 5675
+  max_kg: 10659.421
+UH-60L_DAP:
+  empty_kg: 5675
+  max_kg: 10659.421
