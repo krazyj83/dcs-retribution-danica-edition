@@ -803,21 +803,22 @@ class Settings:
         section=REDFOR_LOGISTICS_SECTION,
         default=True,
         detail=(
-            "When enabled, the AI will automatically plan logistic flights "
-            "to resupply REDFOR bases that fall below the 40% supply threshold."
+            "When enabled, REDFOR moves ground units each turn from bases "
+            "with more than they need to bases below their target (see the "
+            "target settings below), by road convoy or AI airlift depending "
+            "on distance."
         ),
     )
     redfor_resupply_max_bases: int = bounded_int_option(
-        "Maximum REDFOR bases to resupply per turn",
+        "Maximum REDFOR resupply transfers per turn",
         page=CAMPAIGN_MANAGEMENT_PAGE,
         section=REDFOR_LOGISTICS_SECTION,
         default=3,
         min=1,
         max=10,
         detail=(
-            "Maximum number of REDFOR bases that will receive resupply "
-            "flights in a single turn. Higher values increase AI logistics "
-            "activity but may impact performance."
+            "Maximum number of convoys and airlifts REDFOR orders in a single "
+            "turn to refill bases below their target."
         ),
     )
     redfor_resupply_max_distance_km: int = bounded_int_option(
@@ -830,6 +831,32 @@ class Settings:
         detail=(
             "REDFOR will only resupply bases within this distance of the "
             "source base. Prevents long cross-map supply runs."
+        ),
+    )
+    redfor_resupply_frontline_target: int = bounded_int_option(
+        "REDFOR frontline base target (ground units)",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=REDFOR_LOGISTICS_SECTION,
+        default=20,
+        min=0,
+        max=200,
+        detail=(
+            "A REDFOR base next to an active front line with fewer ground "
+            "units than this (counting units already on their way) is "
+            "resupplied first."
+        ),
+    )
+    redfor_resupply_rear_target: int = bounded_int_option(
+        "REDFOR rear base target (ground units)",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=REDFOR_LOGISTICS_SECTION,
+        default=6,
+        min=0,
+        max=200,
+        detail=(
+            "Ground units a REDFOR base away from the front line keeps. Below "
+            "this it is resupplied; above it, the extra units are sent to "
+            "bases that need them."
         ),
     )
     redfor_main_base_enabled: bool = boolean_option(

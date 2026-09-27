@@ -137,7 +137,7 @@ def road(network: TransitNetwork, a: FakeCp, b: FakeCp) -> None:
 
 def test_supply_planner_moves_units_between_red_bases() -> None:
     a = FakeCp("A", Player.RED, x=0, armor=8)
-    b = FakeCp("B", Player.RED, x=10_000, armor=8)
+    b = FakeCp("B", Player.RED, x=10_000, armor=0)
     network = TransitNetwork()
     road(network, a, b)
     game = make_game([a, b], network)

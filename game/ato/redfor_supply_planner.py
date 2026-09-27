@@ -1,9 +1,10 @@
 """
 game/ato/redfor_supply_planner.py
 
-Automatically creates ground convoy OR airlift transfer orders between
-REDFOR bases each turn, using the shared distance bands in
-game/logistics/transport_tiers.py:
+Each turn, moves REDFOR ground units from bases with more than their target to
+bases below it: frontline bases first, nearest supplier first (see
+RedforSupplyPlanner). The transport depends on distance, using the shared bands
+in game/logistics/transport_tiers.py:
   - Under 120 km, road-connected -> land convoy (visible, targetable)
   - Under 220 km                 -> airlift, helicopters preferred
   - Over 220 km                  -> airlift, planes preferred
@@ -12,10 +13,10 @@ game/logistics/transport_tiers.py:
 from __future__ import annotations
 
 import logging
-import random
+from dataclasses import dataclass
 from datetime import datetime
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from game.game import Game
@@ -72,10 +73,40 @@ def airlift_possible(
     return False
 
 
-class RedforSupplyPlanner:
-    """Plans automatic ground supply transfers between REDFOR control points.
+@dataclass(eq=False)
+class _Base:
+    """One REDFOR base's ground units against its target this turn."""
 
-    See the module docstring for which transport each distance uses.
+    cp: ControlPoint
+    frontline: bool
+    target: int
+    present: int
+    incoming: int
+
+    @property
+    def shortfall(self) -> int:
+        """Units still needed after everything already on its way arrives."""
+        return max(0, self.target - self.present - self.incoming)
+
+    @property
+    def spare(self) -> int:
+        """Units this base can give away and stay at its own target."""
+        return max(0, self.present - self.target)
+
+
+class RedforSupplyPlanner:
+    """Refills REDFOR bases that are below their ground-unit target.
+
+    Each turn:
+      1. Every REDFOR base gets a target: frontline bases (next to an active
+         front) the frontline target, the rest the rear target (Settings).
+         Units already on their way to a base count towards it.
+      2. Bases below target want units; bases above it have spare units.
+      3. Pairs are tried frontline bases first, then nearest first. So a base
+         with spare units feeds the closest base that needs them, and a full
+         base is skipped for the next one out.
+      4. Each order moves up to CONVOY_SIZE units, by road convoy or airlift
+         depending on distance (see the module docstring).
     """
 
     def __init__(self, game: Game) -> None:
@@ -94,125 +125,121 @@ class RedforSupplyPlanner:
         )
         from game.transfers import TransferOrder
 
+        bases = self._bases()
+        needy = [b for b in bases if b.shortfall > 0]
+        donors = [b for b in bases if b.spare > 0]
+        if not needy or not donors:
+            return
+
+        max_dist_m = self._setting("redfor_resupply_max_distance_km", 400) * 1000.0
+        pairs: list[tuple[_Base, _Base, float]] = []
+        for dest in needy:
+            for source in donors:
+                if source is dest:
+                    continue
+                dist_m = _distance(source.cp, dest.cp)
+                if dist_m <= max_dist_m:
+                    pairs.append((source, dest, dist_m))
+        # Frontline bases first, then shortest trip first.
+        pairs.sort(key=lambda p: (not p[1].frontline, p[2]))
+
         now = datetime.utcnow()
-        transfers_created = 0
-        max_transfers = self._max_convoys()
+        network = self.red.transit_network
+        max_transfers = self._setting("redfor_resupply_max_bases", MAX_CONVOYS_PER_TURN)
+        created = 0
 
-        settings = getattr(self.game, "settings", None)
-        max_dist_km = getattr(settings, "redfor_resupply_max_distance_km", 400)
-        max_dist_m = max_dist_km * 1000.0
-
-        red_cps = [
-            cp
-            for cp in self.game.theater.controlpoints
-            if cp.captured.is_red and cp.can_deploy_ground_units
-        ]
-
-        if len(red_cps) < 2:
-            return
-
-        # Candidate pairs: (source, destination, distance, by_road, preferred airlift)
-        candidate_pairs: list[
-            tuple[ControlPoint, ControlPoint, float, bool, Optional[str]]
-        ] = []
-        transit_network = self.red.transit_network
-
-        for cp in red_cps:
-            if cp not in transit_network.nodes:
-                continue
-            for neighbor in list(transit_network.nodes[cp]):
-                if not neighbor.captured.is_red or not neighbor.can_deploy_ground_units:
-                    continue
-
-                try:
-                    dist_m = cp.position.distance_to_point(neighbor.position)
-                except Exception:
-                    dist_m = 0.0
-
-                if dist_m > max_dist_m:
-                    continue
-
-                tier = tier_for(dist_m)
-                by_road = (
-                    tier is Tier.SHORT
-                    and road_path(transit_network, cp, neighbor) is not None
-                )
-                preferred = None if by_road else preferred_airlift(tier)
-
-                pair = tuple(sorted([cp.id, neighbor.id]))
-                existing = [tuple(sorted([p[0].id, p[1].id])) for p in candidate_pairs]
-                if pair not in existing:
-                    candidate_pairs.append((cp, neighbor, dist_m, by_road, preferred))
-
-        if not candidate_pairs:
-            logger.debug("RedforSupplyPlanner: no eligible REDFOR base pairs found.")
-            return
-
-        # Road routes first (more reliable), then airlift; nearest first within
-        # each. Shuffle the front half in place so the same pair doesn't win
-        # every turn (slicing and shuffling the copy had no effect).
-        candidate_pairs.sort(key=lambda t: (not t[3], t[2]))
-        half = max(1, len(candidate_pairs) // 2)
-        front = candidate_pairs[:half]
-        random.shuffle(front)
-        candidate_pairs[:half] = front
-
-        for source, destination, dist_m, by_road, preferred in candidate_pairs:
-            if transfers_created >= max_transfers:
+        for source, dest, dist_m in pairs:
+            if created >= max_transfers:
                 break
-
-            units = self._select_units(source, CONVOY_SIZE)
-            if not units:
+            count = min(CONVOY_SIZE, source.spare, dest.shortfall)
+            if count <= 0:
+                continue  # topped up or emptied by an earlier order this turn
+            if self._pending_between(source.cp, dest.cp):
+                continue
+            if not has_transfer_route(self.game, source.cp, dest.cp):
                 continue
 
-            mode = "convoy" if by_road else f"airlift ({preferred} preferred)"
-            dist_km = dist_m / 1000.0
-
-            if not has_transfer_route(self.game, source, destination):
-                continue
-            # Every new transfer strips its units from the source base at once
-            # (new_transfer -> commit_losses). Don't stack a second order on a
-            # pair that is still waiting, and don't order an airlift no Red
-            # aircraft can fly: those units would sit in limbo indefinitely.
-            if self._pending_between(source, destination):
-                continue
-            if not by_road and not airlift_possible(self.game, source, destination):
+            tier = tier_for(dist_m)
+            by_road = (
+                tier is Tier.SHORT
+                and road_path(network, source.cp, dest.cp) is not None
+            )
+            preferred = None if by_road else preferred_airlift(tier)
+            # Every new transfer strips its units from the source base at once,
+            # so don't order an airlift no Red aircraft can fly: those units
+            # would sit in limbo indefinitely.
+            if not by_road and not airlift_possible(self.game, source.cp, dest.cp):
                 logger.debug(
                     "RedforSupplyPlanner: no Red transport can fly %s -> %s",
-                    source.name,
-                    destination.name,
+                    source.cp.name,
+                    dest.cp.name,
                 )
                 continue
 
+            units = _select_units(source.cp, count)
+            if not units:
+                continue
+            sent = sum(units.values())
+            mode = "convoy" if by_road else f"airlift ({preferred} preferred)"
             try:
-                transfer = TransferOrder(source, destination, units)
+                transfer = TransferOrder(source.cp, dest.cp, units)
                 if not by_road:
                     transfer.request_airflift = True
                     transfer.preferred_airlift = preferred
                 self.red.transfers.new_transfer(transfer, now)
-                transfers_created += 1
-                logger.info(
-                    "RedforSupplyPlanner: %s %s -> %s (%.0f km, %d units)",
-                    mode,
-                    source.name,
-                    destination.name,
-                    dist_km,
-                    len(units),
-                )
             except Exception as e:
                 logger.warning(
                     "RedforSupplyPlanner: failed to create %s %s->%s: %s",
                     mode,
-                    source.name,
-                    destination.name,
+                    source.cp.name,
+                    dest.cp.name,
                     e,
                 )
+                continue
 
-        if transfers_created:
+            source.present -= sent
+            dest.incoming += sent
+            created += 1
             logger.info(
-                "RedforSupplyPlanner: created %d transfer(s) this turn.",
-                transfers_created,
+                "RedforSupplyPlanner: %s %s -> %s (%.0f km, %d units, %s short %d)",
+                mode,
+                source.cp.name,
+                dest.cp.name,
+                dist_m / 1000.0,
+                sent,
+                dest.cp.name,
+                dest.shortfall,
             )
+
+        if created:
+            logger.info(
+                "RedforSupplyPlanner: created %d transfer(s) this turn.", created
+            )
+
+    def _bases(self) -> list[_Base]:
+        frontline_target = self._setting("redfor_resupply_frontline_target", 20)
+        rear_target = self._setting("redfor_resupply_rear_target", 6)
+        incoming: dict[int, int] = {}
+        for transfer in self.red.transfers:
+            dest = getattr(transfer, "destination", None)
+            if dest is not None:
+                incoming[id(dest)] = incoming.get(id(dest), 0) + _size(transfer)
+
+        bases = []
+        for cp in self.game.theater.controlpoints:
+            if not cp.captured.is_red or not cp.can_deploy_ground_units:
+                continue
+            frontline = bool(getattr(cp, "has_active_frontline", False))
+            bases.append(
+                _Base(
+                    cp=cp,
+                    frontline=frontline,
+                    target=frontline_target if frontline else rear_target,
+                    present=_armor_count(cp),
+                    incoming=incoming.get(id(cp), 0),
+                )
+            )
+        return bases
 
     def _pending_between(self, source: ControlPoint, destination: ControlPoint) -> bool:
         return any(
@@ -221,32 +248,48 @@ class RedforSupplyPlanner:
         )
 
     def _is_enabled(self) -> bool:
+        return bool(self._setting("redfor_resupply_enabled", True))
+
+    def _setting(self, name: str, default: Any) -> Any:
         settings = getattr(self.game, "settings", None)
         if settings is None:
-            return True
-        return getattr(settings, "redfor_resupply_enabled", True)
+            return default
+        return getattr(settings, name, default)
 
-    def _max_convoys(self) -> int:
-        settings = getattr(self.game, "settings", None)
-        if settings is None:
-            return MAX_CONVOYS_PER_TURN
-        return getattr(settings, "redfor_resupply_max_bases", MAX_CONVOYS_PER_TURN)
 
-    def _select_units(self, cp: ControlPoint, count: int) -> dict[GroundUnitType, int]:
-        units: dict[GroundUnitType, int] = {}
-        try:
-            if not hasattr(cp, "base") or not hasattr(cp.base, "armor"):
-                return {}
-            for unit_type, available in cp.base.armor.items():
-                if available <= 0:
-                    continue
-                send = min(available // 2, count - sum(units.values()))
-                if send > 0:
-                    units[unit_type] = send
-                if sum(units.values()) >= count:
-                    break
-        except Exception as e:
-            logger.debug(
-                "RedforSupplyPlanner: error selecting units from %s: %s", cp.name, e
-            )
-        return units
+def _distance(a: ControlPoint, b: ControlPoint) -> float:
+    try:
+        return a.position.distance_to_point(b.position)
+    except Exception:
+        return 0.0
+
+
+def _armor_count(cp: ControlPoint) -> int:
+    try:
+        return sum(n for n in cp.base.armor.values() if n > 0)
+    except AttributeError:
+        return 0
+
+
+def _size(transfer: Any) -> int:
+    try:
+        return sum(transfer.units.values())
+    except AttributeError:
+        return 0
+
+
+def _select_units(cp: ControlPoint, count: int) -> dict[GroundUnitType, int]:
+    """Up to count units, taken one at a time from the most plentiful type.
+
+    Gives a mixed convoy and never empties a scarce type first.
+    """
+    pool = {t: n for t, n in cp.base.armor.items() if n > 0}
+    units: dict[GroundUnitType, int] = {}
+    while count > 0 and pool:
+        unit_type = max(pool, key=lambda t: pool[t])
+        units[unit_type] = units.get(unit_type, 0) + 1
+        pool[unit_type] -= 1
+        if pool[unit_type] == 0:
+            del pool[unit_type]
+        count -= 1
+    return units

@@ -70,12 +70,12 @@ TRUCK = next(GroundUnitType.for_dcs_type(vehicle_map["M 818"]))
 
 
 class RedCp:
-    def __init__(self, name: str, x_km: float) -> None:
+    def __init__(self, name: str, x_km: float, trucks: int = 8) -> None:
         self.id = name
         self.name = name
         self.captured = Player.RED
         self.can_deploy_ground_units = True
-        self.base = SimpleNamespace(armor={TRUCK: 8})
+        self.base = SimpleNamespace(armor={TRUCK: trucks})
         self.position = SimpleNamespace(
             x=x_km * KM, distance_to_point=lambda o: abs(x_km * KM - o.x)
         )
@@ -122,7 +122,7 @@ def test_redfor_supply_uses_the_same_bands(
     from game.ato import redfor_supply_planner as planner
 
     monkeypatch.setattr(planner, "airlift_possible", lambda game, a, b: True)
-    game = _red_game(RedCp("A", 0), RedCp("B", km), link)
+    game = _red_game(RedCp("A", 0), RedCp("B", km, trucks=0), link)
 
     planner.RedforSupplyPlanner(game).plan()
 
@@ -138,7 +138,7 @@ def test_redfor_skips_an_airlift_no_red_aircraft_can_fly(
     from game.ato import redfor_supply_planner as planner
 
     monkeypatch.setattr(planner, "airlift_possible", lambda game, a, b: False)
-    a, b = RedCp("A", 0), RedCp("B", 180)
+    a, b = RedCp("A", 0), RedCp("B", 180, trucks=0)
     game = _red_game(a, b, TransitConnection.Airlift)
 
     planner.RedforSupplyPlanner(game).plan()
@@ -150,7 +150,7 @@ def test_redfor_skips_an_airlift_no_red_aircraft_can_fly(
 def test_redfor_does_not_stack_a_second_order_on_a_waiting_pair() -> None:
     from game.ato.redfor_supply_planner import RedforSupplyPlanner
 
-    a, b = RedCp("A", 0), RedCp("B", 50)
+    a, b = RedCp("A", 0), RedCp("B", 50, trucks=0)
     game = _red_game(a, b, TransitConnection.Road)
 
     RedforSupplyPlanner(game).plan()
