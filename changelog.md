@@ -9,6 +9,11 @@
 * **[Modding]** Add support for Su-35S mod (v2.0.27b)
 * **[Plugins]** Update EW Script to version 2.1
 * **[Options]** New option to spawn TACAN beacons at captured airfields
+* **[Modding]** Added support for the CurrentHill Iran Military Assets pack: the Shahed-136 launcher, two IRGCN fast-attack craft, and a new `[CH] Iran 2020` faction, behind a New Game mods checkbox. (upstream #886)
+* **[Campaigns]** New campaign: Syria - Desert Trident (Starfire), with the new `USA-Israel 2000` and `Iraq 2000` factions. Campaign format 10.9 (motor pools).
+* **[Data]** Added the F-100D Super Sabre (DCS module) to the USA 1955-1975 and Vietnam War factions, and the F-14A Tomcat (Block 95-GR Export).
+* **[Data]** Weapons data updated to upstream: 74 new weapon groups and wider CLSID coverage (Super Hornet, JAS-39, CH packs and more), with introduction years for date-restricted loadouts.
+* **[Logistics]** UH-60L and MH-60L DAP cargo loads are now weight-checked (mod data: 3622 kg at full fuel).
 * **[Mission Generator]** Native DTC data cartridges for the F/A-18C and F-16C: every blue client flight spawns with its steerpoints and push times, recovery TACAN/ICLS/ACLS and the SA/HSD picture already loaded, and multiplayer clients receive the cartridge with the mission download. Campaign setting `Pre-load DTC data cartridges`, on by default.
 * **[Campaigns]** Ability to define motor pool objects which spawn reserve armor
 * **[Campaigns]** Motorpool placement is Garage_A-anchored and empty reserve pools are excluded from attack planning

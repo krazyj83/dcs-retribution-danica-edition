@@ -59,6 +59,16 @@ def test_less_fuel_means_more_cargo() -> None:
     assert weights.payload_kg(0.25) > weights.payload_kg(0.5) > weights.payload_kg(1)
 
 
+def test_uh60l_and_dap_cargo_is_checked() -> None:
+    from pydcs_extensions.uh60l.uh60l import UH_60L, UH_60L_DAP
+
+    for unit_type in (UH_60L, UH_60L_DAP):
+        weights = cargo_aircraft(_aircraft(unit_type))
+        assert weights is not None
+        # Mod data: 10659 kg max - 5675 kg empty - 1362 kg fuel.
+        assert weights.payload_kg(1.0) == pytest.approx(3622.4, abs=1)
+
+
 def test_weapon_weights_come_from_dcs() -> None:
     assert lb(weapon_weight_kg(HELLFIRE) or 0) == pytest.approx(99, abs=1)
     assert weapon_weight_kg("not-a-weapon") is None
