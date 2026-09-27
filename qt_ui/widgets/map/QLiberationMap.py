@@ -37,10 +37,15 @@ class LoggingWebPage(QWebEnginePage):
             logging.info(message)
 
     def javaScriptPrompt(self, *args):  # type: ignore[no-untyped-def]
-        """Handle window.prompt() calls from the map JavaScript."""
-        message = args[1] if len(args) > 1 else "Input"
-        default_value = args[2] if len(args) > 2 else ""
-        result = args[3] if len(args) > 3 else None
+        """Handle window.prompt() calls from the map (drop zone and convoy route
+        names).
+
+        PySide expects the override to return (accepted, text). Depending on
+        the PySide version it also passes Qt's output argument as a 4th
+        argument, as a plain str that cannot be written to, so it is ignored.
+        """
+        message = str(args[1]) if len(args) > 1 else "Input"
+        default_value = str(args[2]) if len(args) > 2 else ""
         text, ok = QInputDialog.getText(
             None,
             "Input",
@@ -48,12 +53,7 @@ class LoggingWebPage(QWebEnginePage):
             text=default_value,
         )
         if ok:
-            if result is not None:
-                result.append(text)
-                return True
             return True, text
-        if result is not None:
-            return False
         return False, ""
 
 
