@@ -10,6 +10,7 @@ jest.mock("react-leaflet", () => ({
   useMapEvents: (handlers: Record<string, (e: any) => void>) => {
     mapHandlers = handlers;
   },
+  LayerGroup: (props: PropsWithChildren<any>) => <div>{props.children}</div>,
   Popup: (props: PropsWithChildren<any>) => <div>{props.children}</div>,
   Marker: (props: PropsWithChildren<any>) => <div>{props.children}</div>,
   Tooltip: (props: PropsWithChildren<any>) => <span>{props.children}</span>,

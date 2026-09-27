@@ -1,6 +1,6 @@
 import { LatLng, DivIcon, DomEvent } from "leaflet";
 import React, { useEffect, useRef, useState } from "react";
-import { CircleMarker, Marker, Polyline, Popup, Tooltip, useMapEvents } from "react-leaflet";
+import { CircleMarker, LayerGroup, Marker, Polyline, Popup, Tooltip, useMapEvents } from "react-leaflet";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import { DropZone, createDropZone, deleteDropZone, selectDropZones, serverBase } from "../../api/dropZonesSlice";
 import { createConvoyRoute, deleteConvoyRoute, selectConvoyRoutes } from "../../api/convoyRoutesSlice";
@@ -206,10 +206,15 @@ function MapRightClickHandler() {
 
   if (pending === null) return null;
 
+  // The name forms are closed only by Save, Cancel or Esc, never by Leaflet
+  // removing a popup: when the menu popup closes and the drop zone form opens
+  // at the same spot, Leaflet reports a popup removal right after the switch,
+  // which used to wipe the brand-new form before it was shown.
+
   if (pending.kind === "menu") {
     const latlng = pending.latlng;
     return (
-      <Popup position={latlng} eventHandlers={{ remove: () => setPending((p) => (p?.kind === "menu" ? null : p)) }} closeButton={false}>
+      <Popup key="menu" position={latlng} closeButton={false}>
         <div style={menuWrap}>
           <div style={menuTitle}>Map actions</div>
           <button
@@ -243,7 +248,7 @@ function MapRightClickHandler() {
     return (
       <>
         <Marker position={latlng} icon={makeDiamondIcon(PENDING_COLOR, 20)} />
-        <Popup position={latlng} eventHandlers={{ remove: () => setPending((p) => (p?.kind === "dz-name" ? null : p)) }} closeButton={false}>
+        <Popup key="dz-name" position={latlng} closeButton={false} autoClose={false} closeOnClick={false}>
           <NameForm title="🎯 New Drop Zone" defaultName="Drop Zone" onSave={save} onCancel={cancel} />
         </Popup>
       </>
@@ -271,7 +276,7 @@ function MapRightClickHandler() {
     <>
       <Polyline positions={[start, end]} pathOptions={{ color: PENDING_COLOR, weight: 2, dashArray: "6 4", opacity: 0.7 }} />
       <CircleMarker center={start} radius={6} pathOptions={{ color: PENDING_COLOR, fillColor: PENDING_COLOR, fillOpacity: 1 }} />
-      <Popup position={end} eventHandlers={{ remove: () => setPending((p) => (p?.kind === "route-name" ? null : p)) }} closeButton={false}>
+      <Popup key="route-name" position={end} closeButton={false} autoClose={false} closeOnClick={false}>
         <NameForm title="🚛 New Convoy Route" defaultName="Convoy Route" onSave={save} onCancel={cancel} />
       </Popup>
     </>
@@ -354,12 +359,15 @@ function ConvoyRouteMarkers() {
   );
 }
 
+// Everything is drawn inside one LayerGroup: a LayersControl overlay takes a
+// single layer, and loose markers each registered themselves as a new
+// "Drop zones & Convoy routes" entry in the layer list.
 export default function DropZoneLayer() {
   return (
-    <>
+    <LayerGroup>
       <DropZoneMarkers />
       <ConvoyRouteMarkers />
       <MapRightClickHandler />
-    </>
+    </LayerGroup>
   );
 }
