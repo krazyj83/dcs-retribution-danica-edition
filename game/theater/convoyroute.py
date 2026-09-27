@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Iterator, Optional
+from uuid import UUID
 
 from dcs.mapping import Point
 from game.theater.missiontarget import MissionTarget
@@ -21,6 +22,23 @@ from game.theater.missiontarget import MissionTarget
 if TYPE_CHECKING:
     from game.ato.flighttype import FlightType
     from game.theater import Coalition, Player
+
+
+@dataclass
+class PlayerConvoyRoute:
+    """A convoy route drawn on the map by the player.
+
+    Saved with the campaign (``Game.player_convoy_routes``). A route is good
+    for one turn: the convoy drives it in the next mission, and the route is
+    removed when the turn ends.
+    """
+
+    id: UUID
+    name: str
+    start_lat: float
+    start_lng: float
+    end_lat: float
+    end_lng: float
 
 
 @dataclass

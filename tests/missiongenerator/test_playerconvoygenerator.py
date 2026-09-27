@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import Counter
 from types import SimpleNamespace
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from dcs.mapping import LatLng, Point
@@ -24,8 +25,8 @@ from game.missiongenerator.playerconvoygenerator import (
     CONVOY_SIZE,
     PlayerConvoyGenerator,
 )
-from game.server.convoyroutes import routes as convoy_routes
 from game.sim.missionresultsprocessor import MissionResultsProcessor
+from game.theater.convoyroute import PlayerConvoyRoute
 from game.theater.player import Player
 from game.theater.theatergroundobject import MotorpoolGroundObject
 from game.unitmap import UnitMap
@@ -82,7 +83,7 @@ class FakeCp:
         return self.name
 
 
-def _game(cps: list[FakeCp]) -> Any:
+def _game(cps: list[FakeCp], routes: list[Any] | None = None) -> Any:
     faction = SimpleNamespace(
         name="Test faction",
         country=SimpleNamespace(name="USA"),
@@ -91,20 +92,27 @@ def _game(cps: list[FakeCp]) -> Any:
     return SimpleNamespace(
         theater=SimpleNamespace(terrain=TERRAIN, controlpoints=cps),
         coalition_for=lambda player: SimpleNamespace(faction=faction),
+        player_convoy_routes={r.id: r for r in routes or []},
     )
 
 
-def _route(name: str = "Supply Road") -> Any:
-    return SimpleNamespace(name=name, start=ROUTE_START, end=ROUTE_END)
+def _route(name: str = "Supply Road") -> PlayerConvoyRoute:
+    return PlayerConvoyRoute(
+        id=uuid4(),
+        name=name,
+        start_lat=ROUTE_START.lat,
+        start_lng=ROUTE_START.lng,
+        end_lat=ROUTE_END.lat,
+        end_lng=ROUTE_END.lng,
+    )
 
 
 def _generate(
     cps: list[FakeCp], routes: list[Any], monkeypatch: pytest.MonkeyPatch
 ) -> tuple[Mission, UnitMap]:
-    monkeypatch.setattr(convoy_routes, "get_all", lambda: routes)
     mission = Mission(TERRAIN)
     unit_map = UnitMap()
-    PlayerConvoyGenerator(mission, _game(cps), unit_map).generate()
+    PlayerConvoyGenerator(mission, _game(cps, routes), unit_map).generate()
     return mission, unit_map
 
 

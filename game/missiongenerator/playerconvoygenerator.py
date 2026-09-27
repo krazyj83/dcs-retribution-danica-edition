@@ -37,7 +37,7 @@ from game.utils import kph
 
 if TYPE_CHECKING:
     from game import Game
-    from game.server.convoyroutes.models import ConvoyRouteJs
+    from game.theater.convoyroute import PlayerConvoyRoute
     from game.theater import ControlPoint
     from game.unitmap import UnitMap
 
@@ -65,12 +65,8 @@ class PlayerConvoyGenerator:
         self._taken: dict[ControlPoint, Counter[GroundUnitType]] = {}
 
     def generate(self) -> None:
-        # Imported here, not at module level: game.server imports game.sim, which
-        # imports game.missiongenerator, so a top-level import is a cycle that
-        # only works when game.server happens to be imported first.
-        from game.server.convoyroutes.routes import get_all as get_all_convoy_routes
-
-        for route in get_all_convoy_routes():
+        routes = getattr(self.game, "player_convoy_routes", {})
+        for route in list(routes.values()):
             try:
                 self._spawn_convoy(route)
             except Exception:
@@ -78,11 +74,11 @@ class PlayerConvoyGenerator:
                     f"Failed to generate player convoy for route '{route.name}'"
                 )
 
-    def _spawn_convoy(self, route: ConvoyRouteJs) -> None:
-        """Create one vehicle group driving the given ConvoyRouteJs."""
+    def _spawn_convoy(self, route: PlayerConvoyRoute) -> None:
+        """Create one vehicle group driving the given route."""
         terrain = self.game.theater.terrain
-        start = Point.from_latlng(LatLng(route.start.lat, route.start.lng), terrain)
-        end = Point.from_latlng(LatLng(route.end.lat, route.end.lng), terrain)
+        start = Point.from_latlng(LatLng(route.start_lat, route.start_lng), terrain)
+        end = Point.from_latlng(LatLng(route.end_lat, route.end_lng), terrain)
 
         friendly = [
             cp

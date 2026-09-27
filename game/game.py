@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     from .sim import GameUpdateEvents
     from .squadrons import AirWing
     from .threatzones import ThreatZones
+    from .theater.convoyroute import PlayerConvoyRoute
 
 COMMISION_UNIT_VARIETY = 4
 COMMISION_LIMITS_SCALE = 1.5
@@ -137,6 +138,8 @@ class Game:
         # Aircraft purchase requests from RedforAdaptivePlanner, re-added by
         # Coalition.initialize_turn() after it clears procurement_requests.
         self.redfor_pending_procurement_requests: list[AircraftProcurementRequest] = []
+        # Convoy routes the player drew on the map for this turn only.
+        self.player_convoy_routes: dict[UUID, PlayerConvoyRoute] = {}
 
         if start_time is None:
             self.time_of_day_offset_for_start_time = list(TimeOfDay).index(
@@ -177,6 +180,8 @@ class Game:
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__.update(state)
+        if not hasattr(self, "player_convoy_routes"):
+            self.player_convoy_routes = {}
         if not hasattr(self, "laser_code_registry"):
             self.laser_code_registry = LaserCodeRegistry()
             for front_line in self.theater.conflicts():
@@ -307,6 +312,15 @@ class Game:
         """
         self.message("End of turn #" + str(self.turn), "-" * 40)
         self.turn += 1
+
+        # Player-drawn convoy routes last one turn: their convoys drove in the
+        # mission that just ended (or the turn was skipped).
+        if self.player_convoy_routes:
+            logging.info(
+                f"Removing {len(self.player_convoy_routes)} player convoy route(s) "
+                "at end of turn"
+            )
+            self.player_convoy_routes.clear()
 
         # The coalition-specific turn finalization *must* happen before unit deliveries,
         # since the coalition-specific finalization handles transit network updates and
