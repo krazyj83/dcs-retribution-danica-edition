@@ -110,11 +110,16 @@ class MissionResultsProcessor:
     def commit_player_drawn_convoys(debriefing: Debriefing) -> None:
         """Settle the vehicles borrowed by player-drawn convoys.
 
-        Dead vehicles are lost from their origin base. Survivors are delivered
-        to the friendly base nearest the route end, provided it is still on the
-        same side as the origin; otherwise they stay where they came from.
+        Dead vehicles are lost from their origin base. Vehicles that reached
+        the route end are delivered to the friendly base nearest the route end,
+        provided it is still on the same side as the origin. Everything else
+        (still on the road when the mission ended, or the base changed hands)
+        stays where it came from.
         """
         dead = {loss.name for loss in debriefing.player_drawn_convoy_losses}
+        arrived = set(
+            getattr(debriefing.state_data, "player_convoy_arrivals", None) or []
+        )
         for unit in debriefing.unit_map.player_drawn_convoys.values():
             origin = unit.origin
             if origin.base.total_units_of_type(unit.unit_type) <= 0:
@@ -129,6 +134,12 @@ class MissionResultsProcessor:
                 continue
             destination = unit.destination
             if destination is origin or destination.captured != origin.captured:
+                continue
+            if unit.name not in arrived:
+                logging.info(
+                    f"Player convoy {unit.unit_type} did not reach {destination}, "
+                    f"stays at {origin}"
+                )
                 continue
             origin.base.armor[unit.unit_type] -= 1
             destination.base.commission_units({unit.unit_type: 1})

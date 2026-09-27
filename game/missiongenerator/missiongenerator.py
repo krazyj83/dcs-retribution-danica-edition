@@ -113,7 +113,9 @@ class MissionGenerator:
 
         ConvoyGenerator(self.mission, self.game, self.unit_map).generate()
         CargoShipGenerator(self.mission, self.game, self.unit_map).generate()
-        PlayerConvoyGenerator(self.mission, self.game, self.unit_map).generate()
+        player_convoys = PlayerConvoyGenerator(self.mission, self.game, self.unit_map)
+        player_convoys.generate()
+        self._write_player_convoy_data(player_convoys)
 
         self.generate_destroyed_units()
 
@@ -213,6 +215,28 @@ class MissionGenerator:
             self.mission.triggerrules.triggers.append(trigger)
         except Exception:
             logging.exception("MissionGenerator: naval munitions data failed")
+
+    def _write_player_convoy_data(self, convoys: PlayerConvoyGenerator) -> None:
+        """Route ends of player-drawn convoys, for arrival detection in the
+        mission (resources/plugins/base/dcs_retribution.lua)."""
+        try:
+            from dcs.action import DoScript
+            from dcs.translation import String
+            from dcs.triggers import TriggerStart
+
+            from game.missiongenerator.transfercargogenerator import to_lua
+
+            trigger = TriggerStart(comment="Set DCS Retribution player convoy data")
+            trigger.add_action(
+                DoScript(
+                    String(
+                        f"dcsRetributionPlayerConvoys = {to_lua(convoys.script_data())}"
+                    )
+                )
+            )
+            self.mission.triggerrules.triggers.append(trigger)
+        except Exception:
+            logging.exception("MissionGenerator: player convoy data failed")
 
     def _generate_logistics_flights(self) -> None:
         """

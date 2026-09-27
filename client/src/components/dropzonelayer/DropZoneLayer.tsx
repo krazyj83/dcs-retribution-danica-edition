@@ -5,8 +5,17 @@ import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import { DropZone, createDropZone, deleteDropZone, selectDropZones, serverBase } from "../../api/dropZonesSlice";
 import { createConvoyRoute, deleteConvoyRoute, selectConvoyRoutes } from "../../api/convoyRoutesSlice";
 import type { ConvoyRoute } from "../../api/convoyRoutesSlice";
+import { describeDrive } from "./convoyTime";
 
-const popupWrap: React.CSSProperties = { minWidth: 210 };
+// Dark panel, like the right-click menu: the light title text was unreadable
+// on Leaflet's default white popup.
+const popupWrap: React.CSSProperties = {
+  minWidth: 210,
+  padding: "8px 10px",
+  background: "#1a252f",
+  borderRadius: 4,
+  border: "1px solid #3d566e",
+};
 
 const menuWrap: React.CSSProperties = {
   minWidth: 200,
@@ -82,7 +91,7 @@ function makeDiamondIcon(color: string, size: number = 18) {
 type Pending =
   | { kind: "menu"; latlng: LatLng }
   | { kind: "dz-name"; latlng: LatLng }
-  | { kind: "route-start"; start: LatLng }
+  | { kind: "route-start"; start: LatLng; cursor?: LatLng }
   | { kind: "route-name"; start: LatLng; end: LatLng };
 
 const inputStyle: React.CSSProperties = {
@@ -104,6 +113,12 @@ const errorStyle: React.CSSProperties = {
   marginTop: 6,
 };
 
+const infoStyle: React.CSSProperties = {
+  color: "#bdc3c7",
+  fontSize: 11,
+  marginTop: 4,
+};
+
 function errorText(err: unknown): string {
   if (err && typeof err === "object" && "message" in err) {
     return String((err as { message: unknown }).message);
@@ -116,11 +131,12 @@ function errorText(err: unknown): string {
 // typed text back to the page.
 export function NameForm(props: {
   title: string;
+  info?: string;
   defaultName: string;
   onSave: (name: string) => Promise<void>;
   onCancel: () => void;
 }) {
-  const { title, defaultName, onSave, onCancel } = props;
+  const { title, info, defaultName, onSave, onCancel } = props;
   const [name, setName] = useState(defaultName);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -160,6 +176,7 @@ export function NameForm(props: {
   return (
     <form ref={formRef} style={popupWrap} onSubmit={submit}>
       <strong style={{ fontSize: 13, color: "#ecf0f1" }}>{title}</strong>
+      {info && <div style={infoStyle}>{info}</div>}
       <input
         autoFocus
         aria-label="Name"
@@ -198,6 +215,12 @@ function MapRightClickHandler() {
     click() {
       // A left-click on the map closes the menu; a route in progress stays.
       setPending((p) => (p?.kind === "menu" ? null : p));
+    },
+    mousemove(e) {
+      // While placing the end point, draw a live line with the drive time.
+      setPending((p) =>
+        p?.kind === "route-start" ? { ...p, cursor: e.latlng } : p
+      );
     },
     keydown(e) {
       if (e.originalEvent.key === "Escape") setPending(null);
@@ -256,12 +279,22 @@ function MapRightClickHandler() {
   }
 
   if (pending.kind === "route-start") {
+    const cursor = pending.cursor;
     return (
+      <>
+        {cursor && (
+          <Polyline positions={[pending.start, cursor]} pathOptions={{ color: PENDING_COLOR, weight: 2, dashArray: "6 4", opacity: 0.7 }}>
+            <Tooltip permanent direction="right" offset={[12, 0]}>
+              {describeDrive(pending.start, cursor)}
+            </Tooltip>
+          </Polyline>
+        )}
       <CircleMarker center={pending.start} radius={8} pathOptions={{ color: PENDING_COLOR, fillColor: PENDING_COLOR, fillOpacity: 0.9, weight: 2 }}>
         <Tooltip permanent direction="top" offset={[0, -12]}>
           Route start — right-click to set end point (Esc cancels)
         </Tooltip>
       </CircleMarker>
+      </>
     );
   }
 
@@ -277,7 +310,7 @@ function MapRightClickHandler() {
       <Polyline positions={[start, end]} pathOptions={{ color: PENDING_COLOR, weight: 2, dashArray: "6 4", opacity: 0.7 }} />
       <CircleMarker center={start} radius={6} pathOptions={{ color: PENDING_COLOR, fillColor: PENDING_COLOR, fillOpacity: 1 }} />
       <Popup key="route-name" position={end} closeButton={false} autoClose={false} closeOnClick={false}>
-        <NameForm title="🚛 New Convoy Route" defaultName="Convoy Route" onSave={save} onCancel={cancel} />
+        <NameForm title="🚛 New Convoy Route" info={describeDrive(start, end)} defaultName="Convoy Route" onSave={save} onCancel={cancel} />
       </Popup>
     </>
   );
@@ -332,7 +365,9 @@ function ConvoyRouteMarkers() {
         return (
           <React.Fragment key={r.id}>
             <Polyline positions={[start, end]} pathOptions={{ color: ROUTE_COLOR, weight: 3, dashArray: "8 5", opacity: 0.85 }}>
-              <Tooltip sticky>{r.name}</Tooltip>
+              <Tooltip sticky>
+                {r.name} — {describeDrive(r.start, r.end)}
+              </Tooltip>
             </Polyline>
             <Marker position={start} icon={makeDiamondIcon(ROUTE_COLOR, 18)}>
               <Popup>
@@ -341,6 +376,9 @@ function ConvoyRouteMarkers() {
                   <div style={{ fontSize: 11, color: "#7f8c8d", margin: "2px 0 8px" }}>
                     Start: {r.start.lat.toFixed(4)}, {r.start.lng.toFixed(4)}<br />
                     End: &nbsp;{r.end.lat.toFixed(4)}, {r.end.lng.toFixed(4)}
+                  </div>
+                  <div style={{ ...infoStyle, margin: "0 0 8px" }}>
+                    🕒 {describeDrive(r.start, r.end)}
                   </div>
                   <button style={{ ...btn, width: "100%", marginBottom: 5 }} onClick={() => openEscortDialog(r)}>
                     ✈ Plan Escort Mission

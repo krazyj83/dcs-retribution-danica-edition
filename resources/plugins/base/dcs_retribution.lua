@@ -25,6 +25,49 @@ local function messageAll(message)
     mist.message.add(msg)
 end
 
+-- Player-drawn convoys: vehicles that reached their route end.
+-- dcsRetributionPlayerConvoys = {radius = m, convoys = {{group, x, z}, ...}}
+-- is written by the mission generator (playerconvoygenerator.py). A vehicle
+-- counts as arrived once it has been within `radius` of its route end; only
+-- arrived vehicles are delivered to the destination base after the mission.
+player_convoy_arrived = player_convoy_arrived or {}
+
+function retribution_check_player_convoys()
+    local data = dcsRetributionPlayerConvoys
+    if type(data) ~= "table" or type(data.convoys) ~= "table" then
+        return
+    end
+    local radius = tonumber(data.radius) or 2000
+    for _, convoy in ipairs(data.convoys) do
+        local group = Group.getByName(convoy.group)
+        if group and group:isExist() then
+            for _, unit in ipairs(group:getUnits() or {}) do
+                if unit and unit:isExist() and unit:getLife() > 0 then
+                    local p = unit:getPoint()
+                    local dx, dz = p.x - convoy.x, p.z - convoy.z
+                    if dx * dx + dz * dz <= radius * radius then
+                        player_convoy_arrived[unit:getName()] = true
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function player_convoy_arrivals()
+    pcall(retribution_check_player_convoys)
+    local names = {}
+    for name, _ in pairs(player_convoy_arrived) do
+        names[#names + 1] = name
+    end
+    return names
+end
+
+timer.scheduleFunction(function(_, t)
+    pcall(retribution_check_player_convoys)
+    return t + 15
+end, nil, timer.getTime() + 15)
+
 function write_state()
     local _debriefing_file_location = debriefing_file_location
     if not debriefing_file_location or debriefing_file_location == "" then
@@ -54,6 +97,11 @@ function write_state()
         if cargo_ok and cargo_crates and #cargo_crates > 0 then
             game_state["cargo_crates"] = cargo_crates
         end
+    end
+    -- Player-drawn convoy vehicles that reached their route end, if any.
+    local arrivals = player_convoy_arrivals()
+    if #arrivals > 0 then
+        game_state["player_convoy_arrivals"] = arrivals
     end
     -- Naval munitions crates (ship_weapons plugin), if any.
     if retribution_naval_state then

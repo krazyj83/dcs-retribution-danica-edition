@@ -22,6 +22,7 @@ from dcs.vehicles import vehicle_map
 from game.dcs.groundunittype import GroundUnitType
 from game.debriefing import Debriefing
 from game.missiongenerator.playerconvoygenerator import (
+    ARRIVAL_RADIUS_M,
     CONVOY_SIZE,
     PlayerConvoyGenerator,
 )
@@ -228,11 +229,18 @@ def test_vehicles_parked_in_a_motorpool_are_not_spare(
 # --- Settlement after the mission ----------------------------------------------
 
 
-def _debrief(unit_map: UnitMap, killed: list[str]) -> Debriefing:
+def _debrief(
+    unit_map: UnitMap, killed: list[str], arrived: list[str] | None = None
+) -> Debriefing:
+    """``arrived`` defaults to every convoy vehicle reaching the route end."""
+    if arrived is None:
+        arrived = list(unit_map.player_drawn_convoys)
     debriefing = Debriefing.__new__(Debriefing)
     debriefing.unit_map = unit_map
     debriefing.state_data = SimpleNamespace(  # type: ignore[assignment]
-        killed_ground_units=killed, killed_aircraft=[]
+        killed_ground_units=killed,
+        killed_aircraft=[],
+        player_convoy_arrivals=arrived,
     )
     debriefing.ground_losses = debriefing.dead_ground_units()
     return debriefing
@@ -283,3 +291,51 @@ def test_route_ending_at_its_own_source_changes_nothing(
     MissionResultsProcessor.commit_player_drawn_convoys(_debrief(unit_map, []))
 
     assert only.base.armor == {TRUCK: 4}
+
+
+def test_vehicles_that_did_not_reach_the_route_end_stay_home(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _near_start("Source", {TRUCK: 10})
+    delivery = _near_end("Delivery", {})
+    mission, unit_map = _generate([source, delivery], [_route()], monkeypatch)
+    names = [str(u.name) for u in mission.country("USA").vehicle_group[0].units]
+    assert len(names) == CONVOY_SIZE
+
+    # One arrived, one was killed on the way, the rest were still driving.
+    debriefing = _debrief(unit_map, killed=[names[1]], arrived=[names[0]])
+    MissionResultsProcessor.commit_player_drawn_convoys(debriefing)
+
+    assert delivery.base.armor == {TRUCK: 1}
+    assert source.base.armor == {TRUCK: 10 - 1 - 1}
+
+
+def test_no_arrival_report_delivers_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = _near_start("Source", {TRUCK: 4})
+    delivery = _near_end("Delivery", {})
+    _, unit_map = _generate([source, delivery], [_route()], monkeypatch)
+
+    MissionResultsProcessor.commit_player_drawn_convoys(
+        _debrief(unit_map, [], arrived=[])
+    )
+
+    assert source.base.armor == {TRUCK: 4}
+    assert delivery.base.armor == {}
+
+
+def test_mission_script_gets_each_convoy_and_its_route_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _near_start("Source", {TRUCK: 10})
+    delivery = _near_end("Delivery", {})
+    mission = Mission(TERRAIN)
+    generator = PlayerConvoyGenerator(
+        mission, _game([source, delivery], [_route("MSR")]), UnitMap()
+    )
+    generator.generate()
+
+    data = generator.script_data()
+    end = _at(ROUTE_END.lat, ROUTE_END.lng)
+    group = mission.country("USA").vehicle_group[0]
+    assert data["radius"] == ARRIVAL_RADIUS_M
+    assert data["convoys"] == [{"group": str(group.name), "x": end.x, "z": end.y}]

@@ -11,9 +11,12 @@ Each convoy borrows real vehicles from a friendly base's spare reserve:
   plentiful types, so a convoy is e.g. 2 trucks + 1 APC + 1 tank.
 - Destination: the friendly base nearest the route end.
 
-Every vehicle is registered in the UnitMap. After the mission,
-``MissionResultsProcessor.commit_player_drawn_convoys`` removes dead vehicles
-from the source base and delivers survivors to the destination base.
+Every vehicle is registered in the UnitMap. The mission script
+(resources/plugins/base/dcs_retribution.lua) watches each convoy and records
+the vehicles that get within ``ARRIVAL_RADIUS_M`` of the route end. After the
+mission, ``MissionResultsProcessor.commit_player_drawn_convoys`` removes dead
+vehicles from the source base and delivers only the vehicles that arrived to
+the destination base; the rest stay at the source base.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ from __future__ import annotations
 import itertools
 import logging
 from collections import Counter
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from dcs import Mission
 from dcs.mapping import LatLng, Point
@@ -49,6 +52,11 @@ CONVOY_SIZE = 4
 # 40 km/h is realistic for a road-bound supply column.
 CONVOY_SPEED = kph(40).kph
 
+# A vehicle within this distance of the route end has arrived. Road-bound
+# columns stop at the road point nearest the end, which can be off the exact
+# spot the player clicked.
+ARRIVAL_RADIUS_M = 2000
+
 # pydcs spaces a new group's units 20 m apart along Y; extra types continue that.
 _UNIT_SPACING_M = 20
 
@@ -63,6 +71,12 @@ class PlayerConvoyGenerator:
         self._counter = itertools.count(1)
         # Vehicles already taken by earlier convoys this mission, per base.
         self._taken: dict[ControlPoint, Counter[GroundUnitType]] = {}
+        # Group name and route end of each spawned convoy, for the mission script.
+        self._spawned: list[dict[str, Any]] = []
+
+    def script_data(self) -> dict[str, Any]:
+        """The table the mission script uses to detect arrivals."""
+        return {"radius": ARRIVAL_RADIUS_M, "convoys": list(self._spawned)}
 
     def generate(self) -> None:
         routes = getattr(self.game, "player_convoy_routes", {})
@@ -110,6 +124,7 @@ class PlayerConvoyGenerator:
         self.unit_map.add_player_drawn_convoy_units(
             group, unit_types, origin, destination
         )
+        self._spawned.append({"group": group_name, "x": end.x, "z": end.y})
         logger.info(
             f"Spawned '{group_name}': {len(unit_types)} vehicles from {origin} "
             f"to {destination}"

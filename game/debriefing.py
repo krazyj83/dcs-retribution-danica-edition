@@ -141,6 +141,10 @@ class StateData:
     #: (see game/logistics/naval_munitions.py).
     naval_munitions: List[dict[str, Any]] = field(default_factory=list)
 
+    #: Names of player-drawn convoy vehicles that reached their route end
+    #: (see game/missiongenerator/playerconvoygenerator.py).
+    player_convoy_arrivals: List[str] = field(default_factory=list)
+
     @classmethod
     def from_json(cls, data: Dict[str, Any], unit_map: UnitMap) -> StateData:
         def clean_unit_list(unit_list: List[Any]) -> List[str]:
@@ -181,6 +185,9 @@ class StateData:
             base_capture_events=data.get("base_capture_events", []),
             cargo_crates=list(data.get("cargo_crates") or []),
             naval_munitions=list(data.get("naval_munitions") or []),
+            player_convoy_arrivals=[
+                str(name) for name in data.get("player_convoy_arrivals") or []
+            ],
         )
 
 

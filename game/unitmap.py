@@ -56,7 +56,8 @@ class PlayerDrawnConvoyUnit:
     """One vehicle of a convoy the player drew on the campaign map.
 
     It is borrowed from ``origin``'s reserve for the mission. If it dies it is
-    lost from ``origin``; if it survives it is delivered to ``destination``.
+    lost from ``origin``; if it reaches the route end it is delivered to
+    ``destination``; otherwise it stays at ``origin``.
     """
 
     name: str

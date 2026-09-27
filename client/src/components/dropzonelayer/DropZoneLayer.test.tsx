@@ -105,7 +105,15 @@ describe("DropZoneLayer right-click workflow", () => {
     fireEvent.click(screen.getByText(/Add Convoy Route/));
     expect(screen.getByText(/right-click to set end point/)).toBeInTheDocument();
 
+    // Moving the mouse draws a live line with the drive time.
+    act(() => {
+      mapHandlers.mousemove({ latlng: { lat: 3, lng: 4 } });
+    });
+    expect(screen.getByText(/by road at 40 km\/h/)).toBeInTheDocument();
+
     rightClick(3, 4);
+    // The name form shows the same estimate.
+    expect(screen.getByText(/by road at 40 km\/h/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "MSR Tampa" },
     });
