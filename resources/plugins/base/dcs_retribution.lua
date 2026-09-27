@@ -55,6 +55,13 @@ function write_state()
             game_state["cargo_crates"] = cargo_crates
         end
     end
+    -- Naval munitions crates (ship_weapons plugin), if any.
+    if retribution_naval_state then
+        local naval_ok, naval = pcall(retribution_naval_state)
+        if naval_ok and naval and #naval > 0 then
+            game_state["naval_munitions"] = naval
+        end
+    end
     local ok, write_error = pcall(function()
         fp:write(json:encode(game_state))
     end)

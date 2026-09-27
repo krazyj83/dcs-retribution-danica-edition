@@ -1037,6 +1037,14 @@ class LogisticsManager:
                 else:
                     line += f", {overflow:.0f} lost (no room)"
             log.append(line)
+
+        # Naval munitions crates flown to ships (ship_weapons plugin).
+        from game.logistics.naval_munitions import settle as settle_naval
+
+        state = getattr(debriefing, "state_data", None)
+        log.extend(
+            settle_naval(game, list(getattr(state, "naval_munitions", None) or []))
+        )
         return log
 
     def cancel_transfer(self, transfer_id: str) -> bool:

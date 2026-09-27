@@ -4,9 +4,12 @@
 -- F10 > Ship Weapons > <ship> > Ammo Status shows each weapon's rounds left,
 -- a load bar and the rearm state.
 --
--- A helicopter that lands on a friendly ship and stays on the deck for
--- CFG.load_time (15 min) delivers one rearm load: 20% of every weapon's full
--- load. A ship group accepts one load per CFG.cooldown (30 min).
+-- A helicopter loads a naval munitions crate at a friendly base (F10 >
+-- Naval munitions; real weight, charged to the base's ammunition stock),
+-- lands on a friendly ship and stays on the deck for CFG.load_time (15 min):
+-- that delivers one rearm load, 20% of every weapon's full load. A ship group
+-- accepts one load per CFG.cooldown (30 min). Missions generated without crate
+-- data (dcsRetributionNaval) accept a 15-min stay without a crate.
 --
 -- How a load reaches the ship depends on the DCS version:
 --   * If DCS offers trigger.action.setAmmo, the load is added straight away
@@ -423,6 +426,166 @@ local function rearmLine(groupName, group)
     return text
 end
 
+-- ── Naval munitions crates ──────────────────────────────────────────────────
+-- dcsRetributionNaval (written by Retribution): {crateKg, bases = {{id, name,
+-- x, z, radius, crates}}}. A helicopter loads one crate at a friendly base
+-- (F10 > Naval munitions); it adds real weight (internal cargo) and is used
+-- up by a 15-min stay on a ship's deck. Retribution charges each base's
+-- ammunition stock for the crates it handed out (retribution_naval_state).
+
+SW.cargo = {}        -- [heliName] = {base = id, name = baseName}
+SW.crates = {}       -- [baseId] = crates left at that base this mission
+SW.report = {}       -- [baseId] = {name, loaded, delivered}
+SW.menus = {}        -- [groupId] = true once the menu is built
+
+local function navalData()
+    return dcsRetributionNaval
+end
+
+--- True when this mission uses naval munitions crates.
+function SW.cratesInUse()
+    return navalData() ~= nil
+end
+
+local function crateKg()
+    return (navalData() and navalData().crateKg) or 500
+end
+
+local function baseAt(point)
+    local best, bestD = nil, nil
+    for _, base in ipairs((navalData() or {}).bases or {}) do
+        local dx, dz = point.x - base.x, point.z - base.z
+        local d = math.sqrt(dx * dx + dz * dz)
+        if d <= base.radius and (bestD == nil or d < bestD) then
+            best, bestD = base, d
+        end
+    end
+    return best
+end
+
+local function cratesLeft(base)
+    if SW.crates[base.id] == nil then
+        SW.crates[base.id] = base.crates or 0
+    end
+    return SW.crates[base.id]
+end
+
+local function reportFor(base)
+    local r = SW.report[base.id]
+    if not r then
+        r = {name = base.name, loaded = 0, delivered = 0}
+        SW.report[base.id] = r
+    end
+    return r
+end
+
+local function setWeight(heli, kg)
+    pcall(trigger.action.setUnitInternalCargo, heli:getName(), kg)
+end
+
+function retribution_naval_state()
+    local out = {}
+    for id, r in pairs(SW.report) do
+        out[#out + 1] = {base = id, name = r.name, loaded = r.loaded, delivered = r.delivered}
+    end
+    return out
+end
+
+local function groupMessage(groupId, text)
+    trigger.action.outTextForGroup(groupId, "[Ship Weapons] " .. text, 15)
+end
+
+local function leadHeli(groupName)
+    local g = Group.getByName(groupName)
+    if not g or not g:isExist() then return nil end
+    return g:getUnits()[1]
+end
+
+function SW.loadCrate(groupName)
+    local heli = leadHeli(groupName)
+    if not heli then return end
+    local gid = heli:getGroup():getID()
+    local name = heli:getName()
+    if SW.cargo[name] then
+        return groupMessage(gid, "You already carry a naval munitions crate from " .. SW.cargo[name].name .. ".")
+    end
+    if heli:inAir() then
+        return groupMessage(gid, "Land at a friendly base to load a naval munitions crate.")
+    end
+    local base = baseAt(heli:getPoint())
+    if not base then
+        return groupMessage(gid, "No friendly base here - naval munitions are loaded at friendly bases.")
+    end
+    if cratesLeft(base) <= 0 then
+        return groupMessage(gid, base.name .. " has no ammunition left for naval munitions crates.")
+    end
+    SW.crates[base.id] = cratesLeft(base) - 1
+    reportFor(base).loaded = reportFor(base).loaded + 1
+    SW.cargo[name] = {base = base.id, name = base.name}
+    setWeight(heli, crateKg())
+    groupMessage(gid, string.format(
+        "Naval munitions crate loaded at %s (%d kg, %d left). Land on a friendly ship and stay %d min on the deck.",
+        base.name, crateKg(), SW.crates[base.id], minutes(CFG.load_time)))
+end
+
+function SW.returnCrate(groupName)
+    local heli = leadHeli(groupName)
+    if not heli then return end
+    local gid = heli:getGroup():getID()
+    local cargo = SW.cargo[heli:getName()]
+    if not cargo then
+        return groupMessage(gid, "You carry no naval munitions crate.")
+    end
+    local base = (not heli:inAir()) and baseAt(heli:getPoint()) or nil
+    if not base or base.id ~= cargo.base then
+        return groupMessage(gid, "Land at " .. cargo.name .. " to return the crate.")
+    end
+    SW.crates[base.id] = cratesLeft(base) + 1
+    reportFor(base).loaded = reportFor(base).loaded - 1
+    SW.cargo[heli:getName()] = nil
+    setWeight(heli, 0)
+    groupMessage(gid, "Naval munitions crate returned to " .. base.name .. ".")
+end
+
+function SW.crateStatus(groupName)
+    local heli = leadHeli(groupName)
+    if not heli then return end
+    local gid = heli:getGroup():getID()
+    local cargo = SW.cargo[heli:getName()]
+    local lines = {}
+    lines[#lines + 1] = cargo and ("Aboard: 1 naval munitions crate from " .. cargo.name)
+        or "Aboard: no naval munitions crate"
+    local base = baseAt(heli:getPoint())
+    if base then
+        lines[#lines + 1] = string.format("%s: %d crate(s) available", base.name, cratesLeft(base))
+    end
+    groupMessage(gid, table.concat(lines, "\n"))
+end
+
+--- Crate delivered: the helicopter is empty again.
+local function crateUsed(heli)
+    local cargo = SW.cargo[heli:getName()]
+    if not cargo then return end
+    local r = SW.report[cargo.base]
+    if r then r.delivered = r.delivered + 1 end
+    SW.cargo[heli:getName()] = nil
+    setWeight(heli, 0)
+end
+
+function SW.addCrateMenu(unit)
+    if not SW.cratesInUse() then return end
+    local group = unit:getGroup()
+    if not group then return end
+    local gid = group:getID()
+    if SW.menus[gid] then return end
+    SW.menus[gid] = true
+    local gname = group:getName()
+    local menu = missionCommands.addSubMenuForGroup(gid, "Naval munitions")
+    missionCommands.addCommandForGroup(gid, string.format("Load crate (%d kg)", crateKg()), menu, SW.loadCrate, gname)
+    missionCommands.addCommandForGroup(gid, "Return crate to base", menu, SW.returnCrate, gname)
+    missionCommands.addCommandForGroup(gid, "Crate status", menu, SW.crateStatus, gname)
+end
+
 -- ── Helicopter loads ────────────────────────────────────────────────────────
 
 local function toPilot(heli, text)
@@ -462,6 +625,7 @@ local function pollSession(heliName, time)
         toPilot(heli, "[Ship Weapons] Rearm load not delivered: " .. why)
         return nil
     end
+    crateUsed(heli)
     toPilot(heli, SW.deliverLoad(session.group))
     return nil
 end
@@ -480,10 +644,15 @@ function SW.onLanding(heli, place)
         toPilot(heli, "[Ship Weapons] " .. why)
         return
     end
+    if SW.cratesInUse() and not SW.cargo[heliName] then
+        toPilot(heli, "[Ship Weapons] Bring a naval munitions crate to rearm " .. groupName
+            .. ": load one at a friendly base (F10 > Naval munitions).")
+        return
+    end
     SW.sessions[heliName] = {ship = shipName, group = groupName, started = timer.getTime()}
     local mean = SW.ratio(group)
     toPilot(heli, string.format(
-        "[Ship Weapons] Rearming %s (%d%%): stay on the deck for %d min to deliver one load.",
+        "[Ship Weapons] Rearming %s (%d%%): stay on the deck for %d min to unload the crate.",
         groupName, pct(mean), minutes(CFG.load_time)))
     timer.scheduleFunction(pollSession, heliName, timer.getTime() + CFG.poll)
 end
@@ -500,6 +669,14 @@ function handler:onEvent(event)
             local placeDesc = event.place:getDesc()
             if not placeDesc or placeDesc.category ~= Airbase.Category.SHIP then return end
             SW.onLanding(unit, event.place)
+        elseif event.id == world.event.S_EVENT_BIRTH
+            or event.id == world.event.S_EVENT_PLAYER_ENTER_UNIT then
+            local desc = unit.getDesc and unit:getDesc()
+            if desc and desc.category == Unit.Category.HELICOPTER
+                and unit.getPlayerName and unit:getPlayerName()
+                and unit:getCoalition() == coalition.side.BLUE then
+                SW.addCrateMenu(unit)
+            end
         elseif event.id == world.event.S_EVENT_TAKEOFF
             or event.id == world.event.S_EVENT_DEAD
             or event.id == world.event.S_EVENT_CRASH
@@ -507,6 +684,9 @@ function handler:onEvent(event)
             or event.id == world.event.S_EVENT_PLAYER_LEAVE_UNIT then
             local name = unit:getName()
             SW.landed[name] = nil
+            if event.id ~= world.event.S_EVENT_TAKEOFF then
+                SW.cargo[name] = nil  -- crate lost with the helicopter
+            end
             if SW.sessions[name] and event.id == world.event.S_EVENT_TAKEOFF then
                 toPilot(unit, "[Ship Weapons] Rearm load cancelled - you took off.")
             end

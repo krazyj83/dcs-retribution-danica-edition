@@ -195,6 +195,25 @@ class MissionGenerator:
         except Exception:
             logging.exception("MissionGenerator: transfer cargo placement failed")
 
+        # Naval munitions crates for rearming ships at sea (ship_weapons plugin).
+        try:
+            from dcs.action import DoScript
+            from dcs.translation import String
+            from dcs.triggers import TriggerStart
+
+            from game.logistics.naval_munitions import script_data
+            from game.missiongenerator.transfercargogenerator import to_lua
+
+            trigger = TriggerStart(comment="Set DCS Retribution naval munitions data")
+            trigger.add_action(
+                DoScript(
+                    String(f"dcsRetributionNaval = {to_lua(script_data(self.game))}")
+                )
+            )
+            self.mission.triggerrules.triggers.append(trigger)
+        except Exception:
+            logging.exception("MissionGenerator: naval munitions data failed")
+
     def _generate_logistics_flights(self) -> None:
         """
         Find all LOGISTICS-typed flights in the blue ATO and generate

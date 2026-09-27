@@ -35,18 +35,25 @@ function run_until(t)
   now = t
 end
 env = {info = function() end}
-pilot_msgs, side_msgs = {}, {}
+pilot_msgs, side_msgs, cargo_kg = {}, {}, {}
 trigger = {action = {
   outTextForGroup = function(gid, text) table.insert(pilot_msgs, text) end,
   outTextForCoalition = function(side, text) table.insert(side_msgs, text) end,
+  setUnitInternalCargo = function(name, kg) cargo_kg[name] = kg end,
 }}
+group_cmds = {}
 missionCommands = {
   addSubMenuForCoalition = function() return {} end,
   addCommandForCoalition = function() end,
+  addSubMenuForGroup = function() return {} end,
+  addCommandForGroup = function(gid, name, parent, fn, arg)
+    group_cmds[name] = function() fn(arg) end
+  end,
 }
 coalition = {side = {RED = 1, BLUE = 2}}
 world = {event = {S_EVENT_LAND = 4, S_EVENT_TAKEOFF = 3, S_EVENT_DEAD = 8,
-  S_EVENT_CRASH = 5, S_EVENT_PILOT_DEAD = 9, S_EVENT_PLAYER_LEAVE_UNIT = 21}}
+  S_EVENT_CRASH = 5, S_EVENT_PILOT_DEAD = 9, S_EVENT_PLAYER_LEAVE_UNIT = 21,
+  S_EVENT_BIRTH = 15, S_EVENT_PLAYER_ENTER_UNIT = 20}}
 handlers = {}
 world.addEventHandler = function(h) table.insert(handlers, h) end
 function fire(ev) for _, h in ipairs(handlers) do h:onEvent(ev) end end
@@ -97,12 +104,21 @@ function make_ship_group(gname, side, ammo_list)
 end
 
 function make_heli(name, side)
-  local g = {}
+  local g = {name = name .. "-group"}
   function g:getID() return 99 end
+  function g:getName() return self.name end
+  function g:isExist() return true end
   local h = new_unit(name, side, Unit.Category.HELICOPTER, 0, 10)
+  function g:getUnits() return {h} end
   h.group = g
+  groups[g.name] = nil  -- not a ship group
+  heli_groups = heli_groups or {}
+  heli_groups[g.name] = g
+  function h:getPlayerName() return "Pilot" end
   return h
 end
+local _group_by_name = Group.getByName
+Group.getByName = function(n) return (heli_groups and heli_groups[n]) or _group_by_name(n) end
 
 function ship_place(u)
   return {getName = function() return u.name end,
@@ -298,4 +314,87 @@ check(string.find(text, "Rearm: loads 0/3 delivered - READY", 1, true), "rearm l
 g.units[1].ammo = 0
 text = ShipWeapons.statusText("Frigate-1")
 check(string.find(text, "0 / 100", 1, true), "empty weapon still listed")
+""")
+
+
+CRATES = r"""
+dcsRetributionNaval = {crateKg = 500, bases = {
+  {id = "base-1", name = "Hatzor", x = 50000, z = 0, radius = 2500, crates = 1},
+}}
+"""
+
+
+def _crate_setup(extra: str = "") -> str:
+    return CRATES + SETUP + r"""
+fire({id = world.event.S_EVENT_BIRTH, initiator = heli})
+function at_base() heli.x = 50000; heli.z = 0; heli.air = false end
+function at_ship() heli.x = 10; heli.z = 0; heli.air = false end
+""" + extra
+
+
+def test_crate_needed_to_rearm_when_crates_are_in_use() -> None:
+    _run(_crate_setup() + r"""
+at_ship()
+land(heli, ship)
+check(has_msg(pilot_msgs, "Bring a naval munitions crate"), "crate required")
+check(ShipWeapons.sessions["Seahawk"] == nil, "no unload without a crate")
+""")
+
+
+def test_crate_loaded_at_base_is_used_up_on_the_ship() -> None:
+    _run(_crate_setup() + r"""
+at_base()
+group_cmds["Load crate (500 kg)"]()
+check(has_msg(pilot_msgs, "crate loaded at Hatzor"), "loaded")
+check(cargo_kg["Seahawk"] == 500, "real weight")
+group_cmds["Load crate (500 kg)"]()
+check(has_msg(pilot_msgs, "already carry"), "one crate at a time")
+
+at_ship()
+land(heli, ship)
+check(has_msg(pilot_msgs, "stay on the deck for 15 min to unload the crate"), "unloading")
+run_until(timer.getTime() + 15 * 60 + 20)
+check(has_msg(pilot_msgs, "load delivered (1/3)"), "load counted")
+check(cargo_kg["Seahawk"] == 0, "crate gone")
+check(ShipWeapons.cargo["Seahawk"] == nil, "nothing aboard")
+
+local state = retribution_naval_state()
+check(#state == 1 and state[1].loaded == 1 and state[1].delivered == 1, "reported")
+check(state[1].base == "base-1", "charged to the pickup base")
+""")
+
+
+def test_base_runs_out_of_crates_and_returned_crates_go_back() -> None:
+    _run(_crate_setup() + r"""
+at_base()
+group_cmds["Load crate (500 kg)"]()
+group_cmds["Return crate to base"]()
+check(has_msg(pilot_msgs, "returned to Hatzor"), "returned")
+check(cargo_kg["Seahawk"] == 0, "weight removed")
+check(retribution_naval_state()[1].loaded == 0, "not charged")
+group_cmds["Load crate (500 kg)"]()   -- the only crate again
+local other = make_heli("Knighthawk", coalition.side.BLUE)
+other.x = 50000
+ShipWeapons.menus[99] = nil
+fire({id = world.event.S_EVENT_BIRTH, initiator = other})
+group_cmds["Load crate (500 kg)"]()
+check(has_msg(pilot_msgs, "no ammunition left"), "base empty")
+""")
+
+
+def test_crate_is_lost_with_the_helicopter() -> None:
+    _run(_crate_setup() + r"""
+at_base()
+group_cmds["Load crate (500 kg)"]()
+fire({id = world.event.S_EVENT_CRASH, initiator = heli})
+check(ShipWeapons.cargo["Seahawk"] == nil, "crate lost")
+local state = retribution_naval_state()
+check(state[1].loaded == 1 and state[1].delivered == 0, "charged, not delivered")
+""")
+
+
+def test_no_crate_needed_outside_retribution() -> None:
+    _run(SETUP + r"""
+land(heli, ship)
+check(has_msg(pilot_msgs, "stay on the deck"), "old behaviour without crate data")
 """)

@@ -137,6 +137,10 @@ class StateData:
     #: (see game/logistics/crate_delivery.py).
     cargo_crates: List[dict[str, Any]] = field(default_factory=list)
 
+    #: Naval munitions crates per base: loaded and delivered to ships
+    #: (see game/logistics/naval_munitions.py).
+    naval_munitions: List[dict[str, Any]] = field(default_factory=list)
+
     @classmethod
     def from_json(cls, data: Dict[str, Any], unit_map: UnitMap) -> StateData:
         def clean_unit_list(unit_list: List[Any]) -> List[str]:
@@ -176,6 +180,7 @@ class StateData:
             destroyed_statics=data.get("destroyed_objects_positions", []),
             base_capture_events=data.get("base_capture_events", []),
             cargo_crates=list(data.get("cargo_crates") or []),
+            naval_munitions=list(data.get("naval_munitions") or []),
         )
 
 
