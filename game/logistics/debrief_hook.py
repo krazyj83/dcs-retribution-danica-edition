@@ -29,9 +29,20 @@ FUEL_LOSS_PER_DEPOT_UNIT = 150.0
 AMMO_LOSS_PER_DEPOT_UNIT = 100.0
 SUPPLY_LOSS_PER_DEPOT_UNIT = 50.0
 
-# Ammunition lost when a SAM site is knocked out (no working air defence left).
-# Charged once per site, however many of its vehicles were destroyed.
-SAM_SITE_AMMO_LOSS = 100.0
+# Ammunition lost when a SAM site is knocked out (no working air defence left),
+# charged once per site and scaled by the site's size (all its vehicles,
+# launchers, radars and support trucks):
+#   SA-13 pair (2) 20 | SA-6 battery (8) 80 | Hawk (12) 120 | Patriot (17) 170
+SAM_SITE_AMMO_PER_UNIT = 10.0
+SAM_SITE_AMMO_MIN = 20.0
+SAM_SITE_AMMO_MAX = 200.0
+
+
+def sam_site_ammo_loss(unit_count: int) -> float:
+    """Ammunition a knocked-out SAM site of this many vehicles costs its base."""
+    loss = SAM_SITE_AMMO_PER_UNIT * max(0, unit_count)
+    return min(SAM_SITE_AMMO_MAX, max(SAM_SITE_AMMO_MIN, loss))
+
 
 # Salvage stock added when blue captures a red base
 CAPTURE_SALVAGE_STOCK = 200.0
@@ -115,12 +126,14 @@ def update_logistics_from_debriefing(debriefing: "Debriefing") -> List[str]:
             wh = logistics.get_warehouse(sam_cp_id)
             if wh is None:
                 continue
+            size = int(getattr(tgo, "unit_count", 0) or 0)
             _reduce(
                 wh,
                 WarehouseCategory.AMMUNITION,
-                SAM_SITE_AMMO_LOSS,
+                sam_site_ammo_loss(size),
                 log,
-                f"{cp.name}: SAM site {tgo.name} knocked out, munitions lost",
+                f"{cp.name}: SAM site {tgo.name} ({size} vehicles) knocked out, "
+                "munitions lost",
             )
         except Exception as e:
             logger.debug(f"Logistics debrief: error processing SAM site loss: {e}")
