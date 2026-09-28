@@ -124,6 +124,12 @@ class Campaign:
             data.get("settings", {}),
         )
 
+    @property
+    def use_placed_units(self) -> bool:
+        """``use_placed_units: true`` in the campaign yaml: spawn the vehicle and
+        ship groups exactly as placed in the miz instead of faction layouts."""
+        return bool(self.data.get("use_placed_units", False))
+
     @classmethod
     def register_faction(
         cls, filename: str, player_faction: dict[str, Any]

@@ -86,6 +86,7 @@ class NewGameWizard(QtWidgets.QWizard):
             tgo_config=campaign.load_ground_forces_config(),
             carrier_config=campaign.load_carrier_config(),
             squadrons_start_full=self.field("squadrons_start_full"),
+            use_placed_units=campaign.use_placed_units,
         )
         mod_settings = ModSettings(
             f9f_panther=self.field("f9f_panther"),

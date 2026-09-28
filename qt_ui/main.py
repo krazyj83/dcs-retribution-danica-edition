@@ -319,6 +319,7 @@ def create_game(
             no_enemy_navy=False,
             tgo_config=campaign.load_ground_forces_config(),
             carrier_config=campaign.load_carrier_config(),
+            use_placed_units=campaign.use_placed_units,
         ),
         ModSettings(
             a4_skyhawk=False,

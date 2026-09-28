@@ -527,6 +527,19 @@ class Settings:
             "extremely incomplete so does not affect all weapons."
         ),
     )
+    advanced_iads_auto: bool = boolean_option(
+        "Build advanced IADS automatically (new campaigns)",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=GENERAL_SECTION,
+        default=True,
+        detail=(
+            "When a new campaign is generated and its author did not set up an "
+            "advanced IADS, place a comms tower for each cluster of SAM/EWR sites, "
+            "power plants within range of them and a command center at each "
+            "side's rear base, and link the network by range for Skynet. "
+            "Has no effect on campaigns already in progress."
+        ),
+    )
     motorpool_enabled: bool = boolean_option(
         "Spawn strikeable motorpool reserves",
         page=CAMPAIGN_MANAGEMENT_PAGE,

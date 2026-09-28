@@ -190,7 +190,7 @@ class IadsNetwork:
         if self.advanced_iads and IadsRole.for_category(tgo.category).is_comms_or_power:
             return self._update_iads_comms_and_power(tgo, events)
         # Remove existing nodes for the given tgo
-        for cn in self.nodes:
+        for cn in list(self.nodes):
             if cn.group.ground_object == tgo:
                 self.nodes.remove(cn)
                 for cID in cn.connections:

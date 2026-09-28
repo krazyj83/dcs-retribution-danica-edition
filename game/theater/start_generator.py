@@ -4,15 +4,19 @@ import logging
 import random
 from dataclasses import dataclass
 from datetime import datetime, time
-from typing import List, Optional
+import math
+from typing import List, Optional, Sequence, Type
 
 import dcs.statics
+from dcs.mapping import Point
+from dcs.unittype import UnitType as DcsUnitType
 from dcs.countries import country_dict
 
 from game import Game
 from game.factions.faction import Faction
 from game.naming import namegen
 from game.scenery_group import SceneryGroup
+from game.theater.presetlocation import PlacedUnit
 from game.theater import (
     PointWithHeading,
     PresetLocation,
@@ -20,10 +24,19 @@ from game.theater import (
     EssexCarrier,
 )
 from game.theater.controlpoint import warn_if_motorpool_inside_capture_zone
+from game.theater.iadsnetwork import autoiads
 from game.theater.theatergroundobject import (
     BuildingGroundObject,
+    CoastalSiteGroundObject,
+    EwrGroundObject,
     IadsBuildingGroundObject,
+    IadsGroundObject,
+    MissileSiteGroundObject,
     MotorpoolGroundObject,
+    SamGroundObject,
+    ShipGroundObject,
+    TheaterGroundObject,
+    VehicleGroupGroundObject,
 )
 from game.utils import Heading, escape_string_for_lua
 from game.version import VERSION
@@ -68,7 +81,10 @@ class GeneratorSettings:
     no_enemy_navy: bool
     tgo_config: TgoConfig
     carrier_config: CampaignCarrierConfig
-    squadrons_start_full: bool
+    squadrons_start_full: bool = False
+    #: Spawn vehicle and ship groups exactly as placed in the campaign miz
+    #: (campaign yaml ``use_placed_units: true``).
+    use_placed_units: bool = False
 
 
 @dataclass
@@ -137,6 +153,76 @@ def apply_default_player_stances(theater: ConflictTheater, settings: Settings) -
         control_point.seed_front_line_stances(settings.default_front_line_stance)
 
 
+def placed_unit_dcs_type(type_id: str) -> Optional[Type[DcsUnitType]]:
+    """The DCS vehicle or ship type for a placed unit, if Retribution has data
+    for it (resources/units/ground_units or ships)."""
+    from dcs.ships import ship_map
+    from dcs.vehicles import vehicle_map
+
+    from game.dcs.groundunittype import GroundUnitType
+
+    if type_id in vehicle_map:
+        vehicle = vehicle_map[type_id]
+        if next(GroundUnitType.for_dcs_type(vehicle), None) is not None:
+            return vehicle
+        return None
+    if type_id in ship_map:
+        ship = ship_map[type_id]
+        if next(ShipUnitType.for_dcs_type(ship), None) is not None:
+            return ship
+    return None
+
+
+def has_air_defence(placed_units: Sequence[PlacedUnit]) -> bool:
+    from dcs.vehicles import AirDefence
+
+    air_defence = {
+        t.id
+        for t in vars(AirDefence).values()
+        if isinstance(t, type) and issubclass(t, DcsUnitType)
+    }
+    return any(unit.type_id in air_defence for unit in placed_units)
+
+
+def placed_ground_object(
+    name: str, location: PresetLocation, cp: ControlPoint, task: GroupTask
+) -> TheaterGroundObject:
+    """The ground object class Retribution uses for this kind of site."""
+    if task == GroupTask.EARLY_WARNING_RADAR:
+        return EwrGroundObject(name, location, cp)
+    if task in (GroupTask.LORAD, GroupTask.MERAD, GroupTask.SHORAD, GroupTask.AAA):
+        return SamGroundObject(name, location, cp, task)
+    if task == GroupTask.NAVY:
+        return ShipGroundObject(name, location, cp)
+    if task == GroupTask.MISSILE:
+        return MissileSiteGroundObject(name, location, cp)
+    if task == GroupTask.COASTAL:
+        return CoastalSiteGroundObject(name, location, cp)
+    return VehicleGroupGroundObject(name, location, cp, task)
+
+
+def auto_iads_active(game: Game) -> bool:
+    """True when the game should place the advanced IADS buildings itself.
+
+    Only for new campaigns with the setting on, and only when the campaign
+    author did not set up IADS: no iads_config and no IADS buildings placed in
+    the .miz (see game/theater/iadsnetwork/autoiads.py).
+    """
+    if not getattr(game.settings, "advanced_iads_auto", False):
+        return False
+    if game.theater.iads_network.iads_config:
+        return False
+    for cp in game.theater.controlpoints:
+        presets = cp.preset_locations
+        if (
+            presets.iads_command_center
+            or presets.iads_connection_node
+            or presets.iads_power_source
+        ):
+            return False
+    return True
+
+
 class GameGenerator:
     def __init__(
         self,
@@ -181,6 +267,10 @@ class GameGenerator:
             # is valid here. Runs only for new games -- never on save load.
             apply_default_player_stances(self.theater, self.settings)
             GroundObjectGenerator(game, self.generator_settings).generate()
+            if auto_iads_active(game):
+                # Buildings were placed by GroundObjectGenerator; the network is
+                # built from them by range in Game.begin_turn_0.
+                game.theater.iads_network.advanced_iads = True
         game.settings.version = VERSION
         return game
 
@@ -258,6 +348,66 @@ class ControlPointGroundObjectGenerator:
         )
         self.control_point.connected_objectives.append(ground_object)
 
+    def generate_placed_group(self, location: PresetLocation, task: GroupTask) -> bool:
+        """Spawn the group exactly as placed in the campaign miz.
+
+        Only when the campaign sets ``use_placed_units: true``. Returns False
+        (and the caller falls back to the faction's units) when the location
+        has no placed units or a placed type has no Retribution unit data, which
+        costs, repair and the debrief need.
+        """
+        if not self.generator_settings.use_placed_units or not location.placed_units:
+            return False
+        cp = self.control_point
+        if cp.captured.is_neutral:
+            return False
+        dcs_types = []
+        for placed in location.placed_units:
+            dcs_type = placed_unit_dcs_type(placed.type_id)
+            if dcs_type is None:
+                logging.warning(
+                    f"{location.original_name}: no Retribution data for "
+                    f"{placed.type_id}; using {self.faction_name} units instead"
+                )
+                return False
+            dcs_types.append(dcs_type)
+
+        name = namegen.random_objective_name()
+        ground_object = placed_ground_object(name, location, cp, task)
+        terrain = location._terrain
+        units = []
+        for placed, dcs_type in zip(location.placed_units, dcs_types):
+            unit = TheaterUnit(
+                self.game.next_unit_id(),
+                placed.name,
+                dcs_type,
+                PointWithHeading.from_point(
+                    Point(placed.x, placed.y, terrain),
+                    Heading.from_degrees(placed.heading),
+                ),
+                ground_object,
+                fixed_pos=True,
+                fixed_hdg=True,
+            )
+            unit_type = unit.unit_type
+            unit.name = escape_string_for_lua(
+                unit_type.variant_id if unit_type else dcs_type.name
+            )
+            units.append(unit)
+        group = TheaterGroup.from_template(
+            self.game.next_group_id(), f"{name} (Placed)", units, ground_object
+        )
+        if isinstance(ground_object, (IadsGroundObject, ShipGroundObject)):
+            group = IadsGroundGroup.from_group(group)
+            group.iads_role = IadsRole.for_task(task)
+        ground_object.groups.append(group)
+        cp.connected_objectives.append(ground_object)
+        logging.info(
+            f"Spawned {location.original_name} at {cp.name} as placed "
+            f"({len(units)} units)"
+        )
+        return True
+
     def generate_navy(self) -> None:
         if self.control_point.captured.is_neutral:
             return
@@ -268,6 +418,8 @@ class ControlPointGroundObjectGenerator:
         if self.control_point.captured.is_red and skip_enemy_navy:
             return
         for position in self.control_point.preset_locations.ships:
+            if self.generate_placed_group(position, GroupTask.NAVY):
+                continue
             unit_group = self.armed_forces.random_group_for_task(GroupTask.NAVY)
             if not unit_group:
                 logging.warning(f"{self.faction_name} has no ForceGroup for Navy")
@@ -486,6 +638,8 @@ class AirbaseGroundObjectGenerator(ControlPointGroundObjectGenerator):
 
     def generate_armor_groups(self) -> None:
         for position in self.control_point.preset_locations.armor_groups:
+            if self.generate_placed_group(position, GroupTask.BASE_DEFENSE):
+                continue
             unit_group = self.get_unit_group_for_task(position, GroupTask.BASE_DEFENSE)
             if not unit_group:
                 logging.error(f"{self.faction_name} has no ForceGroup for Armor")
@@ -516,6 +670,16 @@ class AirbaseGroundObjectGenerator(ControlPointGroundObjectGenerator):
         all other preset locations work — the miz unit is only a position marker.
         """
         for position in self.control_point.preset_locations.custom_groups:
+            if self.generator_settings.use_placed_units and has_air_defence(
+                position.placed_units
+            ):
+                logging.warning(
+                    f"{position.original_name} has air defence units but no SAM-/"
+                    "AAA-/EWR- name prefix: it spawns as placed, but Retribution "
+                    "and Skynet treat it as an armour group"
+                )
+            if self.generate_placed_group(position, GroupTask.BASE_DEFENSE):
+                continue
             unit_group = self.armed_forces.random_group_for_task(GroupTask.BASE_DEFENSE)
             if not unit_group:
                 logging.warning(
@@ -549,6 +713,8 @@ class AirbaseGroundObjectGenerator(ControlPointGroundObjectGenerator):
 
     def generate_ewrs(self) -> None:
         for position in self.control_point.preset_locations.ewrs:
+            if self.generate_placed_group(position, GroupTask.EARLY_WARNING_RADAR):
+                continue
             unit_group = self.armed_forces.random_group_for_task(
                 GroupTask.EARLY_WARNING_RADAR
             )
@@ -594,6 +760,8 @@ class AirbaseGroundObjectGenerator(ControlPointGroundObjectGenerator):
             self.generate_building_at(GroupTask.FACTORY, position)
 
     def generate_aa_at(self, location: PresetLocation, tasks: list[GroupTask]) -> None:
+        if self.generate_placed_group(location, tasks[0]):
+            return
         for task in tasks:
             unit_group = self.get_unit_group_for_task(location, task)
             if unit_group:
@@ -619,6 +787,75 @@ class AirbaseGroundObjectGenerator(ControlPointGroundObjectGenerator):
             self.generate_building_at(GroupTask.COMMS, iads_element)
         for iads_element in self.control_point.preset_locations.iads_power_source:
             self.generate_building_at(GroupTask.POWER, iads_element)
+        if auto_iads_active(self.game) and not self.control_point.captured.is_neutral:
+            self.generate_auto_iads_buildings()
+
+    def generate_auto_iads_buildings(self) -> None:
+        """Comms towers and power plants for this base's SAM and EWR sites."""
+        from game.theater.iadsnetwork.iadsrole import IadsRole
+
+        cp = self.control_point
+        sites = [
+            tgo for tgo in cp.connected_objectives if isinstance(tgo, IadsGroundObject)
+        ]
+        if not sites:
+            return
+        sites.sort(key=lambda t: t.position.distance_to_point(cp.position))
+        placements = [
+            (
+                GroupTask.COMMS,
+                "Comms",
+                autoiads.CLUSTER_RADIUS_M,
+                IadsRole.CONNECTION_NODE.connection_range.meters,
+            ),
+            (
+                GroupTask.POWER,
+                "Power",
+                autoiads.POWER_CLUSTER_RADIUS_M,
+                IadsRole.POWER_SOURCE.connection_range.meters,
+            ),
+        ]
+        for task, label, radius, reach in placements:
+            groups = autoiads.cluster(sites, lambda t: t.position, radius)
+            for number, group in enumerate(groups, start=1):
+                wanted = autoiads.centroid(t.position for t in group)
+                if not self.generate_auto_iads_building(
+                    task,
+                    f"Auto IADS {label} {cp.name} {number}",
+                    wanted,
+                    reach=[t.position for t in group],
+                    reach_m=reach - autoiads.MIN_DISTANCE_FROM_OBJECTS_M,
+                ):
+                    # The faction has no such building: skip the rest too.
+                    break
+
+    def generate_auto_iads_building(
+        self,
+        task: GroupTask,
+        name: str,
+        wanted: Point,
+        reach: Sequence[Point] = (),
+        reach_m: float = math.inf,
+    ) -> bool:
+        """Place one automatic IADS building. False if the faction has none."""
+        theater = self.game.theater
+        spot = autoiads.find_spot(
+            wanted,
+            self.control_point.position,
+            [t.position for t in theater.ground_objects],
+            theater.is_on_land,
+            reach,
+            reach_m,
+        )
+        if spot is None:
+            logging.warning(f"{name}: no free spot on land, not placed")
+            return True
+        try:
+            self.generate_building_at(task, PresetLocation(name, spot))
+        except RuntimeError as e:
+            logging.warning(f"{name}: {e}")
+            return False
+        return True
 
     def generate_scenery_sites(self) -> None:
         presets = self.control_point.preset_locations
@@ -667,6 +904,8 @@ class AirbaseGroundObjectGenerator(ControlPointGroundObjectGenerator):
 
     def generate_missile_sites(self) -> None:
         for position in self.control_point.preset_locations.missile_sites:
+            if self.generate_placed_group(position, GroupTask.MISSILE):
+                continue
             unit_group = self.armed_forces.random_group_for_task(GroupTask.MISSILE)
             if not unit_group:
                 logging.warning(f"{self.faction_name} has no ForceGroup for Missile")
@@ -677,6 +916,8 @@ class AirbaseGroundObjectGenerator(ControlPointGroundObjectGenerator):
 
     def generate_coastal_sites(self) -> None:
         for position in self.control_point.preset_locations.coastal_defenses:
+            if self.generate_placed_group(position, GroupTask.COASTAL):
+                continue
             unit_group = self.armed_forces.random_group_for_task(GroupTask.COASTAL)
             if not unit_group:
                 logging.warning(f"{self.faction_name} has no ForceGroup for Coastal")
@@ -734,6 +975,35 @@ class GroundObjectGenerator:
         for control_point in control_points:
             if not self.generate_for_control_point(control_point):
                 self.game.theater.controlpoints.remove(control_point)
+        if auto_iads_active(self.game):
+            self.generate_auto_command_centers()
+
+    def generate_auto_command_centers(self) -> None:
+        """One command center per coalition, at its base furthest from the enemy
+        that has SAM or EWR sites (automatic advanced IADS)."""
+        control_points = self.game.theater.controlpoints
+        for player in (Player.BLUE, Player.RED):
+            candidates = [
+                cp
+                for cp in control_points
+                if cp.captured == player
+                and not cp.is_fleet
+                and not isinstance(cp, OffMapSpawn)
+                and any(isinstance(t, IadsGroundObject) for t in cp.ground_objects)
+            ]
+            if not candidates:
+                continue
+            rear = max(
+                candidates, key=lambda cp: autoiads.enemy_distance(cp, control_points)
+            )
+            generator = AirbaseGroundObjectGenerator(
+                self.game, self.generator_settings, rear
+            )
+            generator.generate_auto_iads_building(
+                GroupTask.COMMAND_CENTER,
+                f"Auto IADS Command Center {rear.name}",
+                rear.position,
+            )
 
     def generate_for_control_point(self, control_point: ControlPoint) -> bool:
         generator: ControlPointGroundObjectGenerator
