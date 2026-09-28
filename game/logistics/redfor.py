@@ -18,7 +18,8 @@ warehouse like BLUEFOR's, and it decides how many sorties REDFOR can fly:
   the map. With every depot standing a base keeps flying at its current rate;
   with half the fuel depot buildings destroyed it only gets half its fuel
   back, and its stock (and then its sorties) run down.
-* REDFOR warehouses hold RED_CAPACITY fuel and ammunition and start full: a
+* REDFOR warehouses hold RED_CAPACITY fuel, ammunition and supplies (used for
+  repairs, logistics/repairs.py) and start full: a
   busy REDFOR airfield flies 600-800 fuel worth of sorties a turn.
 * Carriers and other ships (fleet control points) are left out: they are
   resupplied at sea and their sorties are never grounded.
@@ -106,7 +107,11 @@ def ensure_red_warehouses(game: Any) -> None:
         if logistics.get_warehouse(cp.id) is None:
             warehouse = Warehouse(cp_id=cp.id, cp_name=cp.name)
             warehouse.coalition = "red"
-            for category in (WarehouseCategory.FUEL, WarehouseCategory.AMMUNITION):
+            for category in (
+                WarehouseCategory.FUEL,
+                WarehouseCategory.AMMUNITION,
+                WarehouseCategory.SUPPLIES,
+            ):
                 item = warehouse.stock[category]
                 item.capacity = item.quantity = RED_CAPACITY
             logistics.add_warehouse(warehouse)
@@ -301,6 +306,12 @@ def resupply(game: Any) -> List[str]:
         ammo_add = ammo_factor * (per_turn * AMMO_RESUPPLY_FRACTION + used_ammo)
         fuel_item.quantity = min(fuel_item.capacity, fuel_item.quantity + fuel_add)
         ammo_item.quantity = min(ammo_item.capacity, ammo_item.quantity + ammo_add)
+        # Supplies only go to repairs (logistics/repairs.py).
+        supplies_item = warehouse.stock[WarehouseCategory.SUPPLIES]
+        supplies_item.quantity = min(
+            supplies_item.capacity,
+            supplies_item.quantity + ammo_factor * per_turn * AMMO_RESUPPLY_FRACTION,
+        )
 
     line = (
         f"REDFOR resupply: {fuel_factor:.0%} of fuel used back plus "

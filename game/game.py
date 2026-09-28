@@ -351,6 +351,13 @@ class Game:
             redfor_resupply(self)
         except Exception:
             logging.exception("REDFOR resupply failed")
+        # ...and repair damaged air defence sites with it (logistics/repairs.py).
+        try:
+            from game.logistics.repairs import redfor_repair_air_defences
+
+            redfor_repair_air_defences(self, events)
+        except Exception:
+            logging.exception("REDFOR air defence repairs failed")
 
         # REDFOR AI supply convoys — creates ground transfer orders each turn
         with logged_duration("REDFOR supply planning"):

@@ -566,6 +566,18 @@ class Settings:
             "A four-ship of Su-27s uses about 190 fuel."
         ),
     )
+    redfor_repairs_air_defences: bool = boolean_option(
+        "REDFOR repairs damaged air defence sites",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=GENERAL_SECTION,
+        default=True,
+        detail=(
+            "Needs REDFOR logistics. At the end of every turn each damaged "
+            "REDFOR SAM or EWR site that still has a unit standing gets one "
+            "destroyed unit back (radars first), paid with supplies and "
+            "ammunition from its base. Sites with every unit destroyed stay down."
+        ),
+    )
     advanced_iads_auto: bool = boolean_option(
         "Build advanced IADS automatically (new campaigns)",
         page=CAMPAIGN_MANAGEMENT_PAGE,

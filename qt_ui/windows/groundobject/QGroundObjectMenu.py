@@ -136,9 +136,26 @@ class QGroundObjectMenu(QDialog):
                 )
 
                 if not unit.alive and unit.repairable and self.cp.captured.is_blue:
+                    from game.logistics.repairs import repair_cost, repair_shortfall
+
                     price = unit.unit_type.price if unit.unit_type else 0
-                    repair = QPushButton(f"Repair [{price}M]")
+                    supplies, ammo = repair_cost(unit)
+                    label = f"Repair [{price}M, {supplies:.0f} supplies"
+                    label += f", {ammo:.0f} ammo]" if ammo else "]"
+                    repair = QPushButton(label)
                     repair.setProperty("style", "btn-success")
+                    shortfall = repair_shortfall(self.game, unit)
+                    if shortfall:
+                        repair.setEnabled(False)
+                        repair.setToolTip(
+                            f"{shortfall} at {self.cp.name}. Resupply the base "
+                            "(Logistics window) to repair."
+                        )
+                    else:
+                        repair.setToolTip(
+                            f"Supplies and ammunition come from {self.cp.name}'s "
+                            "warehouse."
+                        )
                     repair.clicked.connect(
                         lambda u=unit, p=price: self.repair_unit(u, p)
                     )
@@ -267,8 +284,13 @@ class QGroundObjectMenu(QDialog):
             self.sell_all_button.setText("Disband (+$" + str(self.total_value) + "M)")
 
     def repair_unit(self, unit, price):
+        from game.logistics.repairs import charge_repair, repair_shortfall
+
+        if repair_shortfall(self.game, unit) is not None:
+            return
         if self.game.blue.budget > price:
             self.game.blue.budget -= price
+            charge_repair(self.game, unit)
             unit.alive = True
             GameUpdateSignal.get_instance().updateGame(self.game)
 
