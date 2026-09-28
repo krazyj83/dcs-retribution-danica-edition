@@ -674,9 +674,11 @@ class AirbaseGroundObjectGenerator(ControlPointGroundObjectGenerator):
                 position.placed_units
             ):
                 logging.warning(
-                    f"{position.original_name} has air defence units but no SAM-/"
-                    "AAA-/EWR- name prefix: it spawns as placed, but Retribution "
-                    "and Skynet treat it as an armour group"
+                    f"{position.original_name} has air defence units of a type the "
+                    "campaign loader doesn't recognise (see campaignloader/"
+                    "markerunits.py): it spawns as placed, but Retribution and "
+                    "Skynet treat it as an armour group. Add a SAM-/AAA-/EWR- name "
+                    "prefix to fix it"
                 )
             if self.generate_placed_group(position, GroupTask.BASE_DEFENSE):
                 continue

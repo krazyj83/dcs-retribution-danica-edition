@@ -41,6 +41,9 @@ if TYPE_CHECKING:
     from dcs import Point
 
 
+from game.campaignloader.markerunits import role_for_group, warship_types
+
+
 class MizCampaignLoader:
     BLUE_COUNTRY = CombinedJointTaskForcesBlue()
     RED_COUNTRY = CombinedJointTaskForcesRed()
@@ -238,8 +241,11 @@ class MizCampaignLoader:
 
     @property
     def ships(self) -> Iterator[ShipGroup]:
+        """Ship groups: the marker type or any warship (markerunits.py)."""
+        warships = warship_types()
         for group in self.red.ship_group:
-            if group.units[0].type == self.SHIP_UNIT_TYPE:
+            unit_type = group.units[0].type
+            if unit_type == self.SHIP_UNIT_TYPE or unit_type in warships:
                 yield group
 
     @property
@@ -287,13 +293,13 @@ class MizCampaignLoader:
     @property
     def ewrs(self) -> Iterator[VehicleGroup]:
         for group in self.red.vehicle_group:
-            if group.units[0].type in self.EWR_UNIT_TYPE:
+            if group.units[0].type == self.EWR_UNIT_TYPE:
                 yield group
 
     @property
     def armor_groups(self) -> Iterator[VehicleGroup]:
         for group in itertools.chain(self.blue.vehicle_group, self.red.vehicle_group):
-            if group.units[0].type in self.ARMOR_GROUP_UNIT_TYPE:
+            if group.units[0].type == self.ARMOR_GROUP_UNIT_TYPE:
                 yield group
 
     @property
@@ -715,37 +721,14 @@ class MizCampaignLoader:
             preset_list.append(PresetLocation.from_group(group))
             claimed_vehicle_ids.add(id(group))
 
-        for group in self.red.vehicle_group:
-            if group.units[0].type == self.MISSILE_SITE_UNIT_TYPE:
-                _claim(group, "missile_sites")
-
-        for group in self.red.vehicle_group:
-            if group.units[0].type == self.COASTAL_DEFENSE_UNIT_TYPE:
-                _claim(group, "coastal_defenses")
-
-        for group in self.red.vehicle_group:
-            if group.units[0].type in self.LONG_RANGE_SAM_UNIT_TYPES:
-                _claim(group, "long_range_sams")
-
-        for group in self.red.vehicle_group:
-            if group.units[0].type in self.MEDIUM_RANGE_SAM_UNIT_TYPES:
-                _claim(group, "medium_range_sams")
-
-        for group in self.red.vehicle_group:
-            if group.units[0].type in self.SHORT_RANGE_SAM_UNIT_TYPES:
-                _claim(group, "short_range_sams")
-
-        for group in itertools.chain(self.blue.vehicle_group, self.red.vehicle_group):
-            if group.units[0].type in self.AAA_UNIT_TYPES:
-                _claim(group, "aaa")
-
-        for group in self.red.vehicle_group:
-            if group.units[0].type == self.EWR_UNIT_TYPE:
-                _claim(group, "ewrs")
-
-        for group in itertools.chain(self.blue.vehicle_group, self.red.vehicle_group):
-            if group.units[0].type == self.ARMOR_GROUP_UNIT_TYPE:
-                _claim(group, "armor_groups")
+        # Recognised unit types: see game/campaignloader/markerunits.py (the
+        # first unit decides; if it isn't recognised, the group's other units do).
+        for group in all_vehicle_groups:
+            role = role_for_group(
+                (str(unit.type) for unit in group.units), self._skip_unit_types
+            )
+            if role is not None:
+                _claim(group, role)
 
         # ── Pass 3: custom_groups catch-all ───────────────────────────────────
         # Any vehicle group not yet claimed that is also not an internal placeholder
