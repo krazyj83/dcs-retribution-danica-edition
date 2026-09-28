@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from uuid import UUID
 from dataclasses import dataclass, field
@@ -345,6 +346,9 @@ class Warehouse:
     cp_id: UUID
     cp_name: str
     stock: Dict[WarehouseCategory, StockItem] = field(default_factory=dict)
+    #: Fuel the base's sorties used in the last mission (see logistics/fuel.py).
+    #: Class-level default keeps warehouses pickled before this field loadable.
+    fuel_used_last_mission: float = 0.0
 
     def __post_init__(self) -> None:
         for cat in WarehouseCategory:
@@ -925,10 +929,15 @@ class LogisticsManager:
         """
         from game.logistics.transfer_flights import flight_for_transfer
 
+        from game.logistics.fuel import unlimited_fuel
+
         if getattr(self, "_last_attrition_turn", None) != game.turn:
             self._last_attrition_turn = game.turn
+            keep_fuel = unlimited_fuel(game)
             for wh in self._warehouses.values():
-                for item in wh.stock.values():
+                for category, item in wh.stock.items():
+                    if keep_fuel and category is WarehouseCategory.FUEL:
+                        continue
                     item.apply_consumption(item.quantity * self.ATTRITION_PER_TURN)
 
         for t in self._transfers.values():
@@ -949,10 +958,18 @@ class LogisticsManager:
         Runs after results are committed (captures applied) and before
         Game.pass_turn() clears the ATO. Returns human-readable log lines.
         """
+        from game.logistics.fuel import use_fuel_for_sorties
         from game.logistics.transfer_flights import control_point, flight_for_transfer
         from game.theater.player import Player
 
         log: List[str] = []
+        try:
+            fuel_log = use_fuel_for_sorties(game)
+        except Exception:
+            logging.getLogger(__name__).exception("Sortie fuel use failed")
+            fuel_log = []
+        self.add_debrief_log(fuel_log)
+        log.extend(fuel_log)
         for t in self._transfers.values():
             if t.status is not TransferStatus.IN_FLIGHT:
                 continue
@@ -1046,6 +1063,27 @@ class LogisticsManager:
             settle_naval(game, list(getattr(state, "naval_munitions", None) or []))
         )
         return log
+
+    # ── Base captures and the debrief log ─────────────────────────────
+
+    def on_base_captured(self, cp: Any, new_owner: Any) -> List[str]:
+        """A base changed hands: weapons to 0, fuel kept (see logistics/capture.py)."""
+        from game.logistics.capture import on_base_captured
+
+        log = on_base_captured(self, cp, new_owner)
+        self.add_debrief_log(log)
+        return log
+
+    def add_debrief_log(self, lines: List[str]) -> None:
+        """Lines for the debrief window's "Logistics & Warehouse changes"."""
+        if not hasattr(self, "_debrief_log"):
+            self._debrief_log: List[str] = []
+        self._debrief_log.extend(lines)
+
+    def pop_debrief_log(self) -> List[str]:
+        lines = list(getattr(self, "_debrief_log", []))
+        self._debrief_log = []
+        return lines
 
     def cancel_transfer(self, transfer_id: str) -> bool:
         t = self._transfers.get(transfer_id)

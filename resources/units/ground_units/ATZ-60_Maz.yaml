@@ -1,0 +1,9 @@
+class: Logistics
+description: Tractor with a 60,000 litre airfield fuel trailer. In a convoy it delivers fuel to the destination base's warehouse.
+introduced: 1980
+manufacturer: Various
+origin: USSR
+price: 5
+role: Fuel Tanker
+variants:
+  Fuel Truck ATZ-60 MAZ-7410: null

@@ -82,6 +82,10 @@ class QBaseInventory(QFrame):
             grid.addWidget(status, row, 2)
             self._bars[cat.value] = (bar, status)
         grid.setColumnStretch(1, 1)
+        # How long the fuel lasts at the last mission's rate.
+        self.fuel_label = QLabel()
+        self.fuel_label.setWordWrap(True)
+        grid.addWidget(self.fuel_label, len(WarehouseCategory), 0, 1, 3)
         layout.addWidget(stock_box)
 
         body = QHBoxLayout()
@@ -180,6 +184,8 @@ class QBaseInventory(QFrame):
                 status.setText(f"{row.level:.0%}")
             status.setStyleSheet(f"color: {color};")
 
+        self.fuel_label.setText(self._fuel_text(inv))
+
         lines = []
         if inv.incoming:
             lines.append("<b>Incoming</b>")
@@ -195,6 +201,27 @@ class QBaseInventory(QFrame):
             "(one crate per 50 ammunition)."
         )
         self._fill_weapons()
+
+    @staticmethod
+    def _fuel_text(inv: BaseInventory) -> str:
+        from game.logistics import WarehouseCategory
+
+        if inv.unlimited_fuel:
+            return "Fuel: unlimited (setting on), sorties don't use warehouse fuel."
+        fuel = next(r for r in inv.stock if r.category is WarehouseCategory.FUEL)
+        if fuel.quantity <= 0:
+            return (
+                f"<span style='color:{EMPTY}'><b>Out of fuel.</b></span> "
+                "Flights can still be planned; resupply this base."
+            )
+        if inv.fuel_turns_left is None:
+            return "Fuel: no sorties from this base last mission."
+        color = LOW if inv.fuel_turns_left < 3 else GOOD
+        return (
+            f"Fuel: last mission used {inv.fuel_used_last_mission:.0f}, "
+            f"<span style='color:{color}'><b>about {inv.fuel_turns_left:.1f} "
+            "turns left</b></span> at that rate."
+        )
 
     def _fill_weapons(self) -> None:
         self.tree.clear()

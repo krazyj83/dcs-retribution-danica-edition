@@ -213,7 +213,12 @@ class RedforSupplyPlanner:
             )
             return False
 
-        units = _select_units(source.cp, count, escort=by_road and self.escort_convoys)
+        units = _select_units(
+            source.cp,
+            count,
+            escort=by_road and self.escort_convoys,
+            fuel_trucks=by_road,
+        )
         if not units:
             return False
         sent = sum(units.values())
@@ -359,16 +364,30 @@ def _size(transfer: Any) -> int:
 
 
 def _select_units(
-    cp: ControlPoint, count: int, escort: bool = False
+    cp: ControlPoint, count: int, escort: bool = False, fuel_trucks: bool = False
 ) -> dict[GroundUnitType, int]:
     """Up to count units, taken one at a time from the most plentiful type.
 
     Gives a mixed convoy and never empties a scarce type first. With escort,
     one SHORAD/AAA vehicle (the most plentiful one) goes first, if the base
     has one; the rest of the convoy is then picked from the other types.
+    With fuel_trucks (road convoys), up to MAX_FUEL_TRUCKS_PER_CONVOY spare
+    fuel trucks ride along on top of count; otherwise fuel trucks stay home.
     """
+    from game.logistics.fuel import MAX_FUEL_TRUCKS_PER_CONVOY, is_fuel_truck
+
     pool = {t: n for t, n in cp.base.armor.items() if n > 0}
     units: dict[GroundUnitType, int] = {}
+    # Fuel trucks ride along on top of the count (up to 2), when spare.
+    trucks = 0
+    for unit_type in sorted(
+        (t for t in pool if is_fuel_truck(t)), key=lambda t: (-pool[t], str(t))
+    ):
+        take = min(pool[unit_type], MAX_FUEL_TRUCKS_PER_CONVOY - trucks)
+        if fuel_trucks and take > 0 and count > 0:
+            units[unit_type] = take
+            trucks += take
+        del pool[unit_type]
     if escort and count > 0:
         air_defence = [t for t in pool if is_air_defence(t)]
         if air_defence:

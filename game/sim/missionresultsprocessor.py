@@ -115,7 +115,14 @@ class MissionResultsProcessor:
         provided it is still on the same side as the origin. Everything else
         (still on the road when the mission ended, or the base changed hands)
         stays where it came from.
+
+        Fuel trucks move their load from the origin's warehouse to the
+        destination when they arrive, and lose it when destroyed
+        (logistics/fuel.py).
         """
+        from game.logistics.fuel import deliver_truck_fuel, lose_truck_fuel
+
+        game = getattr(debriefing, "game", None)
         dead = {loss.name for loss in debriefing.player_drawn_convoy_losses}
         arrived = set(
             getattr(debriefing.state_data, "player_convoy_arrivals", None) or []
@@ -131,6 +138,7 @@ class MissionResultsProcessor:
             if unit.name in dead:
                 logging.info(f"Player convoy {unit.unit_type} destroyed from {origin}")
                 origin.base.armor[unit.unit_type] -= 1
+                lose_truck_fuel(game, origin, unit.unit_type)
                 continue
             destination = unit.destination
             if destination is origin or destination.captured != origin.captured:
@@ -143,6 +151,7 @@ class MissionResultsProcessor:
                 continue
             origin.base.armor[unit.unit_type] -= 1
             destination.base.commission_units({unit.unit_type: 1})
+            deliver_truck_fuel(game, origin, destination, unit.unit_type)
             logging.info(
                 f"Player convoy delivered {unit.unit_type} from {origin} "
                 f"to {destination}"

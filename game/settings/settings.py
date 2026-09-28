@@ -527,6 +527,19 @@ class Settings:
             "extremely incomplete so does not affect all weapons."
         ),
     )
+    logistics_unlimited_fuel: bool = boolean_option(
+        "Unlimited warehouse fuel",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=GENERAL_SECTION,
+        default=False,
+        detail=(
+            "When on, sorties don't use their base's warehouse fuel and fuel is "
+            "not lost to the 1% per turn attrition. Destroyed fuel depots still "
+            "cost fuel. When off, every BLUEFOR aircraft in a mission uses fuel "
+            "from its departure base (its internal fuel, 200 kg per unit, max "
+            "100 units)."
+        ),
+    )
     advanced_iads_auto: bool = boolean_option(
         "Build advanced IADS automatically (new campaigns)",
         page=CAMPAIGN_MANAGEMENT_PAGE,

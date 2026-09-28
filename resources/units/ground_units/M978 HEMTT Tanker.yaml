@@ -1,0 +1,9 @@
+class: Logistics
+description: Fuel tanker carrying about 9,500 litres of fuel. In a convoy it delivers fuel to the destination base's warehouse.
+introduced: 1985
+manufacturer: Oshkosh
+origin: USA
+price: 3
+role: Fuel Tanker
+variants:
+  Fuel Truck M978 HEMTT: null

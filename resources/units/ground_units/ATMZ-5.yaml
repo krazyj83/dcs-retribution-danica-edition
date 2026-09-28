@@ -1,0 +1,9 @@
+class: Logistics
+description: Fuel tanker carrying about 5,000 litres of fuel. In a convoy it delivers fuel to the destination base's warehouse.
+introduced: 1970
+manufacturer: Various
+origin: USSR
+price: 2
+role: Fuel Tanker
+variants:
+  Fuel Truck ATMZ-5: null

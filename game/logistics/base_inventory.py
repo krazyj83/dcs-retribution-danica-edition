@@ -90,6 +90,11 @@ class BaseInventory:
     outgoing: List[str] = field(default_factory=list)
     #: Naval munitions crates the base can hand out (ship rearming).
     naval_crates: int = 0
+    #: Fuel the base's sorties used last mission, and how many turns the stock
+    #: lasts at that rate (None: no sorties last mission). See logistics/fuel.py.
+    fuel_used_last_mission: float = 0.0
+    fuel_turns_left: Optional[float] = None
+    unlimited_fuel: bool = False
 
     @property
     def weapon_totals(self) -> tuple[int, int, int]:
@@ -150,6 +155,8 @@ def base_inventory(game: Game, cp: Any) -> BaseInventory:
             dst = names.get(t.dest_cp_id, "?")
             outgoing.append(f"{t.cargo_label} to {dst} ({state})")
 
+    from game.logistics.fuel import turns_left, unlimited_fuel
+
     ammo = warehouse.stock[WarehouseCategory.AMMUNITION].quantity
     return BaseInventory(
         base_name=cp.name,
@@ -159,4 +166,9 @@ def base_inventory(game: Game, cp: Any) -> BaseInventory:
         incoming=incoming,
         outgoing=outgoing,
         naval_crates=int(ammo // AMMO_PER_CRATE),
+        fuel_used_last_mission=float(
+            getattr(warehouse, "fuel_used_last_mission", 0.0) or 0.0
+        ),
+        fuel_turns_left=turns_left(warehouse),
+        unlimited_fuel=unlimited_fuel(game),
     )

@@ -161,9 +161,25 @@ class PlayerConvoyGenerator:
 
     @staticmethod
     def _pick_units(spare: dict[GroundUnitType, int]) -> dict[GroundUnitType, int]:
-        """Up to CONVOY_SIZE vehicles, round-robin over the most plentiful types."""
+        """Up to CONVOY_SIZE vehicles, round-robin over the most plentiful types,
+        plus up to MAX_FUEL_TRUCKS_PER_CONVOY fuel trucks when the base has
+        spare ones (they deliver fuel, see logistics/fuel.py)."""
+        from game.logistics.fuel import MAX_FUEL_TRUCKS_PER_CONVOY, is_fuel_truck
+
+        trucks: Counter[GroundUnitType] = Counter()
+        for unit_type, count in sorted(
+            spare.items(), key=lambda item: (-item[1], str(item[0]))
+        ):
+            if not is_fuel_truck(unit_type):
+                continue
+            take = min(count, MAX_FUEL_TRUCKS_PER_CONVOY - sum(trucks.values()))
+            if take > 0:
+                trucks[unit_type] += take
         remaining = dict(
-            sorted(spare.items(), key=lambda item: (-item[1], str(item[0])))
+            sorted(
+                ((t, n) for t, n in spare.items() if not is_fuel_truck(t)),
+                key=lambda item: (-item[1], str(item[0])),
+            )
         )
         picked: Counter[GroundUnitType] = Counter()
         while remaining and sum(picked.values()) < CONVOY_SIZE:
@@ -174,6 +190,7 @@ class PlayerConvoyGenerator:
                 remaining[unit_type] -= 1
                 if remaining[unit_type] == 0:
                     del remaining[unit_type]
+        picked.update(trucks)
         return dict(picked)
 
     def _create_group(

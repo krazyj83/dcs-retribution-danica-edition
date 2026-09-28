@@ -140,12 +140,25 @@ class TransferOrder:
             return "No transports available"
         return self.transport.description()
 
+    def _game(self) -> Any:
+        coalition = getattr(self.origin, "_coalition", None)
+        return getattr(coalition, "game", None)
+
     def kill_all(self) -> None:
+        from game.logistics.fuel import is_fuel_truck, lose_truck_fuel
+
+        for unit_type, count in self.units.items():
+            if is_fuel_truck(unit_type):
+                lose_truck_fuel(self._game(), self.origin, unit_type, count)
         self.units.clear()
 
     def kill_unit(self, unit_type: GroundUnitType) -> None:
         if unit_type not in self.units or not self.units[unit_type]:
             raise KeyError(f"{self} has no {unit_type} remaining")
+        from game.logistics.fuel import is_fuel_truck, lose_truck_fuel
+
+        if is_fuel_truck(unit_type):
+            lose_truck_fuel(self._game(), self.origin, unit_type)
         if self.units[unit_type] == 1:
             del self.units[unit_type]
         else:
@@ -165,7 +178,14 @@ class TransferOrder:
         return self.destination == self.position or not self.size
 
     def disband_at(self, location: ControlPoint) -> None:
+        from game.logistics.fuel import deliver_truck_fuel, is_fuel_truck
+
         logging.info(f"Units halting at {location}.")
+        for unit_type, count in self.units.items():
+            if is_fuel_truck(unit_type):
+                deliver_truck_fuel(
+                    self._game(), self.origin, location, unit_type, count
+                )
         location.base.commission_units(self.units)
         self.units.clear()
 

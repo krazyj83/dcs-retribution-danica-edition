@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, Type
 
 from PySide6.QtCore import Qt, Signal, QEvent
@@ -76,6 +77,13 @@ class QFlightCreator(QDialog):
         )
         self.squadron_selector.setCurrentIndex(0)
         layout.addLayout(QLabeledWidget("Squadron:", self.squadron_selector))
+
+        # Warning only: a base without warehouse fuel can still launch flights.
+        self.fuel_warning = QLabel()
+        self.fuel_warning.setWordWrap(True)
+        self.fuel_warning.setStyleSheet("color: #e74c3c; font-weight: bold;")
+        layout.addWidget(self.fuel_warning)
+        self.update_fuel_warning(self.squadron_selector.currentData())
 
         self.divert = QArrivalAirfieldSelector(
             [
@@ -264,6 +272,7 @@ class QFlightCreator(QDialog):
         # Clear the roster first so we return the pilots to the pool. This way if we end
         # up repopulating from the same squadron we'll get the same pilots back.
         self.roster_editor.replace(None, None)
+        self.update_fuel_warning(squadron)
         if squadron is not None:
             self.roster_editor.replace(
                 squadron, FlightRoster(squadron, self.flight_size_spinner.value())
@@ -271,6 +280,18 @@ class QFlightCreator(QDialog):
             self.on_departure_changed(squadron.location)
 
             self.roster_editor.pilots_changed.emit()
+
+    def update_fuel_warning(self, squadron: Optional[Squadron]) -> None:
+        from game.logistics.fuel import fuel_warning
+
+        warning = None
+        if squadron is not None:
+            try:
+                warning = fuel_warning(self.game, squadron.location)
+            except Exception:
+                logging.exception("Could not check the base's fuel")
+        self.fuel_warning.setText(warning or "")
+        self.fuel_warning.setVisible(warning is not None)
 
     def update_max_size(self, available: int) -> None:
         aircraft = self.aircraft_selector.currentData()

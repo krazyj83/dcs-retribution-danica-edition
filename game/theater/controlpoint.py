@@ -1080,6 +1080,13 @@ class ControlPoint(MissionTarget, SidcDescribable, ABC):
         self._create_missing_front_lines(game.laser_code_registry, events)
         self.apply_default_stance_on_capture(game, for_player)
         events.update_control_point(self)
+        # Warehouse and weapon stores: weapons lost, fuel kept.
+        logistics = getattr(game, "logistics", None)
+        if logistics is not None:
+            try:
+                logistics.on_base_captured(self, for_player)
+            except Exception:
+                logging.exception(f"Logistics capture handling failed for {self}")
 
         # All the attached TGOs have either been depopulated or captured. Tell the UI to
         # update their state. Also update orientation and IADS state for specific tgos

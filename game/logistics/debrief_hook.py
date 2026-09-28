@@ -7,8 +7,8 @@ stock based on what happened in the mission:
 - Destroyed fuel depots  → reduce fuel stock at that base
 - Destroyed ammo depots  → reduce ammunition stock at that base
 - SAM site knocked out   → reduce ammunition stock at its base, once per site
-- Base captures by RED   → zero all stock except fuel
-- Base captures by BLUE  → add base to warehouse network with salvage stock
+- Base captures and fuel used by sorties → applied earlier (capture.py,
+  fuel.py); their log lines are shown here
 
 Called when the debrief window opens, after the mission results are processed.
 """
@@ -42,10 +42,6 @@ def sam_site_ammo_loss(unit_count: int) -> float:
     """Ammunition a knocked-out SAM site of this many vehicles costs its base."""
     loss = SAM_SITE_AMMO_PER_UNIT * max(0, unit_count)
     return min(SAM_SITE_AMMO_MAX, max(SAM_SITE_AMMO_MIN, loss))
-
-
-# Salvage stock added when blue captures a red base
-CAPTURE_SALVAGE_STOCK = 200.0
 
 
 def update_logistics_from_debriefing(debriefing: "Debriefing") -> List[str]:
@@ -139,47 +135,12 @@ def update_logistics_from_debriefing(debriefing: "Debriefing") -> List[str]:
             logger.debug(f"Logistics debrief: error processing SAM site loss: {e}")
 
     # ------------------------------------------------------------------
-    # 2. Base captures
+    # 2. Base captures and fuel used by sorties
     # ------------------------------------------------------------------
-    for capture in debriefing.base_captures:
-        cp = capture.control_point
-        captured_by_player = capture.captured_by_player
-        capture_cp_id: Any = cp.id
-        try:
-            if captured_by_player.is_blue:
-                # Blue captured a red base — add to warehouse network with salvage
-                from game.logistics import Warehouse
-
-                new_wh = Warehouse(cp_id=capture_cp_id, cp_name=cp.name)
-                for cat in WarehouseCategory:
-                    new_wh.stock[cat].quantity = CAPTURE_SALVAGE_STOCK
-                logistics._warehouses[capture_cp_id] = new_wh
-                log.append(
-                    f"{cp.name} captured by blue — added to warehouse network "
-                    f"with {CAPTURE_SALVAGE_STOCK:.0f} salvage stock per category"
-                )
-            else:
-                # Red captured a blue base — zero everything EXCEPT fuel
-                wh = logistics.get_warehouse(capture_cp_id)
-                if wh is not None:
-                    for cat in WarehouseCategory:
-                        if cat == WarehouseCategory.FUEL:
-                            log.append(
-                                f"{cp.name} captured by red — fuel stock retained "
-                                f"({wh.stock[cat].quantity:.0f} remaining)"
-                            )
-                            continue
-                        lost = wh.stock[cat].quantity
-                        wh.stock[cat].quantity = 0.0
-                        if lost > 0:
-                            log.append(
-                                f"{cp.name} captured by red — "
-                                f"{lost:.0f} {cat.value} lost"
-                            )
-                    logistics._warehouses.pop(capture_cp_id, None)
-
-        except Exception as e:
-            logger.debug(f"Logistics debrief: error processing capture event: {e}")
+    # Applied when the results were committed (ControlPoint.capture and
+    # LogisticsManager.on_state_processed, see logistics/capture.py and
+    # logistics/fuel.py); only their log lines are collected here.
+    log.extend(logistics.pop_debrief_log())
 
     if log:
         logger.info("Logistics debrief summary:\n" + "\n".join(f"  {l}" for l in log))
