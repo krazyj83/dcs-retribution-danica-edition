@@ -72,7 +72,7 @@ class AircraftBehavior:
             self.configure_refueling(group, flight)
         elif self.task == FlightType.RECOVERY:
             self.configure_recovery(group, flight)
-        elif self.task in [FlightType.CAS, FlightType.BAI]:
+        elif self.task in [FlightType.CAS, FlightType.BAI, FlightType.CONVOY_ESCORT]:
             self.configure_cas(group, flight)
         elif self.task == FlightType.ARMED_RECON:
             self.configure_armed_recon(group, flight)

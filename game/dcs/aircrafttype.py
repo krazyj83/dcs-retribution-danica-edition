@@ -277,6 +277,13 @@ class AircraftType(UnitType[Type[FlyingType]]):
             ):
                 enrich[FlightType.ARMED_RECON] = value
 
+        # Anything that can fly CAS (or BAI) can escort a convoy along a road.
+        if FlightType.CONVOY_ESCORT not in self.task_priorities:
+            if (value := self.task_priorities.get(FlightType.CAS)) or (
+                value := self.task_priorities.get(FlightType.BAI)
+            ):
+                enrich[FlightType.CONVOY_ESCORT] = value
+
         if FlightType.RECOVERY not in self.task_priorities:
             if (
                 value := self.task_priorities.get(FlightType.REFUELING)

@@ -28,6 +28,7 @@ from .shiprecoverytanker import RecoveryTankerFlightPlan
 from .strike import StrikeFlightPlan
 from .sweep import SweepFlightPlan
 from .tarcap import TarCapFlightPlan
+from .convoyescort import ConvoyEscortFlightPlan
 from .theaterrefueling import TheaterRefuelingFlightPlan
 
 if TYPE_CHECKING:
@@ -51,6 +52,7 @@ class FlightPlanBuilderTypes:
             FlightType.BAI: BaiFlightPlan.builder_type(),
             FlightType.BARCAP: BarCapFlightPlan.builder_type(),
             FlightType.CAS: CasFlightPlan.builder_type(),
+            FlightType.CONVOY_ESCORT: ConvoyEscortFlightPlan.builder_type(),
             FlightType.DEAD: DeadFlightPlan.builder_type(),
             FlightType.ESCORT: EscortFlightPlan.builder_type(),
             FlightType.OCA_AIRCRAFT: OcaAircraftFlightPlan.builder_type(),

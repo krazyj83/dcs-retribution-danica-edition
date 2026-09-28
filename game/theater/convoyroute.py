@@ -13,6 +13,7 @@ places the orbit over the centre of the route.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Iterator, Optional
 from uuid import UUID
 
@@ -22,6 +23,22 @@ from game.theater.missiontarget import MissionTarget
 if TYPE_CHECKING:
     from game.ato.flighttype import FlightType
     from game.theater import Coalition, Player
+    from game.utils import Distance
+
+#: Same drive-time estimate as the map (client/.../dropzonelayer/convoyTime.ts):
+#: the road is 1.2 to 1.5 times the straight line, driven at 40 km/h.
+CONVOY_SPEED_KPH = 40.0
+ROAD_FACTOR_LOW = 1.2
+ROAD_FACTOR_HIGH = 1.5
+
+
+def drive_time(straight_line: Distance) -> tuple[timedelta, timedelta]:
+    """(fastest, slowest) estimated drive time for a route this long."""
+    hours = straight_line.kilometers / CONVOY_SPEED_KPH
+    return (
+        timedelta(hours=hours * ROAD_FACTOR_LOW),
+        timedelta(hours=hours * ROAD_FACTOR_HIGH),
+    )
 
 
 @dataclass
@@ -77,12 +94,12 @@ class ConvoyRouteTarget(MissionTarget):
     def mission_types(self, for_player: Player) -> Iterator[FlightType]:
         """Yield mission types suitable for protecting a player convoy route.
 
-        CONVOY_ESCORT is an independent FlightType (not ESCORT or SEAD_ESCORT)
-        so it bypasses the package dialog's 'only escort flights' validation.
-        CAS and BARCAP are offered as alternatives.
+        CONVOY_ESCORT (game/ato/flightplans/convoyescort.py) patrols the road
+        from start to end for the convoy's drive time, attacking ground units
+        near it; it is a main task, not an escort of other flights. BARCAP
+        covers the route from the air.
         """
         from game.ato.flighttype import FlightType
 
         yield FlightType.CONVOY_ESCORT
-        yield FlightType.CAS
         yield FlightType.BARCAP

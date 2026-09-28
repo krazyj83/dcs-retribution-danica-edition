@@ -71,6 +71,19 @@ class RaceTrackBuilder(PydcsWaypointBuilder):
                 )
             )
 
+        if self.flight.flight_type is FlightType.CONVOY_ESCORT:
+            # Cover the convoy: attack ground units near the road.
+            waypoint.tasks.append(
+                EngageTargets(
+                    max_distance=int(flight_plan.engagement_distance.meters),
+                    targets=[
+                        Targets.All.GroundUnits.GroundVehicles,
+                        Targets.All.GroundUnits.AirDefence.AAA,
+                        Targets.All.GroundUnits.Infantry,
+                    ],
+                )
+            )
+
         orbit = OrbitAction(
             altitude=waypoint.alt,
             pattern=OrbitAction.OrbitPattern.RaceTrack,

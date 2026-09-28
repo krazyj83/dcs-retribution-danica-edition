@@ -173,6 +173,7 @@ class Package(RadioFrequencyContainer):
         # first task in this list that matches a flight in the package.
         tasks_by_priority = [
             FlightType.CAS,
+            FlightType.CONVOY_ESCORT,
             FlightType.STRIKE,
             FlightType.ANTISHIP,
             FlightType.OCA_AIRCRAFT,
