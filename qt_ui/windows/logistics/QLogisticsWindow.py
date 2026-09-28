@@ -864,7 +864,8 @@ class WarehouseTab(QWidget):
         sync_warehouses_from_game(self.logistics, self.game)
         self.refresh()
         self.status_label.setText(
-            f"Synced - {len(self.logistics._warehouses)} blue bases loaded."
+            f"Synced - {len(self.logistics.warehouses_for_coalition('blue'))} "
+            "blue bases loaded."
         )
 
     def refresh(self) -> None:

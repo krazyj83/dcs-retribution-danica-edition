@@ -44,6 +44,7 @@ class QIntelInfo(QFrame):
                 front_line_units[unit_type.display_name] += count
 
         units_by_task["Front line units"] = front_line_units
+        self._add_supply_estimate(intel_layout)
         for task, unit_types in units_by_task.items():
             task_group = QGroupBox(task)
             task_layout = QGridLayout()
@@ -65,3 +66,22 @@ class QIntelInfo(QFrame):
         layout.addWidget(scroll)
 
         self.setLayout(layout)
+
+    def _add_supply_estimate(self, layout: QVBoxLayout) -> None:
+        """REDFOR fuel and ammunition, as an intel estimate (logistics/redfor.py)."""
+        from game.logistics.redfor import intel_estimate
+
+        try:
+            game = self.cp.coalition.game
+            rows = intel_estimate(game, self.cp)
+        except Exception:
+            return
+        if not rows:
+            return
+        group = QGroupBox("Supplies (intel estimate)")
+        grid = QGridLayout()
+        group.setLayout(grid)
+        for row, (label, text, color) in enumerate(rows):
+            grid.addWidget(QLabel(f"<b>{label}</b>"), row, 0)
+            grid.addWidget(QLabel(f"<span style='color:{color}'>{text}</span>"), row, 1)
+        layout.addWidget(group)

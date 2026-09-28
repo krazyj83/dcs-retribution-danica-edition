@@ -44,6 +44,7 @@ def on_base_captured(
     if warehouse is None:
         warehouse = Warehouse(cp_id=cp.id, cp_name=cp.name)
         logistics.add_warehouse(warehouse)
+    warehouse.coalition = "blue" if new_owner.is_blue else "red"
     for category in WarehouseCategory:
         if category is WarehouseCategory.FUEL:
             continue

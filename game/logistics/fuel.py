@@ -137,8 +137,9 @@ def use_fuel_for_sorties(game: Game) -> List[str]:
 # fuel from the base it left (the origin) to where it arrives. The fuel leaves
 # the origin's warehouse when the truck arrives (and is added to the arrival
 # base, up to its capacity; what doesn't fit stays at the origin) or when the
-# truck is destroyed (the load is lost). Only BLUEFOR bases keep warehouse
-# fuel, so REDFOR fuel trucks are just vehicles.
+# truck is destroyed (the load is lost). REDFOR bases keep warehouse fuel only
+# with the "REDFOR logistics" setting on; otherwise their trucks are just
+# vehicles. REDFOR lines go to the log, not the player's debrief.
 
 #: Warehouse fuel one truck carries, by DCS type (200 kg per unit, ~0.8 kg/l).
 FUEL_TRUCK_LOADS: Dict[str, float] = {
@@ -172,8 +173,14 @@ def _fuel_stock(game: Any, base: Any) -> Any:
     """
     from game.logistics import Warehouse, WarehouseCategory
 
+    from game.logistics.redfor import enabled as redfor_enabled
+
     logistics = getattr(game, "logistics", None)
-    if logistics is None or not base.captured.is_blue:
+    if logistics is None:
+        return None
+    if not base.captured.is_blue and not (
+        base.captured.is_red and redfor_enabled(game)
+    ):
         return None
     warehouse = logistics.get_warehouse(base.id)
     if warehouse is None:
@@ -204,7 +211,7 @@ def deliver_truck_fuel(
     if fits < load:
         line += f" (of {load:.0f}: {origin.name} had {carried:.0f}"
         line += ", the rest did not fit)" if fits < carried else ")"
-    _log(game, line)
+    _log(game, line, red=origin.captured.is_red)
     return line
 
 
@@ -219,11 +226,16 @@ def lose_truck_fuel(
     lost = min(load, source.quantity)
     source.quantity -= lost
     line = f"{count} fuel truck(s) from {origin.name} destroyed: {lost:.0f} fuel lost"
-    _log(game, line)
+    _log(game, line, red=origin.captured.is_red)
     return line
 
 
-def _log(game: Any, line: str) -> None:
+def _log(game: Any, line: str, red: bool = False) -> None:
+    if red:
+        import logging
+
+        logging.getLogger(__name__).info(f"REDFOR: {line}")
+        return
     logistics = getattr(game, "logistics", None)
     if logistics is not None and hasattr(logistics, "add_debrief_log"):
         logistics.add_debrief_log([line])

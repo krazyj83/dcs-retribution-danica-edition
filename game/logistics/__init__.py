@@ -349,6 +349,11 @@ class Warehouse:
     #: Fuel the base's sorties used in the last mission (see logistics/fuel.py).
     #: Class-level default keeps warehouses pickled before this field loadable.
     fuel_used_last_mission: float = 0.0
+    #: Owner of the base: "blue" or "red" (logistics/redfor.py keeps it in
+    #: step with captures). Class default: older saves only had blue ones.
+    coalition: str = "blue"
+    #: Ammunition REDFOR sorties took in the last mission (logistics/redfor.py).
+    ammo_used_last_mission: float = 0.0
 
     def __post_init__(self) -> None:
         for cat in WarehouseCategory:
@@ -541,7 +546,11 @@ class LogisticsManager:
         self._warehouses[warehouse.cp_id] = warehouse
 
     def warehouses_for_coalition(self, coalition: str) -> List[Warehouse]:
-        return list(self._warehouses.values())
+        return [
+            w
+            for w in self._warehouses.values()
+            if getattr(w, "coalition", "blue") == coalition
+        ]
 
     # ── Weapon inventories ─────────────────────────────────────────────
 
@@ -944,8 +953,16 @@ class LogisticsManager:
 
         # Stock going into this turn's mission, for the history chart.
         from game.logistics.history import ensure_friendly_warehouses, record_turn
+        from game.logistics.redfor import (
+            enabled as redfor_enabled,
+            ensure_red_warehouses,
+            sync_warehouse_sides,
+        )
 
         ensure_friendly_warehouses(game)
+        if redfor_enabled(game):
+            ensure_red_warehouses(game)
+        sync_warehouse_sides(game)
         record_turn(self, game.turn)
 
         for t in self._transfers.values():
@@ -978,6 +995,12 @@ class LogisticsManager:
             fuel_log = []
         self.add_debrief_log(fuel_log)
         log.extend(fuel_log)
+        try:
+            from game.logistics.redfor import use_red_sortie_stock
+
+            use_red_sortie_stock(game)
+        except Exception:
+            logging.getLogger(__name__).exception("REDFOR sortie stock use failed")
         for t in self._transfers.values():
             if t.status is not TransferStatus.IN_FLIGHT:
                 continue

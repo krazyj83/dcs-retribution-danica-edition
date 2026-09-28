@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Optional, TYPE_CHECKING
 
@@ -253,6 +254,14 @@ class Coalition:
                     MissionScheduler(
                         self, self.game.settings.desired_player_mission_duration
                     ).schedule_missions(now)
+        if self.player.is_red:
+            # REDFOR only flies what its bases can fuel and arm.
+            from game.logistics.redfor import apply_supply_limits
+
+            try:
+                apply_supply_limits(self.game, self.ato)
+            except Exception:
+                logging.exception("REDFOR supply limits failed")
 
     def plan_procurement(self) -> None:
         # The first turn needs to buy a *lot* of aircraft to fill CAPs, so it gets much

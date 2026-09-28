@@ -540,6 +540,32 @@ class Settings:
             "100 units)."
         ),
     )
+    redfor_logistics: bool = boolean_option(
+        "REDFOR logistics (fuel and ammunition limit enemy sorties)",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=GENERAL_SECTION,
+        default=True,
+        detail=(
+            "REDFOR bases keep warehouse fuel and ammunition. Enemy sorties use "
+            "them, and packages a base can't fuel or arm are grounded (reported "
+            "as intel). Every turn each base gets back what it used, scaled by "
+            "the REDFOR fuel and ammo depots still standing, so destroying depots "
+            "(and fuel trucks) runs REDFOR's stock and sorties down."
+        ),
+    )
+    redfor_fuel_per_turn: int = bounded_int_option(
+        "REDFOR extra fuel per base per turn",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=GENERAL_SECTION,
+        default=60,
+        min=0,
+        max=500,
+        detail=(
+            "On top of what the base's sorties used, with all REDFOR fuel depots "
+            "standing; lets idle bases refill. Ammunition gets two thirds of it. "
+            "A four-ship of Su-27s uses about 190 fuel."
+        ),
+    )
     advanced_iads_auto: bool = boolean_option(
         "Build advanced IADS automatically (new campaigns)",
         page=CAMPAIGN_MANAGEMENT_PAGE,

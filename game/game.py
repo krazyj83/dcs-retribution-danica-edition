@@ -343,6 +343,15 @@ class Game:
         self.blue.end_turn()
         self.red.end_turn()
 
+        # REDFOR bases get their fuel and ammunition for next turn
+        # (logistics/redfor.py), before next turn's planning uses it.
+        try:
+            from game.logistics.redfor import resupply as redfor_resupply
+
+            redfor_resupply(self)
+        except Exception:
+            logging.exception("REDFOR resupply failed")
+
         # REDFOR AI supply convoys — creates ground transfer orders each turn
         with logged_duration("REDFOR supply planning"):
             RedforSupplyPlanner(self).plan()
