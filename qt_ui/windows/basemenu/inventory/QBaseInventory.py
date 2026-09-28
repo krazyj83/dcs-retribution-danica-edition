@@ -1,6 +1,7 @@
 """Base window tab: what the base holds.
 
-Top: warehouse stock (fuel, ammunition, supplies, troops) as level bars.
+Top: warehouse stock (fuel, ammunition, supplies, troops) as level bars,
+and a chart of the stock turn by turn.
 Left: weapon stores by category, with search and a low/empty filter.
 Right: supply flights to and from the base, naval munitions crates, and a
 button to the Logistics window, where stock is changed.
@@ -36,6 +37,7 @@ from game import Game
 from game.logistics.base_inventory import BaseInventory, base_inventory
 from game.theater import ControlPoint
 from qt_ui.models import GameModel
+from qt_ui.windows.basemenu.inventory.QStockHistoryChart import QStockHistoryChart
 
 GOOD = "#27ae60"
 LOW = "#f39c12"
@@ -86,7 +88,15 @@ class QBaseInventory(QFrame):
         self.fuel_label = QLabel()
         self.fuel_label.setWordWrap(True)
         grid.addWidget(self.fuel_label, len(WarehouseCategory), 0, 1, 3)
-        layout.addWidget(stock_box)
+        top = QHBoxLayout()
+        top.addWidget(stock_box, 1)
+
+        history_box = QGroupBox("Stock history (hover for numbers)")
+        hl = QVBoxLayout(history_box)
+        self.history_chart = QStockHistoryChart()
+        hl.addWidget(self.history_chart)
+        top.addWidget(history_box, 1)
+        layout.addLayout(top)
 
         body = QHBoxLayout()
 
@@ -185,6 +195,7 @@ class QBaseInventory(QFrame):
             status.setStyleSheet(f"color: {color};")
 
         self.fuel_label.setText(self._fuel_text(inv))
+        self._fill_history()
 
         lines = []
         if inv.incoming:
@@ -222,6 +233,23 @@ class QBaseInventory(QFrame):
             f"<span style='color:{color}'><b>about {inv.fuel_turns_left:.1f} "
             "turns left</b></span> at that rate."
         )
+
+    def _fill_history(self) -> None:
+        from game.logistics.history import HistoryPoint, history_for, snapshot
+
+        logistics = self.game.logistics
+        warehouse = logistics.get_warehouse(self.cp.id)
+        if warehouse is None:
+            self.history_chart.set_points([], None)
+            return
+        capacity = max(item.capacity for item in warehouse.stock.values())
+        turn = getattr(self.game, "turn", 0)
+        current: Optional[HistoryPoint] = snapshot(logistics, warehouse, turn)
+        history = history_for(logistics, self.cp.id)
+        # Leave out "now" when nothing changed since this turn's point.
+        if history and history[-1] == current:
+            current = None
+        self.history_chart.set_points(history, current, capacity)
 
     def _fill_weapons(self) -> None:
         self.tree.clear()

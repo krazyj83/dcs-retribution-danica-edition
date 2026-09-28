@@ -9,6 +9,7 @@ from . import (
     flights,
     frontlines,
     game,
+    logistics,
     mapzones,
     navmesh,
     qt,
@@ -28,6 +29,7 @@ app.include_router(eventstream.router)
 app.include_router(flights.router)
 app.include_router(frontlines.router)
 app.include_router(game.router)
+app.include_router(logistics.router)
 app.include_router(mapzones.router)
 app.include_router(navmesh.router)
 app.include_router(qt.router)

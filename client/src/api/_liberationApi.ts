@@ -515,8 +515,24 @@ export type ConvoyRoute = {
   end: LatLng;
   repeat?: boolean;
 };
+export type BaseSupply = {
+  id: string;
+  name: string;
+  position: LatLng;
+  fuel: number;
+  fuel_capacity: number;
+  ammunition: number;
+  ammunition_capacity: number;
+  supplies: number;
+  supplies_capacity: number;
+  fuel_turns_left?: number | null;
+  unlimited_fuel: boolean;
+  status: string;
+  reasons: string[];
+};
 export type Game = {
   convoy_routes: ConvoyRoute[];
+  supply_status?: BaseSupply[];
   control_points: ControlPoint[];
   tgos: Tgo[];
   supply_routes: SupplyRoute[];

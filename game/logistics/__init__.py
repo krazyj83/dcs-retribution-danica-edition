@@ -449,6 +449,8 @@ class LogisticsManager:
         #: Last turn attrition was applied, so regenerating a mission doesn't
         #: apply it twice.
         self._last_attrition_turn: Optional[int] = None
+        #: Stock per base, turn by turn (see logistics/history.py).
+        self._history: Dict[UUID, List[Any]] = {}
 
     # ── Drop zones ─────────────────────────────────────────────────────
 
@@ -939,6 +941,12 @@ class LogisticsManager:
                     if keep_fuel and category is WarehouseCategory.FUEL:
                         continue
                     item.apply_consumption(item.quantity * self.ATTRITION_PER_TURN)
+
+        # Stock going into this turn's mission, for the history chart.
+        from game.logistics.history import ensure_friendly_warehouses, record_turn
+
+        ensure_friendly_warehouses(game)
+        record_turn(self, game.turn)
 
         for t in self._transfers.values():
             if t.status is TransferStatus.PLANNED and flight_for_transfer(

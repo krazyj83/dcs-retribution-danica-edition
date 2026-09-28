@@ -13,6 +13,7 @@ import Iadsnetworklayer from "../iadsnetworklayer";
 import NavMeshLayer from "../navmesh/NavMeshLayer";
 import LeafletRuler from "../ruler/Ruler";
 import SupplyRoutesLayer from "../supplyrouteslayer";
+import SupplyStatusLayer from "../supplystatuslayer";
 import TerrainZonesLayers from "../terrainzones/TerrainZonesLayers";
 import TgosLayer from "../tgoslayer/TgosLayer";
 import { CoalitionThreatZones } from "../threatzones";
@@ -128,6 +129,9 @@ export default function LiberationMap() {
         </MapOverlay>
         <MapOverlay name="Supply routes" defaultChecked={true}>
           <SupplyRoutesLayer />
+        </MapOverlay>
+        <MapOverlay name="Base supply status" defaultChecked={true}>
+          <SupplyStatusLayer />
         </MapOverlay>
         <MapOverlay name="Drop zones & Convoy routes" defaultChecked={true}>
           <DropZoneLayer />

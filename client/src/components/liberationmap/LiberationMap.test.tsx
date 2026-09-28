@@ -76,6 +76,7 @@ jest.mock("../supplyrouteslayer", () => () => <div data-testid="layer-supply-rou
 jest.mock("../frontlineslayer", () => () => <div data-testid="layer-front-lines" />);
 jest.mock("../airdefenserangelayer", () => () => <div data-testid="layer-air-defense" />);
 jest.mock("../dropzonelayer", () => () => <div data-testid="layer-drop-zones" />);
+jest.mock("../supplystatuslayer", () => () => <div data-testid="layer-supply-status" />);
 jest.mock("../iadsnetworklayer", () => () => <div data-testid="layer-iads" />);
 jest.mock("../flightplanslayer", () => () => <div data-testid="layer-flight-plans" />);
 jest.mock("../threatzones", () => ({ CoalitionThreatZones: () => <div data-testid="layer-threat-zones" /> }));

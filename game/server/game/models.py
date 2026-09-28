@@ -10,6 +10,7 @@ from game.server.flights.models import FlightJs
 from game.server.frontlines.models import FrontLineJs
 from game.server.iadsnetwork.models import IadsNetworkJs
 from game.server.leaflet import LeafletPoint
+from game.server.logistics.models import BaseSupplyJs
 from game.server.mapzones.models import (
     ThreatZoneContainerJs,
     UnculledZoneJs,
@@ -37,6 +38,7 @@ class GameJs(BaseModel):
     map_zones: MapZonesJs
     drop_zones: list[DropZoneJs]
     convoy_routes: list[ConvoyRouteJs]
+    supply_status: list[BaseSupplyJs]
 
     class Config:
         title = "Game"
@@ -59,4 +61,5 @@ class GameJs(BaseModel):
             map_zones=MapZonesJs.from_game(game),
             drop_zones=dz_routes.get_all(),
             convoy_routes=cr_routes.get_all(),
+            supply_status=BaseSupplyJs.all_in_game(game),
         )
