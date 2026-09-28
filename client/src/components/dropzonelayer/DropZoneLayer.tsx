@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { CircleMarker, LayerGroup, Marker, Polyline, Popup, Tooltip, useMapEvents } from "react-leaflet";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import { DropZone, createDropZone, deleteDropZone, selectDropZones, serverBase } from "../../api/dropZonesSlice";
-import { createConvoyRoute, deleteConvoyRoute, selectConvoyRoutes } from "../../api/convoyRoutesSlice";
+import { createConvoyRoute, deleteConvoyRoute, selectConvoyRoutes, setConvoyRouteRepeat } from "../../api/convoyRoutesSlice";
 import type { ConvoyRoute } from "../../api/convoyRoutesSlice";
 import { describeDrive } from "./convoyTime";
 
@@ -133,11 +133,14 @@ export function NameForm(props: {
   title: string;
   info?: string;
   defaultName: string;
-  onSave: (name: string) => Promise<void>;
+  // Show a "Repeat every turn" tick box (convoy routes).
+  repeatOption?: boolean;
+  onSave: (name: string, repeat: boolean) => Promise<void>;
   onCancel: () => void;
 }) {
-  const { title, info, defaultName, onSave, onCancel } = props;
+  const { title, info, defaultName, repeatOption, onSave, onCancel } = props;
   const [name, setName] = useState(defaultName);
+  const [repeat, setRepeat] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -165,7 +168,7 @@ export function NameForm(props: {
     setBusy(true);
     setError(null);
     try {
-      await onSave(name.trim() || defaultName);
+      await onSave(name.trim() || defaultName, repeat);
     } catch (err) {
       console.error(`${title} failed: ${errorText(err)}`);
       setError(errorText(err));
@@ -185,6 +188,12 @@ export function NameForm(props: {
         onChange={(e) => setName(e.target.value)}
         onFocus={(e) => e.target.select()}
       />
+      {repeatOption && (
+        <label style={{ ...infoStyle, display: "flex", alignItems: "center", gap: 6, marginTop: 8, cursor: "pointer" }}>
+          <input type="checkbox" checked={repeat} onChange={(e) => setRepeat(e.target.checked)} />
+          ↻ Repeat every turn (standing supply line)
+        </label>
+      )}
       {error && <div style={errorStyle}>Could not save: {error}</div>}
       <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
         <button type="submit" style={btn} disabled={busy}>
@@ -299,9 +308,9 @@ function MapRightClickHandler() {
   }
 
   const { start, end } = pending;
-  const save = async (name: string) => {
+  const save = async (name: string, repeat: boolean) => {
     await dispatch(
-      createConvoyRoute({ name, start_lat: start.lat, start_lng: start.lng, end_lat: end.lat, end_lng: end.lng })
+      createConvoyRoute({ name, start_lat: start.lat, start_lng: start.lng, end_lat: end.lat, end_lng: end.lng, repeat })
     ).unwrap();
     setPending(null);
   };
@@ -310,7 +319,7 @@ function MapRightClickHandler() {
       <Polyline positions={[start, end]} pathOptions={{ color: PENDING_COLOR, weight: 2, dashArray: "6 4", opacity: 0.7 }} />
       <CircleMarker center={start} radius={6} pathOptions={{ color: PENDING_COLOR, fillColor: PENDING_COLOR, fillOpacity: 1 }} />
       <Popup key="route-name" position={end} closeButton={false} autoClose={false} closeOnClick={false}>
-        <NameForm title="🚛 New Convoy Route" info={describeDrive(start, end)} defaultName="Convoy Route" onSave={save} onCancel={cancel} />
+        <NameForm title="🚛 New Convoy Route" info={describeDrive(start, end)} defaultName="Convoy Route" repeatOption onSave={save} onCancel={cancel} />
       </Popup>
     </>
   );
@@ -364,15 +373,25 @@ function ConvoyRouteMarkers() {
         const end: [number, number] = [r.end.lat, r.end.lng];
         return (
           <React.Fragment key={r.id}>
-            <Polyline positions={[start, end]} pathOptions={{ color: ROUTE_COLOR, weight: 3, dashArray: "8 5", opacity: 0.85 }}>
+            {/* Standing routes are drawn solid, one-off routes dashed. */}
+            <Polyline
+              positions={[start, end]}
+              pathOptions={{ color: ROUTE_COLOR, weight: 3, dashArray: r.repeat ? undefined : "8 5", opacity: 0.85 }}
+            >
               <Tooltip sticky>
+                {r.repeat ? "↻ " : ""}
                 {r.name} — {describeDrive(r.start, r.end)}
               </Tooltip>
             </Polyline>
             <Marker position={start} icon={makeDiamondIcon(ROUTE_COLOR, 18)}>
               <Popup>
                 <div style={popupWrap}>
-                  <strong style={{ fontSize: 13, color: "#ecf0f1" }}>🚛 {r.name}</strong>
+                  <strong style={{ fontSize: 13, color: "#ecf0f1" }}>
+                    🚛 {r.name}
+                  </strong>
+                  <div style={{ ...infoStyle, margin: "2px 0 0" }}>
+                    {r.repeat ? "↻ Standing route: a convoy drives it every turn" : "One-off: removed at the end of this turn"}
+                  </div>
                   <div style={{ fontSize: 11, color: "#7f8c8d", margin: "2px 0 8px" }}>
                     Start: {r.start.lat.toFixed(4)}, {r.start.lng.toFixed(4)}<br />
                     End: &nbsp;{r.end.lat.toFixed(4)}, {r.end.lng.toFixed(4)}
@@ -382,6 +401,12 @@ function ConvoyRouteMarkers() {
                   </div>
                   <button style={{ ...btn, width: "100%", marginBottom: 5 }} onClick={() => openEscortDialog(r)}>
                     ✈ Plan Escort Mission
+                  </button>
+                  <button
+                    style={{ ...btn, width: "100%", marginBottom: 5 }}
+                    onClick={() => dispatch(setConvoyRouteRepeat({ id: r.id, repeat: !r.repeat }))}
+                  >
+                    {r.repeat ? "⏹ Stop repeating" : "↻ Repeat every turn"}
                   </button>
                   <button style={{ ...dangerBtn, width: "100%" }} onClick={() => dispatch(deleteConvoyRoute(r.id))}>
                     🗑 Remove Route

@@ -1,8 +1,9 @@
 """Convoy route API routes.
 
 Routes are stored on the game (``Game.player_convoy_routes``), so they are
-saved with the campaign, belong to that campaign only, and are removed at
-the end of each turn (see ``Game.finish_turn``).
+saved with the campaign and belong to that campaign only. One-off routes are
+removed at the end of each turn; standing routes (``repeat``) stay until the
+player removes them (see ``Game.finish_turn``).
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from starlette.responses import Response
 
 from game.server.dependencies import GameContext
 from game.server.leaflet import LeafletPoint
-from .models import ConvoyRouteJs, CreateConvoyRouteRequest
+from .models import ConvoyRouteJs, CreateConvoyRouteRequest, UpdateConvoyRouteRequest
 
 if TYPE_CHECKING:
     from game.theater.convoyroute import PlayerConvoyRoute
@@ -39,6 +40,7 @@ def _to_js(route: PlayerConvoyRoute) -> ConvoyRouteJs:
         name=route.name,
         start=LeafletPoint(lat=route.start_lat, lng=route.start_lng),
         end=LeafletPoint(lat=route.end_lat, lng=route.end_lng),
+        repeat=getattr(route, "repeat", False),
     )
 
 
@@ -91,8 +93,28 @@ def create_convoy_route(body: CreateConvoyRouteRequest) -> ConvoyRouteJs:
         start_lng=body.start_lng,
         end_lat=body.end_lat,
         end_lng=body.end_lng,
+        repeat=body.repeat,
     )
     routes[route.id] = route
+    return _to_js(route)
+
+
+@router.patch(
+    "/{route_id}",
+    operation_id="update_convoy_route",
+    response_model=ConvoyRouteJs,
+)
+def update_convoy_route(
+    route_id: UUID, body: UpdateConvoyRouteRequest
+) -> ConvoyRouteJs:
+    """Make a route standing (repeat every turn) or one-off."""
+    routes = _routes()
+    if routes is None or route_id not in routes:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail=f"No convoy route {route_id}"
+        )
+    route = routes[route_id]
+    route.repeat = body.repeat
     return _to_js(route)
 
 

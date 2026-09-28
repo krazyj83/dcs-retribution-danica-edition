@@ -14,6 +14,8 @@ class ConvoyRouteJs(BaseModel):
     name: str
     start: LeafletPoint
     end: LeafletPoint
+    #: Standing route: a convoy drives it every turn until it is removed.
+    repeat: bool = False
 
     class Config:
         title = "ConvoyRoute"
@@ -25,3 +27,8 @@ class CreateConvoyRouteRequest(BaseModel):
     start_lng: float
     end_lat: float
     end_lng: float
+    repeat: bool = False
+
+
+class UpdateConvoyRouteRequest(BaseModel):
+    repeat: bool

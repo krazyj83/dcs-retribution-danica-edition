@@ -513,6 +513,7 @@ export type ConvoyRoute = {
   name: string;
   start: LatLng;
   end: LatLng;
+  repeat?: boolean;
 };
 export type Game = {
   convoy_routes: ConvoyRoute[];

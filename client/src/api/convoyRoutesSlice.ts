@@ -8,6 +8,8 @@ export interface ConvoyRoute {
   name: string;
   start: { lat: number; lng: number };
   end: { lat: number; lng: number };
+  // Standing route: a new convoy drives it every turn until it is removed.
+  repeat?: boolean;
 }
 
 export const createConvoyRoute = createAsyncThunk(
@@ -18,6 +20,7 @@ export const createConvoyRoute = createAsyncThunk(
     start_lng: number;
     end_lat: number;
     end_lng: number;
+    repeat?: boolean;
   }): Promise<ConvoyRoute> => {
     const res = await fetch(`${serverBase()}/convoy-routes/`, {
       method: "POST",
@@ -25,6 +28,19 @@ export const createConvoyRoute = createAsyncThunk(
       body: JSON.stringify(args),
     });
     if (!res.ok) throw new Error(`Create convoy route failed: ${res.status}`);
+    return res.json();
+  }
+);
+
+export const setConvoyRouteRepeat = createAsyncThunk(
+  "convoyRoutes/setRepeat",
+  async (args: { id: string; repeat: boolean }): Promise<ConvoyRoute> => {
+    const res = await fetch(`${serverBase()}/convoy-routes/${args.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repeat: args.repeat }),
+    });
+    if (!res.ok) throw new Error(`Update convoy route failed: ${res.status}`);
     return res.json();
   }
 );
@@ -61,6 +77,11 @@ const convoyRoutesSlice = createSlice({
     });
     builder.addCase(createConvoyRoute.fulfilled, (state, action) => {
       state.routes.push(action.payload);
+    });
+    builder.addCase(setConvoyRouteRepeat.fulfilled, (state, action) => {
+      state.routes = state.routes.map((r) =>
+        r.id === action.payload.id ? action.payload : r
+      );
     });
     builder.addCase(deleteConvoyRoute.fulfilled, (state, action: PayloadAction<string>) => {
       state.routes = state.routes.filter((r) => r.id !== action.payload);

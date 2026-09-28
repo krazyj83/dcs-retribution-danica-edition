@@ -282,6 +282,18 @@ class Game:
             # reset when we're done.
             self.compute_threat_zones(GameUpdateEvents())
 
+    def end_turn_convoy_routes(self) -> None:
+        """Remove the one-off player convoy routes; keep the standing ones."""
+        routes = self.player_convoy_routes
+        one_off = [rid for rid, r in routes.items() if not getattr(r, "repeat", False)]
+        for rid in one_off:
+            del routes[rid]
+        if one_off or routes:
+            logging.info(
+                f"Removed {len(one_off)} one-off player convoy route(s) at end of "
+                f"turn, {len(routes)} standing route(s) kept"
+            )
+
     def finish_turn(self, events: GameUpdateEvents, skipped: bool = False) -> None:
         """Finalizes the current turn and advances to the next turn.
 
@@ -313,14 +325,10 @@ class Game:
         self.message("End of turn #" + str(self.turn), "-" * 40)
         self.turn += 1
 
-        # Player-drawn convoy routes last one turn: their convoys drove in the
-        # mission that just ended (or the turn was skipped).
-        if self.player_convoy_routes:
-            logging.info(
-                f"Removing {len(self.player_convoy_routes)} player convoy route(s) "
-                "at end of turn"
-            )
-            self.player_convoy_routes.clear()
+        # One-off player convoy routes last one turn: their convoys drove in the
+        # mission that just ended (or the turn was skipped). Standing routes
+        # stay and send a new convoy next turn.
+        self.end_turn_convoy_routes()
 
         # The coalition-specific turn finalization *must* happen before unit deliveries,
         # since the coalition-specific finalization handles transit network updates and

@@ -130,7 +130,43 @@ describe("DropZoneLayer right-click workflow", () => {
       start_lng: 2,
       end_lat: 3,
       end_lng: 4,
+      repeat: false,
     });
+  });
+
+  it("creates a standing route and can stop it repeating", async () => {
+    const created = {
+      id: "r-2",
+      name: "MSR Denver",
+      start: { lat: 1, lng: 2 },
+      end: { lat: 3, lng: 4 },
+      repeat: true,
+    };
+    const fetchMock = mockFetch(201, created);
+    const { store } = renderWithProviders(<DropZoneLayer />);
+
+    rightClick(1, 2);
+    fireEvent.click(screen.getByText(/Add Convoy Route/));
+    rightClick(3, 4);
+    fireEvent.click(screen.getByLabelText(/Repeat every turn/));
+    fireEvent.click(screen.getByText(/Save/));
+
+    await waitFor(() =>
+      expect(store.getState().convoyRoutes.routes).toHaveLength(1)
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).repeat).toBe(true);
+    expect(screen.getByText(/Standing route/)).toBeInTheDocument();
+
+    const patchMock = mockFetch(200, { ...created, repeat: false });
+    fireEvent.click(screen.getByText(/Stop repeating/));
+    await waitFor(() =>
+      expect(store.getState().convoyRoutes.routes[0].repeat).toBe(false)
+    );
+    const [url, init] = patchMock.mock.calls[0];
+    expect(url).toMatch(/\/convoy-routes\/r-2$/);
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body)).toEqual({ repeat: false });
+    expect(screen.getByText(/One-off: removed/)).toBeInTheDocument();
   });
 
   it("cancels a route in progress with Escape", () => {

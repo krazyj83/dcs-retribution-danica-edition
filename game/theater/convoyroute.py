@@ -28,9 +28,10 @@ if TYPE_CHECKING:
 class PlayerConvoyRoute:
     """A convoy route drawn on the map by the player.
 
-    Saved with the campaign (``Game.player_convoy_routes``). A route is good
-    for one turn: the convoy drives it in the next mission, and the route is
-    removed when the turn ends.
+    Saved with the campaign (``Game.player_convoy_routes``). A convoy drives
+    the route in the next mission. A one-off route is removed when the turn
+    ends; a standing route (``repeat``) stays, and a new convoy drives it every
+    turn until the player removes it.
     """
 
     id: UUID
@@ -39,6 +40,12 @@ class PlayerConvoyRoute:
     start_lng: float
     end_lat: float
     end_lng: float
+    repeat: bool = False
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        # Routes saved before standing routes existed were all one-off.
+        state.setdefault("repeat", False)
+        self.__dict__.update(state)
 
 
 @dataclass

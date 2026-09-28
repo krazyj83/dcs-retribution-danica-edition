@@ -1,4 +1,5 @@
-"""Player-drawn convoy routes are saved with the game and last one turn."""
+"""Player-drawn convoy routes are saved with the game; one-off routes last one
+turn, standing routes stay until removed."""
 
 from __future__ import annotations
 
@@ -119,3 +120,37 @@ def test_old_saves_get_an_empty_route_list(monkeypatch: pytest.MonkeyPatch) -> N
     # And a saved route survives a save/load round trip.
     route = _route()
     assert pickle.loads(pickle.dumps(route)) == route
+
+
+def test_standing_routes_stay_one_off_routes_go() -> None:
+    game = _bare_game()
+    one_off, standing = _route(), _route()
+    standing.repeat = True
+    game.player_convoy_routes = {one_off.id: one_off, standing.id: standing}
+
+    game.end_turn_convoy_routes()
+
+    assert list(game.player_convoy_routes) == [standing.id]
+
+
+def test_route_can_be_made_standing_and_back(game: Any) -> None:
+    client = TestClient(app)
+    created = client.post("/convoy-routes/", json={**ROUTE, "repeat": True}).json()
+    assert created["repeat"] is True
+    route_id = created["id"]
+
+    updated = client.patch(f"/convoy-routes/{route_id}", json={"repeat": False})
+
+    assert updated.status_code == 200 and updated.json()["repeat"] is False
+    assert next(iter(game.player_convoy_routes.values())).repeat is False
+    missing = client.patch(f"/convoy-routes/{uuid4()}", json={"repeat": True})
+    assert missing.status_code == 404
+
+
+def test_routes_saved_before_standing_routes_load_as_one_off() -> None:
+    route = _route()
+    state = dict(route.__dict__)
+    del state["repeat"]
+    old: Any = PlayerConvoyRoute.__new__(PlayerConvoyRoute)
+    old.__setstate__(state)
+    assert old.repeat is False and old.name == "R"
