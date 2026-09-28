@@ -154,6 +154,8 @@ class MissionGenerator:
 
         namegen.reset_numbers()
         self.generate_warehouses()
+        # Anything else in the mission file after this was added in the editor.
+        self.unit_map.record_generated_units(self.mission)
         output.parent.mkdir(parents=True, exist_ok=True)
         self.mission.save(output)
 

@@ -49,6 +49,10 @@ class LossGrid(QGridLayout):
         )
         self.add_loss_rows(debriefing.ground_object_losses_by_type(player), lambda u: u)
         self.add_loss_rows(debriefing.scenery_losses_by_type(player), lambda u: u)
+        self.add_loss_rows(
+            debriefing.editor_losses_by_type(player),
+            lambda u: f"{u} (added in mission editor)",
+        )
 
     def add_loss_rows(self, losses: Dict[T, int], make_name: Callable[[T], str]):
         for unit_type, count in losses.items():

@@ -84,6 +84,25 @@ class UnitMap:
         self.player_drawn_convoys: Dict[str, PlayerDrawnConvoyUnit] = {}
         self.cargo_ships: Dict[str, CargoShip] = {}
         self.airlifts: Dict[str, AirliftUnits] = {}
+        #: Names of every unit Retribution put in the mission file. Losses of
+        #: other mission-file units were added in the mission editor.
+        self.generated_unit_names: Optional[frozenset[str]] = None
+
+    def record_generated_units(self, mission: Any) -> None:
+        """Remember every unit name in the generated mission (call last)."""
+        names: set[str] = set()
+        for coalition in mission.coalition.values():
+            for country in coalition.countries.values():
+                for groups in (
+                    country.plane_group,
+                    country.helicopter_group,
+                    country.vehicle_group,
+                    country.ship_group,
+                    country.static_group,
+                ):
+                    for group in groups:
+                        names.update(str(unit.name) for unit in group.units)
+        self.generated_unit_names = frozenset(names)
 
     def add_aircraft(self, group: FlyingGroup[Any], flight: Flight) -> None:
         for pilot, unit in zip(flight.roster.iter_pilots(), group.units):

@@ -13,6 +13,51 @@ destroyed_objects_positions = {} -- will be added via S_EVENT_DEAD event
 mission_ended = false
 dirty_state = false -- Track if state has changed and needs writing
 
+-- Units placed in the mission file, name -> {coalition, category, type}:
+-- everything Retribution generated plus anything added in the mission editor.
+-- Deaths of these units are written as miz_unit_losses; the debrief keeps the
+-- ones Retribution didn't generate (units added in the mission editor).
+-- Units spawned while the mission runs (CTLD troops, respawns) aren't in the
+-- mission file, so they are never counted.
+local miz_units = {}
+pcall(function()
+    for side, coalition in pairs(env.mission and env.mission.coalition or {}) do
+        for _, country in ipairs(coalition.country or {}) do
+            for _, category in ipairs({"plane", "helicopter", "vehicle", "ship", "static"}) do
+                local groups = country[category] and country[category].group or {}
+                for _, group in ipairs(groups) do
+                    for _, unit in ipairs(group.units or {}) do
+                        if unit.name then
+                            miz_units[unit.name] = {
+                                coalition = side, category = category, type = unit.type,
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+miz_unit_losses = {}
+local miz_unit_lost = {}
+
+local function note_miz_unit_loss(name)
+    local info = name and miz_units[name]
+    if info and not miz_unit_lost[name] then
+        miz_unit_lost[name] = true
+        miz_unit_losses[#miz_unit_losses + 1] = {
+            name = name, coalition = info.coalition,
+            category = info.category, type = info.type,
+        }
+    end
+end
+
+local function object_name(object)
+    if not object or not object.getName then return nil end
+    local ok, name = pcall(object.getName, object)
+    return ok and name or nil
+end
+
 local function ends_with(str, ending)
    return ending == "" or str:sub(-#ending) == ending
 end
@@ -97,6 +142,10 @@ function write_state()
         if cargo_ok and cargo_crates and #cargo_crates > 0 then
             game_state["cargo_crates"] = cargo_crates
         end
+    end
+    -- Mission-file units that were lost (see miz_units above), if any.
+    if #miz_unit_losses > 0 then
+        game_state["miz_unit_losses"] = miz_unit_losses
     end
     -- Player-drawn convoy vehicles that reached their route end, if any.
     local arrivals = player_convoy_arrivals()
@@ -244,6 +293,13 @@ local function onEvent(event)
     if being_respawned(event) then
         return
     end
+    if event.id == world.event.S_EVENT_CRASH or event.id == world.event.S_EVENT_UNIT_LOST
+        or event.id == world.event.S_EVENT_DEAD then
+        note_miz_unit_loss(object_name(event.initiator))
+    elseif event.id == world.event.S_EVENT_KILL then
+        note_miz_unit_loss(object_name(event.target))
+    end
+
     if event.id == world.event.S_EVENT_CRASH and event.initiator then
         crash_events[#crash_events + 1] = event.initiator.getName(event.initiator)
         dirty_state = true

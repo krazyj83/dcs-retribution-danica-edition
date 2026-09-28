@@ -177,6 +177,11 @@ class QWaitingForMissionResultWindow(QDialog):
             ("Scenery Objects lost", blue.scenery, red.scenery),
             ("Bases captured", blue.bases_captured, red.bases_captured),
             ("Runways destroyed", blue.runways_destroyed, red.runways_destroyed),
+            (
+                "Mission editor units lost",
+                blue.editor_units,
+                red.editor_units,
+            ),
         ]
         for label, blue_count, red_count in rows:
             self.add_update_row(label, blue_count, red_count, update_layout)
