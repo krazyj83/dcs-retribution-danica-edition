@@ -1,3 +1,6 @@
+// Danica Edition: this file is maintained by hand. The upstream generator
+// (`npm run regenerate-api`) crashes on GroupTask, so regenerating it would drop
+// the fork's endpoints. Add new endpoints here and in their slices.
 import { baseApi as api } from "./baseApi";
 
 const injectedRtkApi = api.injectEndpoints({

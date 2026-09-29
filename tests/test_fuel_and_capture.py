@@ -12,7 +12,6 @@ from dcs.planes import F_16C_50, KC_135
 
 from game.logistics import LogisticsManager, Warehouse, WarehouseCategory
 from game.logistics.base_inventory import base_inventory
-from game.logistics.capture import CAPTURE_SALVAGE_STOCK
 from game.logistics.fuel import (
     fuel_per_aircraft,
     fuel_warning,
@@ -142,7 +141,7 @@ def test_lost_base_keeps_fuel_and_loses_weapons() -> None:
     assert "fuel kept (640)" in log[1]
 
 
-def test_retaken_base_keeps_fuel_gets_salvage_and_no_weapons() -> None:
+def test_retaken_base_keeps_fuel_and_nothing_else() -> None:
     base = _cp("Larnaca")
     logistics = LogisticsManager()
     _stocked(logistics, base)
@@ -153,7 +152,7 @@ def test_retaken_base_keeps_fuel_gets_salvage_and_no_weapons() -> None:
     wh = logistics.get_warehouse(base.id)
     assert wh is not None
     assert wh.stock[FUEL].quantity == 640
-    assert wh.stock[AMMO].quantity == CAPTURE_SALVAGE_STOCK
+    assert wh.stock[AMMO].quantity == 0
     inv = logistics.get_weapon_inventory(base.id)
     assert inv is not None
     assert sum(i.quantity for i in inv.items.values()) == 0
@@ -168,7 +167,7 @@ def test_captured_enemy_base_without_warehouse_gets_one() -> None:
     wh = logistics.get_warehouse(base.id)
     assert wh is not None
     assert wh.stock[FUEL].quantity == 500  # default tank farm
-    assert wh.stock[AMMO].quantity == CAPTURE_SALVAGE_STOCK
+    assert wh.stock[AMMO].quantity == 0
 
 
 def test_debrief_log_is_handed_out_once() -> None:

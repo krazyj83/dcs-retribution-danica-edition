@@ -64,6 +64,8 @@ PILOTS_AND_SQUADRONS_SECTION = "Pilots and Squadrons"
 HQ_AUTOMATION_SECTION = "HQ Automation"
 FLIGHT_PLANNER_AUTOMATION = "Flight Planner Automation"
 REDFOR_LOGISTICS_SECTION = "REDFOR Logistics"
+BASE_SUPPLIES_SECTION = "Base Supplies"
+BATTLEFIELD_SECTION = "Battlefield"
 
 CAMPAIGN_DOCTRINE_PAGE = "Campaign Doctrine"
 DOCTRINE_DISTANCES_SECTION = "Doctrine distances"
@@ -530,7 +532,7 @@ class Settings:
     logistics_unlimited_fuel: bool = boolean_option(
         "Unlimited warehouse fuel",
         page=CAMPAIGN_MANAGEMENT_PAGE,
-        section=GENERAL_SECTION,
+        section=BASE_SUPPLIES_SECTION,
         default=False,
         detail=(
             "When on, sorties don't use their base's warehouse fuel and fuel is "
@@ -543,7 +545,7 @@ class Settings:
     logistics_players_load_on_ground: bool = boolean_option(
         "Player aircraft load from base stores",
         page=CAMPAIGN_MANAGEMENT_PAGE,
-        section=GENERAL_SECTION,
+        section=BASE_SUPPLIES_SECTION,
         default=True,
         detail=(
             "Player aircraft starting on the ground at a friendly airfield spawn "
@@ -556,7 +558,7 @@ class Settings:
     redfor_logistics: bool = boolean_option(
         "REDFOR logistics (fuel and ammunition limit enemy sorties)",
         page=CAMPAIGN_MANAGEMENT_PAGE,
-        section=GENERAL_SECTION,
+        section=REDFOR_LOGISTICS_SECTION,
         default=True,
         detail=(
             "REDFOR bases keep warehouse fuel and ammunition. Enemy sorties use "
@@ -569,12 +571,13 @@ class Settings:
     redfor_fuel_per_turn: int = bounded_int_option(
         "REDFOR extra fuel per base per turn",
         page=CAMPAIGN_MANAGEMENT_PAGE,
-        section=GENERAL_SECTION,
+        section=REDFOR_LOGISTICS_SECTION,
         default=60,
         min=0,
         max=500,
         detail=(
-            "On top of what the base's sorties used, with all REDFOR fuel depots "
+            "Needs REDFOR logistics. On top of what the base's sorties used, "
+            "with all REDFOR fuel depots "
             "standing; lets idle bases refill. Ammunition gets two thirds of it. "
             "A four-ship of Su-27s uses about 190 fuel."
         ),
@@ -582,7 +585,7 @@ class Settings:
     redfor_repairs_air_defences: bool = boolean_option(
         "REDFOR repairs damaged air defence sites",
         page=CAMPAIGN_MANAGEMENT_PAGE,
-        section=GENERAL_SECTION,
+        section=REDFOR_LOGISTICS_SECTION,
         default=True,
         detail=(
             "Needs REDFOR logistics. At the end of every turn each damaged "
@@ -594,7 +597,7 @@ class Settings:
     advanced_iads_auto: bool = boolean_option(
         "Build advanced IADS automatically (new campaigns)",
         page=CAMPAIGN_MANAGEMENT_PAGE,
-        section=GENERAL_SECTION,
+        section=BATTLEFIELD_SECTION,
         default=True,
         detail=(
             "When a new campaign is generated and its author did not set up an "
@@ -607,7 +610,7 @@ class Settings:
     motorpool_enabled: bool = boolean_option(
         "Spawn strikeable motorpool reserves",
         page=CAMPAIGN_MANAGEMENT_PAGE,
-        section=GENERAL_SECTION,
+        section=BATTLEFIELD_SECTION,
         default=True,
         detail=(
             "Render each control point's not-yet-deployed reserve armor as a "
@@ -618,12 +621,13 @@ class Settings:
     motorpool_spawn_cap: int = bounded_int_option(
         "Maximum motorpool vehicles per turn",
         page=CAMPAIGN_MANAGEMENT_PAGE,
-        section=GENERAL_SECTION,
+        section=BATTLEFIELD_SECTION,
         default=10,
         min=0,
         max=25,
         detail=(
-            "Caps how many reserve vehicles a control point renders across its "
+            "Needs motorpool reserves. Caps how many reserve vehicles a control "
+            "point renders across its "
             "motorpool(s) per turn. Lower this if motorpools hurt mission "
             "performance."
         ),

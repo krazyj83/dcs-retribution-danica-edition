@@ -21,9 +21,6 @@ from game.dcs.helpers import unit_type_from_name
 from game.missiongenerator.aircraft.aircraftgenerator import (
     AircraftGenerator,
 )
-from game.missiongenerator.logisticsmissiongenerator import (
-    LogisticsMissionGenerator,
-)
 from game.naming import namegen
 from game.radio.radios import RadioFrequency, RadioRegistry, MHz
 from game.radio.tacan import TacanRegistry
@@ -184,8 +181,8 @@ class MissionGenerator:
                 "continuing mission generation without drop zones"
             )
 
-        # Generate LOGISTICS flight groups from the blue ATO
-        self._generate_logistics_flights()
+        # LOGISTIC flights are generated like any other flight; their
+        # transfers went IN_FLIGHT in LogisticsManager.on_turn_end.
 
         # Weapon transfers: put the cargo next to the aircraft that flies it.
         try:
@@ -241,69 +238,6 @@ class MissionGenerator:
             )
         except Exception:
             logging.exception("MissionGenerator: player convoy data failed")
-
-    def _generate_logistics_flights(self) -> None:
-        """
-        Find all LOGISTICS-typed flights in the blue ATO and generate
-        their pydcs flight groups via LogisticsMissionGenerator.
-
-        Concept — why we handle this separately from generate_air_units():
-          The AircraftGenerator handles all standard flight types through
-          its generate_flights() dispatch. LOGISTICS flights are special
-          because they need to read from game.logistics to get transfer
-          details, and they need the drop zone trigger zones to already
-          exist in the mission (which inject_into_mission() just created).
-          Separating this into its own pass keeps the AircraftGenerator
-          clean and avoids coupling it to the logistics module.
-        """
-        logistics_flights_generated = 0
-        logistics_flights_skipped = 0
-
-        # Both coalitions' ATOs can hold LOGISTIC flights (red ones can be
-        # planned with "Show/Plan OPFOR's ATO"), so check both.
-        for coalition_ato in (self.game.blue.ato, self.game.red.ato):
-            for package in coalition_ato.packages:
-                for flight in package.flights:
-                    if flight.flight_type is not FlightType.LOGISTIC:
-                        continue
-
-                    transfer_id = getattr(flight, "transfer_id", None)
-                    if not transfer_id:
-                        logging.warning(
-                            "MissionGenerator: LOGISTICS flight in package '%s' "
-                            "has no transfer_id — skipped. "
-                            "Was schedule_transfer() called when planning?",
-                            package.target.name if package.target else "unknown",
-                        )
-                        logistics_flights_skipped += 1
-                        continue
-
-                    try:
-                        gen = LogisticsMissionGenerator(flight, self.game, self.mission)
-                        success = gen.generate()
-                        if success:
-                            logistics_flights_generated += 1
-                            logging.info(
-                                "MissionGenerator: LOGISTICS flight generated "
-                                "(transfer %s)",
-                                transfer_id[:8],
-                            )
-                        else:
-                            logistics_flights_skipped += 1
-                    except Exception:
-                        logging.exception(
-                            "MissionGenerator: LOGISTICS flight generation failed "
-                            "for transfer %s — skipping this flight",
-                            transfer_id[:8] if transfer_id else "unknown",
-                        )
-                        logistics_flights_skipped += 1
-
-        if logistics_flights_generated or logistics_flights_skipped:
-            logging.info(
-                "MissionGenerator: logistics flights — " "generated=%d skipped=%d",
-                logistics_flights_generated,
-                logistics_flights_skipped,
-            )
 
     @staticmethod
     def _configure_react_to_threat_for_ew_jamming_packages(

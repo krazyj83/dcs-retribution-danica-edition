@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from uuid import UUID
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional, Dict, List, Tuple, TYPE_CHECKING
@@ -147,7 +148,8 @@ def build_weapon_inventory(cp: "ControlPoint", game: "Game") -> WeaponInventory:
     try:
         from game.data.weapons import Pylon
 
-        for coalition in [game.blue, game.red]:
+        # Weapon stores are BLUEFOR's; REDFOR sorties use the ammunition stock.
+        for coalition in [game.blue]:
             try:
                 for aircraft_type, squadrons in coalition.air_wing.squadrons.items():
                     for sq in squadrons:
@@ -197,13 +199,17 @@ def build_weapon_inventory(cp: "ControlPoint", game: "Game") -> WeaponInventory:
     return inv
 
 
+#: Soviet air-to-air missile names ("R-60M", "2 x R-73"), but not the "R-" in
+#: BR-250, LR-25 or TER-9.
+_SOVIET_AAM = re.compile(r"(^|[^A-Z0-9])R-\d")
+
+
 def _weapon_category(name: str) -> str:
     n = name.upper()
-    if any(
+    if _SOVIET_AAM.search(n) or any(
         x in n
         for x in [
             "AIM-",
-            "R-",
             "AA-",
             "MICA",
             "AMRAAM",
@@ -221,7 +227,6 @@ def _weapon_category(name: str) -> str:
         for x in [
             "AGM-",
             "KH-",
-            "Kh-",
             "AS-",
             "MAVERICK",
             "HARM",
@@ -244,12 +249,24 @@ def _weapon_category(name: str) -> str:
             "KAB-",
             "BETAB",
             "OFAB",
+            "BR-2",
+            "BR-5",
         ]
     ):
         return "Bomb"
     if any(
         x in n
-        for x in ["ROCKET", "S-5", "S-8", "S-13", "S-24", "ZUNI", "HYDRA", "FFAR"]
+        for x in [
+            "ROCKET",
+            "RKTS",
+            "S-5",
+            "S-8",
+            "S-13",
+            "S-24",
+            "ZUNI",
+            "HYDRA",
+            "FFAR",
+        ]
     ):
         return "Rocket"
     if any(x in n for x in ["DROP TANK", "FUEL TANK", "PTB-"]):
@@ -534,8 +551,8 @@ class LogisticsTransfer:
         return f"{self.quantity:.0f} {self.category.value}"
 
     def mark_in_flight(self) -> None:
-        """Called by LogisticsMissionGenerator once the flight has been
-        generated in the mission. Raises ValueError if the transfer isn't
+        """Called by on_turn_end when the transfer's flight is in the ATO.
+        Raises ValueError if the transfer isn't
         in the PLANNED state (e.g. it was already marked, or cancelled)."""
         if self.status != TransferStatus.PLANNED:
             raise ValueError(
@@ -563,6 +580,9 @@ class LogisticsManager:
 
     #: Fraction of every warehouse category lost each turn (handling, spoilage).
     ATTRITION_PER_TURN = 0.01
+    #: Delivered and failed transfers stay in the Transfers list this many
+    #: turns, then are dropped so saves don't keep them forever.
+    FINISHED_TRANSFER_TURNS = 5
 
     def __init__(self) -> None:
         self._drop_zones: Dict[str, DropZone] = {}
@@ -623,9 +643,6 @@ class LogisticsManager:
 
     def get_drop_zone(self, dz_id: str) -> Optional[DropZone]:
         return self._drop_zones.get(dz_id)
-
-    def active_drop_zones(self, coalition: str) -> List[DropZone]:
-        return list(self._drop_zones.values())
 
     def drop_zones_for_cp(self, cp_id: UUID) -> List[DropZone]:
         return [dz for dz in self._drop_zones.values() if dz.cp_id == cp_id]
@@ -729,6 +746,9 @@ class LogisticsManager:
                 if current is not None:
                     for clsid, item in current.items.items():
                         if clsid in weapon_ids:
+                            if clsid in fresh.items:
+                                # Stock is kept; the category follows the rules.
+                                item.category = fresh.items[clsid].category
                             fresh.items[clsid] = item
                 self._weapon_inventories[cp.id] = fresh
         except Exception as e:
@@ -1096,6 +1116,16 @@ class LogisticsManager:
                 game, t.transfer_id
             ):
                 t.mark_in_flight()
+        self.prune_finished_transfers(game.turn)
+
+    def prune_finished_transfers(self, turn: int) -> None:
+        """Drop delivered and failed transfers planned more than
+        FINISHED_TRANSFER_TURNS turns ago."""
+        finished = (TransferStatus.DELIVERED, TransferStatus.FAILED)
+        oldest = turn - self.FINISHED_TRANSFER_TURNS
+        for tid, t in list(self._transfers.items()):
+            if t.status in finished and t.turn_planned < oldest:
+                del self._transfers[tid]
 
     def on_state_processed(self, game: "Game", debriefing: "Debriefing") -> List[str]:
         """Settle IN_FLIGHT transfers from the mission results.

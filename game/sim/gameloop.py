@@ -77,7 +77,7 @@ class GameLoop:
         #     PLANNED → IN_FLIGHT (stock already left the source when the
         #     transfer was scheduled)
         #   - once-per-turn warehouse attrition
-        # Runs BEFORE generate_miz so LogisticsMissionGenerator sees the
+        # Runs BEFORE generate_miz so the cargo generator sees the
         # IN_FLIGHT transfers.
         # ----------------------------------------------------------------
         if hasattr(self.game, "logistics"):

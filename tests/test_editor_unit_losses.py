@@ -170,15 +170,27 @@ def test_mission_script_reports_mission_file_units_lost(tmp_path: Path) -> None:
 
 
 SHOT_SCENARIO = r"""
+coalition = {side = {RED = 1, BLUE = 2}}
+Unit = {Category = {AIRPLANE = 0, HELICOPTER = 1, GROUND_UNIT = 2}}
 local function weapon(t) return {getTypeName = function() return t end} end
+local function shooter(name, side, category)
+  local o = obj(name)
+  o.getCoalition = function() return side end
+  o.getDesc = function() return {category = category} end
+  return o
+end
 fire_shot = function(unit, t)
   for _, h in ipairs(handlers) do
-    h({id = world.event.S_EVENT_SHOT, initiator = obj(unit), weapon = weapon(t)})
+    h({id = world.event.S_EVENT_SHOT, initiator = unit, weapon = weapon(t)})
   end
 end
-fire_shot("Viper 1-1", "AIM_120C")
-fire_shot("Viper 1-1", "AIM_120C")
-fire_shot("Viper 1-1", "GBU_12")
+local viper = shooter("Viper 1-1", coalition.side.BLUE, Unit.Category.AIRPLANE)
+fire_shot(viper, "AIM_120C")
+fire_shot(viper, "AIM_120C")
+fire_shot(viper, "GBU_12")
+-- Not tracked: a REDFOR SAM and a BLUEFOR ground unit.
+fire_shot(shooter("SA-11", coalition.side.RED, Unit.Category.GROUND_UNIT), "9M38")
+fire_shot(shooter("Paladin", coalition.side.BLUE, Unit.Category.GROUND_UNIT), "155")
 write_state()
 """
 

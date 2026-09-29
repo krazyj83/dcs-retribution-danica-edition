@@ -5,8 +5,8 @@ by the ground war, and the capture cheat.
 
     Weapon stores           all weapons set to 0 (they are lost or destroyed)
     Fuel                    stays as it is: the tanks are captured with the base
-    Ammunition, supplies,   captured by BLUEFOR: CAPTURE_SALVAGE_STOCK each
-    troops                  captured by REDFOR:  0
+    Ammunition, supplies,   set to 0 for either side: the new owner has to
+    troops                  ship them in
 
 The base keeps its warehouse and weapon store list either way, so a base that
 is lost and retaken keeps its fuel and shows its (empty) weapon stores.
@@ -19,9 +19,6 @@ from typing import TYPE_CHECKING, Any, List
 if TYPE_CHECKING:
     from game.logistics import LogisticsManager
     from game.theater.player import Player
-
-#: Ammunition, supplies and troops found in a base BLUEFOR captures.
-CAPTURE_SALVAGE_STOCK = 200.0
 
 
 def on_base_captured(
@@ -51,14 +48,10 @@ def on_base_captured(
     for category in WarehouseCategory:
         if category is WarehouseCategory.FUEL:
             continue
-        warehouse.stock[category].quantity = (
-            CAPTURE_SALVAGE_STOCK if new_owner.is_blue else 0.0
-        )
+        warehouse.stock[category].quantity = 0.0
     fuel = warehouse.stock[WarehouseCategory.FUEL].quantity
-    salvage = (
-        f"{CAPTURE_SALVAGE_STOCK:.0f} salvage ammunition, supplies and troops"
-        if new_owner.is_blue
-        else "ammunition, supplies and troops lost"
+    log.append(
+        f"{cp.name} captured by {side}: fuel kept ({fuel:.0f}), "
+        "ammunition, supplies and troops lost"
     )
-    log.append(f"{cp.name} captured by {side}: fuel kept ({fuel:.0f}), {salvage}")
     return log

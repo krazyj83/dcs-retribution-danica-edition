@@ -82,19 +82,28 @@ function retribution_setup_warehouses()
             end
         end
     end
+    -- The same store is at many bases: match each store key once.
+    local match_cache = {}
+    local function best_match(key)
+        local cached = match_cache[key]
+        if cached ~= nil then return cached or nil end
+        local best = nil
+        for _, weapon in ipairs(weapons) do
+            if string.find(key, weapon.short, 1, true)
+                and (not best or #weapon.short > #best.short) then
+                best = weapon
+            end
+        end
+        match_cache[key] = best or false
+        return best
+    end
     for _, base in ipairs(data.bases) do
         local airbase = Airbase.getByName(base.airbase)
         local wh = airbase and airbase.getWarehouse and airbase:getWarehouse()
         if wh then
             local counts = {}
             for _, store in ipairs(base.stores or {}) do
-                local best = nil
-                for _, weapon in ipairs(weapons) do
-                    if string.find(store.key, weapon.short, 1, true)
-                        and (not best or #weapon.short > #best.short) then
-                        best = weapon
-                    end
-                end
+                local best = best_match(store.key)
                 if best then
                     counts[best.name] = (counts[best.name] or 0)
                         + store.count * (store.per_store or 1)
@@ -202,15 +211,31 @@ local function player_ammo_report()
     return report
 end
 
+-- Only BLUEFOR aircraft: their stores are tracked. SAMs, ships and REDFOR
+-- shoot a lot and would only grow the state file.
+local function is_blue_aircraft(unit)
+    if not unit.getCoalition or not unit.getDesc then return false end
+    local ok_side, side = pcall(unit.getCoalition, unit)
+    if not ok_side or side ~= coalition.side.BLUE then return false end
+    local ok_desc, desc = pcall(unit.getDesc, unit)
+    if not ok_desc or not desc then return false end
+    return desc.category == Unit.Category.AIRPLANE
+        or desc.category == Unit.Category.HELICOPTER
+end
+
+-- Returns true when the shot was recorded.
 local function note_shot(event)
     local unit, weapon = event.initiator, event.weapon
     if not unit or not weapon or not unit.getName or not weapon.getTypeName then
-        return
+        return false
+    end
+    if not is_blue_aircraft(unit) then
+        return false
     end
     local ok_name, name = pcall(unit.getName, unit)
     local ok_type, type_name = pcall(weapon.getTypeName, weapon)
     if not ok_name or not ok_type or not name or not type_name then
-        return
+        return false
     end
     local shots = weapons_fired[name]
     if not shots then
@@ -219,6 +244,7 @@ local function note_shot(event)
         weapons_fired_count = weapons_fired_count + 1
     end
     shots[type_name] = (shots[type_name] or 0) + 1
+    return true
 end
 
 local function note_miz_unit_loss(name)
@@ -466,7 +492,6 @@ write_state_error_handling = function()
     mist.scheduleFunction(write_state_error_handling, {}, timer.getTime() + next_schedule_in_seconds)
 end
 
-activeWeapons = {}
 -- Units being replaced by a respawn in place (ship_weapons rearm): unit name ->
 -- time until which their removal is not a loss.
 retribution_respawning = retribution_respawning or {}
@@ -483,8 +508,9 @@ local function onEvent(event)
         return
     end
     if event.id == world.event.S_EVENT_SHOT then
-        note_shot(event)
-        dirty_state = true
+        if note_shot(event) then
+            dirty_state = true
+        end
         return
     end
     if event.id == world.event.S_EVENT_TAKEOFF or event.id == world.event.S_EVENT_LAND then

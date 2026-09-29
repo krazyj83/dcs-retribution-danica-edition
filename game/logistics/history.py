@@ -93,7 +93,3 @@ def record_turn(logistics: LogisticsManager, turn: int) -> None:
 def history_for(logistics: LogisticsManager, cp_id: UUID) -> List[HistoryPoint]:
     """The base's recorded points, oldest first."""
     return list(_history(logistics).get(cp_id, []))
-
-
-def forget_base(logistics: LogisticsManager, cp_id: UUID) -> None:
-    _history(logistics).pop(cp_id, None)
