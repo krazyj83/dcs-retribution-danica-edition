@@ -7,7 +7,8 @@ loads them with the ground crew (rearm/refuel), and DCS takes what they load
 from the airfield's DCS warehouse, which is filled from Retribution's stock:
 
 * Fuel: the warehouse's jet fuel is set to the base's warehouse fuel
-  (FUEL_KG_PER_UNIT kg per unit) and made limited.
+  (FUEL_KG_PER_UNIT kg per unit) and made limited, unless "Unlimited warehouse
+  fuel" is on.
 * Weapons: the warehouse's munitions are made limited, and at mission start
   the mission script (dcs_retribution.lua) sets every DCS weapon to what the
   base's weapon stores hold. Retribution counts stores as they hang on a pylon
@@ -35,7 +36,6 @@ logger = logging.getLogger(__name__)
 
 EMPTY_FUEL_FRACTION = 0.10
 UNMATCHED_STOCK = 500
-FUEL_KG_PER_UNIT = 200.0
 
 
 def enabled(game: Any) -> bool:
@@ -76,15 +76,17 @@ def _airport_bases(game: Game) -> List[Any]:
 def configure_airports(game: Game, mission: Any) -> None:
     """Limit fuel and munitions of the DCS warehouses of friendly airfields."""
     from game.logistics import WarehouseCategory
+    from game.logistics.fuel import FUEL_KG_PER_UNIT, unlimited_fuel
 
     for cp in _airport_bases(game):
         airport = mission.terrain.airports.get(cp.airport.name)
         warehouse = game.logistics.get_warehouse(cp.id)
         if airport is None or warehouse is None:
             continue
-        fuel_units = warehouse.stock[WarehouseCategory.FUEL].quantity
-        airport.unlimited_fuel = False
-        airport.jet_init = round(fuel_units * FUEL_KG_PER_UNIT / 1000.0, 1)  # tons
+        if not unlimited_fuel(game):
+            fuel_units = warehouse.stock[WarehouseCategory.FUEL].quantity
+            airport.unlimited_fuel = False
+            airport.jet_init = round(fuel_units * FUEL_KG_PER_UNIT / 1000.0, 1)
         if game.logistics.get_weapon_inventory(cp.id) is not None:
             airport.unlimited_munitions = False
 
@@ -92,6 +94,7 @@ def configure_airports(game: Game, mission: Any) -> None:
 def script_data(game: Game) -> Dict[str, Any]:
     """dcsRetributionWarehouses: each airfield's stores for the mission script."""
     from game.logistics import WarehouseCategory
+    from game.logistics.fuel import FUEL_KG_PER_UNIT, unlimited_fuel
     from game.logistics.weapon_use import _norm, _pydcs_ids, weapons_per_store
 
     bases: List[Dict[str, Any]] = []
@@ -112,7 +115,7 @@ def script_data(game: Game) -> Dict[str, Any]:
                 }
             )
         fuel: Optional[float] = None
-        if warehouse is not None:
+        if warehouse is not None and not unlimited_fuel(game):
             fuel = warehouse.stock[WarehouseCategory.FUEL].quantity * FUEL_KG_PER_UNIT
         bases.append({"airbase": cp.airport.name, "stores": stores, "fuel_kg": fuel})
     return {"bases": bases, "unmatched": UNMATCHED_STOCK}

@@ -24,6 +24,11 @@ if TYPE_CHECKING:
     from game import Game
 
 
+#: Comment prefix of the start triggers that set the fork's data tables for the
+#: mission scripts (warehouses, naval munitions, player convoys, cargo).
+DATA_TRIGGER_PREFIX = "Set DCS Retribution"
+
+
 class LuaGenerator:
     def __init__(
         self,
@@ -37,8 +42,14 @@ class LuaGenerator:
         self.plugin_scripts: list[str] = []
 
     def generate(self) -> None:
+        # Start triggers made earlier (EWRJ) run after the plugin scripts. The
+        # fork's data tables ("Set DCS Retribution ..." comments) stay first:
+        # the scripts read them when they load.
         ewrj_triggers = [
-            x for x in self.mission.triggerrules.triggers if isinstance(x, TriggerStart)
+            x
+            for x in self.mission.triggerrules.triggers
+            if isinstance(x, TriggerStart)
+            and not str(getattr(x, "comment", "")).startswith(DATA_TRIGGER_PREFIX)
         ]
         self.generate_plugin_data()
         self.inject_plugins()

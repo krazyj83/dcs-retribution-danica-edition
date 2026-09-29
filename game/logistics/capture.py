@@ -40,15 +40,14 @@ def on_base_captured(
         if lost > 0:
             log.append(f"{cp.name} captured by {side}: {lost} weapons lost")
 
+    from game.logistics import fit_to_owner
+
     warehouse = logistics.get_warehouse(cp.id)
     if warehouse is None:
+        # A base whose stock was never tracked: the default tank farm.
         warehouse = Warehouse(cp_id=cp.id, cp_name=cp.name)
         logistics.add_warehouse(warehouse)
-    warehouse.coalition = "blue" if new_owner.is_blue else "red"
-    if new_owner.is_blue:
-        from game.logistics import upgrade_blue_fuel_capacity
-
-        upgrade_blue_fuel_capacity(warehouse)
+    fit_to_owner(warehouse, new_owner)
     for category in WarehouseCategory:
         if category is WarehouseCategory.FUEL:
             continue

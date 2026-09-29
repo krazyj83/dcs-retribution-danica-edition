@@ -121,6 +121,7 @@ class MissionResultsProcessor:
         (logistics/fuel.py).
         """
         from game.logistics.fuel import deliver_truck_fuel, lose_truck_fuel
+        from game.theater.player import Player
 
         game = getattr(debriefing, "game", None)
         dead = {loss.name for loss in debriefing.player_drawn_convoy_losses}
@@ -138,7 +139,7 @@ class MissionResultsProcessor:
             if unit.name in dead:
                 logging.info(f"Player convoy {unit.unit_type} destroyed from {origin}")
                 origin.base.armor[unit.unit_type] -= 1
-                lose_truck_fuel(game, origin, unit.unit_type)
+                lose_truck_fuel(game, origin, unit.unit_type, side=Player.BLUE)
                 continue
             destination = unit.destination
             if destination is origin or destination.captured != origin.captured:
@@ -151,7 +152,9 @@ class MissionResultsProcessor:
                 continue
             origin.base.armor[unit.unit_type] -= 1
             destination.base.commission_units({unit.unit_type: 1})
-            deliver_truck_fuel(game, origin, destination, unit.unit_type)
+            deliver_truck_fuel(
+                game, origin, destination, unit.unit_type, side=Player.BLUE
+            )
             logging.info(
                 f"Player convoy delivered {unit.unit_type} from {origin} "
                 f"to {destination}"

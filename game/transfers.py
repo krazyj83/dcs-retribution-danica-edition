@@ -149,7 +149,9 @@ class TransferOrder:
 
         for unit_type, count in self.units.items():
             if is_fuel_truck(unit_type):
-                lose_truck_fuel(self._game(), self.origin, unit_type, count)
+                lose_truck_fuel(
+                    self._game(), self.origin, unit_type, count, side=self.player
+                )
         self.units.clear()
 
     def kill_unit(self, unit_type: GroundUnitType) -> None:
@@ -158,7 +160,7 @@ class TransferOrder:
         from game.logistics.fuel import is_fuel_truck, lose_truck_fuel
 
         if is_fuel_truck(unit_type):
-            lose_truck_fuel(self._game(), self.origin, unit_type)
+            lose_truck_fuel(self._game(), self.origin, unit_type, side=self.player)
         if self.units[unit_type] == 1:
             del self.units[unit_type]
         else:
@@ -184,7 +186,12 @@ class TransferOrder:
         for unit_type, count in self.units.items():
             if is_fuel_truck(unit_type):
                 deliver_truck_fuel(
-                    self._game(), self.origin, location, unit_type, count
+                    self._game(),
+                    self.origin,
+                    location,
+                    unit_type,
+                    count,
+                    side=self.player,
                 )
         location.base.commission_units(self.units)
         self.units.clear()

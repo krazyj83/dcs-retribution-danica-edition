@@ -18,7 +18,7 @@ CSV formats:
 
 Restock pricing (main base only):
   Warehouse stock:  $0.05M per unit deficit
-  Weapons/rounds:   $0.10M per unit deficit
+  Weapons/rounds:   $0.01M per unit deficit
   Ground units:     in-game procurement price per unit deficit
 """
 
@@ -174,7 +174,11 @@ def blue_control_points(game: Game) -> List:
 
 
 def sync_warehouses_from_game(logistics: LogisticsManager, game: Game) -> None:
+    from game.logistics import keeps_warehouse
+
     for cp in blue_control_points(game):
+        if not keeps_warehouse(cp):
+            continue  # ships and off-map spawns keep no stock
         if cp.id not in logistics._warehouses:
             logistics._warehouses[cp.id] = new_base_warehouse(cp)
         else:
@@ -182,28 +186,10 @@ def sync_warehouses_from_game(logistics: LogisticsManager, game: Game) -> None:
 
 
 def _item_restock_cost(item: WeaponStockItem) -> float:
-    """Cost ($M) to restock a single item to capacity."""
-    deficit = item.capacity - item.quantity
-    if deficit <= 0:
-        return 0.0
-    if item.category in (
-        "Armour",
-        "Air Defence",
-        "Infantry Fighting Vehicle",
-        "Artillery",
-        "Support",
-    ):
-        try:
-            from game.dcs.groundunittype import GroundUnitType
+    """Cost ($M) to restock a single item to capacity (see game/logistics)."""
+    from game.logistics import item_restock_cost
 
-            for (
-                gut
-            ) in GroundUnitType._by_name.values():  # each_unit_type() does not exist
-                if getattr(gut, "variant_id", None) == item.clsid:
-                    return round(deficit * gut.price, 1)
-        except Exception:
-            pass
-    return round(deficit * 0.01, 1)
+    return item_restock_cost(item)
 
 
 # ======================================================================
@@ -697,7 +683,7 @@ class DropZonesTab(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            self.logistics.remove_drop_zone(dz_id)
+            self.logistics.remove_drop_zone(dz_id, self.game)
             self.dropZoneRemoved.emit(dz_id)
             self.refresh()
 

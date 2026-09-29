@@ -371,20 +371,114 @@ class Warehouse:
         return transferred
 
 
+#: Price ($M) of one weapon or round when restocking weapon stores.
+WEAPON_RESTOCK_COST = 0.01
+#: Weapon inventory categories restocked at the ground unit's own price.
+_GROUND_UNIT_RESTOCK_CATEGORIES = frozenset(
+    {
+        "Armour",
+        "Air Defence",
+        "Infantry Fighting Vehicle",
+        "Artillery",
+        "Support Vehicle",
+        "Radar / Command",
+        "Other Ground",
+    }
+)
+
+
+def _ground_unit_prices() -> Dict[str, float]:
+    from game.dcs.groundunittype import GroundUnitType
+
+    return {
+        str(getattr(unit, "variant_id", "")): float(unit.price)
+        for unit in GroundUnitType._by_name.values()
+    }
+
+
+def item_restock_cost(item: WeaponStockItem) -> float:
+    """Cost ($M) to restock one weapon inventory item to capacity.
+
+    Weapons and rounds: WEAPON_RESTOCK_COST each. Ground units: their
+    procurement price each.
+    """
+    deficit = item.capacity - item.quantity
+    if deficit <= 0:
+        return 0.0
+    price = WEAPON_RESTOCK_COST
+    if item.category in _GROUND_UNIT_RESTOCK_CATEGORIES:
+        try:
+            price = _ground_unit_prices().get(item.clsid, WEAPON_RESTOCK_COST)
+        except Exception:
+            price = WEAPON_RESTOCK_COST
+    return round(deficit * price, 1)
+
+
 #: BLUEFOR bases' fuel tank farm: a busy airfield flies 600-800 fuel worth of
 #: sorties a turn, so 1000 ran dry within a turn or two.
 BLUE_FUEL_CAPACITY = 2000.0
 
 
-def new_base_warehouse(cp: Any) -> Warehouse:
-    """The warehouse a BLUEFOR base gets the first time it needs one.
+#: REDFOR warehouses: fuel, ammunition and supplies (logistics/redfor.py).
+RED_CAPACITY = 2000.0
+#: Everything else.
+DEFAULT_CAPACITY = 1000.0
 
-    Default stock, except fuel: BLUE_FUEL_CAPACITY, full.
+
+def keeps_warehouse(cp: Any) -> bool:
+    """Does this base keep warehouse stock? Not ships (supplied at sea) and
+    not off-map spawns."""
+    from game.theater.controlpoint import OffMapSpawn
+
+    return not isinstance(cp, OffMapSpawn) and not getattr(cp, "is_fleet", False)
+
+
+def _capacities(red: bool) -> Dict[WarehouseCategory, float]:
+    if red:
+        return {
+            WarehouseCategory.FUEL: RED_CAPACITY,
+            WarehouseCategory.AMMUNITION: RED_CAPACITY,
+            WarehouseCategory.SUPPLIES: RED_CAPACITY,
+            WarehouseCategory.TROOPS: DEFAULT_CAPACITY,
+        }
+    return {
+        WarehouseCategory.FUEL: BLUE_FUEL_CAPACITY,
+        WarehouseCategory.AMMUNITION: DEFAULT_CAPACITY,
+        WarehouseCategory.SUPPLIES: DEFAULT_CAPACITY,
+        WarehouseCategory.TROOPS: DEFAULT_CAPACITY,
+    }
+
+
+def new_base_warehouse(cp: Any, side: Any = None) -> Warehouse:
+    """The warehouse a base gets the first time it needs one.
+
+    The only place warehouses are made for bases. ``side`` defaults to the
+    base's owner. BLUEFOR: default stock, fuel BLUE_FUEL_CAPACITY and full.
+    REDFOR: fuel, ammunition and supplies RED_CAPACITY and full.
     """
+    owner = side if side is not None else getattr(cp, "captured", None)
+    red = bool(getattr(owner, "is_red", False))
     warehouse = Warehouse(cp_id=cp.id, cp_name=cp.name)
-    fuel = warehouse.stock[WarehouseCategory.FUEL]
-    fuel.capacity = fuel.quantity = BLUE_FUEL_CAPACITY
+    warehouse.coalition = "red" if red else "blue"
+    for category, capacity in _capacities(red).items():
+        item = warehouse.stock[category]
+        item.capacity = capacity
+        if category is WarehouseCategory.FUEL or red:
+            item.quantity = capacity
     return warehouse
+
+
+def fit_to_owner(warehouse: Warehouse, side: Any) -> None:
+    """A base changed hands (or an older save): the new owner's capacities.
+
+    Stock above a smaller capacity is lost; nothing is added.
+    """
+    red = bool(getattr(side, "is_red", False))
+    warehouse.coalition = "red" if red else "blue"
+    for category, capacity in _capacities(red).items():
+        item = warehouse.stock[category]
+        item.capacity = capacity
+        item.quantity = min(item.quantity, capacity)
 
 
 def upgrade_blue_fuel_capacity(warehouse: Warehouse) -> None:
@@ -489,11 +583,27 @@ class LogisticsManager:
     def add_drop_zone(self, dz: DropZone) -> None:
         self._drop_zones[dz.dz_id] = dz
 
-    def remove_drop_zone(self, dz_id: str) -> None:
+    def remove_drop_zone(self, dz_id: str, game: Optional["Game"] = None) -> None:
+        """Remove a drop zone and cancel the planned transfers to it.
+
+        Their cargo goes back to stock (cancel_transfer); with the game given,
+        their LOGISTIC flights are removed from the ATO too.
+        """
         self._drop_zones.pop(dz_id, None)
         for t in list(self._transfers.values()):
             if t.dz_id == dz_id and t.status == TransferStatus.PLANNED:
-                t.status = TransferStatus.FAILED
+                self.cancel_transfer(t.transfer_id)
+                if game is not None:
+                    from game.logistics.transfer_flights import (
+                        remove_transfer_flight,
+                    )
+
+                    try:
+                        remove_transfer_flight(game, t.transfer_id)
+                    except Exception:
+                        logging.getLogger(__name__).exception(
+                            "Could not remove the flight of a cancelled transfer"
+                        )
 
     def get_drop_zone(self, dz_id: str) -> Optional[DropZone]:
         return self._drop_zones.get(dz_id)
@@ -688,43 +798,12 @@ class LogisticsManager:
     def restock_inventory_cost(self, cp_id: UUID) -> float:
         """Cost ($M) to refill ALL weapon/equipment inventory to capacity.
 
-        Weapons/rounds: $0.1M per unit deficit.
-        Ground units: in-game procurement price per unit deficit.
+        Same prices as one item at a time (item_restock_cost).
         """
-        WEAPON_COST = 0.1
         inv = self.get_weapon_inventory(cp_id)
         if inv is None:
             return 0.0
-        total = 0.0
-        for item in inv.items.values():
-            deficit = item.capacity - item.quantity
-            if deficit <= 0:
-                continue
-            if item.category in (
-                "Armour",
-                "Air Defence",
-                "Infantry Fighting Vehicle",
-                "Artillery",
-                "Support",
-            ):
-                try:
-                    from game.dcs.groundunittype import GroundUnitType
-
-                    for (
-                        gut
-                    ) in (
-                        GroundUnitType._by_name.values()
-                    ):  # each_unit_type() does not exist
-                        if getattr(gut, "variant_id", None) == item.clsid:
-                            total += deficit * gut.price
-                            break
-                    else:
-                        total += deficit * WEAPON_COST
-                except Exception:
-                    total += deficit * WEAPON_COST
-            else:
-                total += deficit * WEAPON_COST
-        return round(total, 1)
+        return round(sum(item_restock_cost(i) for i in inv.items.values()), 1)
 
     def restock_inventory(self, cp_id: UUID) -> None:
         """Fill ALL weapon/equipment inventory items to capacity."""
@@ -973,6 +1052,10 @@ class LogisticsManager:
             self._last_attrition_turn = game.turn
             keep_fuel = unlimited_fuel(game)
             for wh in self._warehouses.values():
+                if getattr(wh, "coalition", "blue") == "red":
+                    # REDFOR stock follows its own model (logistics/redfor.py:
+                    # what it uses comes back, scaled by the depots left).
+                    continue
                 for category, item in wh.stock.items():
                     if keep_fuel and category is WarehouseCategory.FUEL:
                         continue
@@ -1020,6 +1103,14 @@ class LogisticsManager:
         report = turn_report.start_report(
             game, debriefing, list(getattr(self, "_debrief_log", []))
         )
+        # Depot and SAM damage first: REDFOR resupply, repairs and next turn's
+        # planning (all at the end of the turn) must see it.
+        try:
+            from game.logistics.debrief_hook import apply_damage
+
+            log.extend(apply_damage(debriefing))
+        except Exception:
+            logging.getLogger(__name__).exception("Depot/SAM damage failed")
         try:
             fuel_log = use_fuel_for_sorties(game)
         except Exception:

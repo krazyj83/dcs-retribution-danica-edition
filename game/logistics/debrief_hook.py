@@ -10,7 +10,10 @@ stock based on what happened in the mission:
 - Base captures and fuel used by sorties → applied earlier (capture.py,
   fuel.py); their log lines are shown here
 
-Called when the debrief window opens, after the mission results are processed.
+The depot and SAM losses are applied with the mission results
+(LogisticsManager.on_state_processed calls apply_damage), before the turn ends,
+so REDFOR resupply, repairs and planning see them. The debrief window then only
+collects the lines (update_logistics_from_debriefing).
 """
 
 from __future__ import annotations
@@ -45,10 +48,37 @@ def sam_site_ammo_loss(unit_count: int) -> float:
 
 
 def update_logistics_from_debriefing(debriefing: "Debriefing") -> List[str]:
+    """Lines for the debrief window: every logistics change of the mission.
+
+    Applies the depot and SAM losses first if the results processing hasn't
+    already (older callers, tests), then hands out the queued log lines.
     """
-    Main entry point, called by QDebriefingWindow.
-    Returns a list of human-readable log lines describing what changed.
+    game = debriefing.game
+    logistics = getattr(game, "logistics", None)
+    if logistics is None:
+        return []
+    if not getattr(debriefing, "_logistics_damage_applied", False):
+        apply_damage(debriefing)
+    log = logistics.pop_debrief_log()
+    try:
+        from game.logistics.turn_report import add_unreported
+
+        # Lines queued after the report was started (convoys arriving at the
+        # end of the turn).
+        add_unreported(logistics, "events", log)
+    except Exception:
+        logger.exception("Turn report: debrief lines failed")
+    if log:
+        logger.info("Logistics debrief summary:\n" + "\n".join(f"  {l}" for l in log))
+    return log
+
+
+def apply_damage(debriefing: "Debriefing") -> List[str]:
+    """Stock lost to destroyed depots and knocked-out SAM sites. Log lines.
+
+    Also queued for the debrief window and added to the turn report.
     """
+    setattr(debriefing, "_logistics_damage_applied", True)
     game = debriefing.game
 
     if not hasattr(game, "logistics") or game.logistics is None:
@@ -134,23 +164,13 @@ def update_logistics_from_debriefing(debriefing: "Debriefing") -> List[str]:
         except Exception as e:
             logger.debug(f"Logistics debrief: error processing SAM site loss: {e}")
 
-    # ------------------------------------------------------------------
-    # 2. Base captures and fuel used by sorties
-    # ------------------------------------------------------------------
-    # Applied when the results were committed (ControlPoint.capture and
-    # LogisticsManager.on_state_processed, see logistics/capture.py and
-    # logistics/fuel.py); only their log lines are collected here.
     try:
         from game.logistics.turn_report import add_to_latest
 
         add_to_latest(logistics, "damage", list(log))
     except Exception:
         logger.exception("Turn report: depot damage lines failed")
-    log.extend(logistics.pop_debrief_log())
-
-    if log:
-        logger.info("Logistics debrief summary:\n" + "\n".join(f"  {l}" for l in log))
-
+    logistics.add_debrief_log(log)
     return log
 
 

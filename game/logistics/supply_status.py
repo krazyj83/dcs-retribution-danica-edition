@@ -81,9 +81,8 @@ def _level(quantity: float, capacity: float) -> float:
 def supply_status(game: Game) -> List[BaseSupply]:
     """Supply status of every BLUEFOR base (bases not yet given a warehouse
     show the default one, as the Base Inventory tab does)."""
-    from game.logistics import WarehouseCategory, new_base_warehouse
+    from game.logistics import WarehouseCategory, keeps_warehouse, new_base_warehouse
     from game.logistics.fuel import turns_left, unlimited_fuel
-    from game.theater.controlpoint import OffMapSpawn
 
     logistics = getattr(game, "logistics", None)
     if logistics is None:
@@ -91,10 +90,8 @@ def supply_status(game: Game) -> List[BaseSupply]:
     unlimited = unlimited_fuel(game)
     result: List[BaseSupply] = []
     for cp in game.theater.controlpoints:
-        if not cp.captured.is_blue or isinstance(cp, OffMapSpawn):
+        if not cp.captured.is_blue or not keeps_warehouse(cp):
             continue
-        if getattr(cp, "is_fleet", False):
-            continue  # ships are supplied at sea
         warehouse = logistics.get_warehouse(cp.id)
         if warehouse is None:
             warehouse = new_base_warehouse(cp)

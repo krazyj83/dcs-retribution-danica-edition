@@ -44,12 +44,15 @@ local CFG = {
     redfor_threshold  = 0.25,
 }
 
-local REDFOR_AUTO = true
-if dcsRetribution and dcsRetribution.plugins and dcsRetribution.plugins.ship_weapons then
-    local p = dcsRetribution.plugins.ship_weapons
-    if p.redforAutoRearm ~= nil then
-        REDFOR_AUTO = p.redforAutoRearm
+-- The plugin options are set after this script loads (luaplugin.py injects a
+-- plugin's configuration after its scripts), so read them in init().
+local function redforAutoRearm()
+    local p = dcsRetribution and dcsRetribution.plugins
+        and dcsRetribution.plugins.ship_weapons
+    if p and p.redforAutoRearm ~= nil then
+        return p.redforAutoRearm
     end
+    return true
 end
 
 ShipWeapons = {
@@ -789,7 +792,7 @@ local function init()
     end
     world.addEventHandler(handler)
     timer.scheduleFunction(checkPending, nil, timer.getTime() + CFG.respawn_check)
-    if REDFOR_AUTO then
+    if redforAutoRearm() then
         timer.scheduleFunction(redforRearm, nil, timer.getTime() + CFG.redfor_interval)
     end
     log("ready - rearm mode: " .. (SW.canSetAmmo() and "setAmmo (+20% per load)" or "respawn when all loads are delivered"))

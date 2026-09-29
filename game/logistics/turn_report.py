@@ -89,6 +89,15 @@ def add_to_latest(logistics: Any, section: str, lines: List[str]) -> None:
         report.add(section, lines)
 
 
+def add_unreported(logistics: Any, section: str, lines: List[str]) -> None:
+    """Add to the latest report the lines no section of it has yet."""
+    report = latest(logistics)
+    if report is None:
+        return
+    known = {line for existing in report.sections.values() for line in existing}
+    report.add(section, [line for line in lines if line not in known])
+
+
 def _loss_table(counts: Any) -> Dict[str, int]:
     names = {f.name for f in fields(counts)}
     return {

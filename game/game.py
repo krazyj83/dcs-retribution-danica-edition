@@ -364,6 +364,19 @@ class Game:
         except Exception:
             logging.exception("REDFOR air defence repairs failed")
 
+        # A skipped turn has no debrief window: file what was queued for it
+        # (convoys arriving, captures) in the turn report instead of letting
+        # it show up in the next mission's debrief.
+        if skipped:
+            try:
+                from game.logistics.turn_report import add_unreported
+
+                add_unreported(
+                    self.logistics, "events", self.logistics.pop_debrief_log()
+                )
+            except Exception:
+                logging.exception("Turn report: skipped turn lines failed")
+
         # REDFOR AI supply convoys — creates ground transfer orders each turn
         with logged_duration("REDFOR supply planning"):
             RedforSupplyPlanner(self).plan()

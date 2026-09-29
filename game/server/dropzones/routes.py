@@ -167,4 +167,4 @@ def delete_drop_zone(dz_id: UUID) -> None:
             status.HTTP_404_NOT_FOUND,
             detail=f"No drop zone {dz_id}",
         )
-    logistics.remove_drop_zone(key)
+    logistics.remove_drop_zone(key, GameContext.get())

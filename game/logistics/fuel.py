@@ -86,7 +86,12 @@ def use_fuel_for_sorties(game: Game) -> List[str]:
     Runs after the mission results are committed (captures applied) and before
     the ATO is cleared. Returns log lines.
     """
-    from game.logistics import Warehouse, WarehouseCategory, new_base_warehouse
+    from game.logistics import (
+        Warehouse,
+        WarehouseCategory,
+        keeps_warehouse,
+        new_base_warehouse,
+    )
 
     logistics = game.logistics
     for wh in logistics._warehouses.values():
@@ -103,8 +108,8 @@ def use_fuel_for_sorties(game: Game) -> List[str]:
             base = getattr(flight, "departure", None)
             if base is None or not base.captured.is_blue:
                 continue  # lost during the mission: its stock went with it
-            if getattr(base, "is_fleet", False):
-                continue  # carriers and LHAs are supplied at sea
+            if not keeps_warehouse(base):
+                continue  # carriers, LHAs and off-map spawns: no warehouse
             bases[base.id] = base
             used[base.id] += flight.count * fuel_per_aircraft(flight.unit_type)
             sorties[base.id] += flight.count
@@ -188,21 +193,30 @@ def _fuel_stock(game: Any, base: Any) -> Any:
         return None
     warehouse = logistics.get_warehouse(base.id)
     if warehouse is None:
-        warehouse = (
-            new_base_warehouse(base)
-            if base.captured.is_blue
-            else Warehouse(cp_id=base.id, cp_name=base.name)
-        )
+        warehouse = new_base_warehouse(base)
         logistics.add_warehouse(warehouse)
     return warehouse.stock[WarehouseCategory.FUEL]
 
 
 def deliver_truck_fuel(
-    game: Any, origin: Any, arrival: Any, unit_type: Any, count: int = 1
+    game: Any,
+    origin: Any,
+    arrival: Any,
+    unit_type: Any,
+    count: int = 1,
+    side: Any = None,
 ) -> Optional[str]:
-    """Fuel trucks from origin arrived at arrival: move their fuel."""
+    """Fuel trucks from origin arrived at arrival: move their fuel.
+
+    ``side`` is the convoy's owner. Nothing moves when the origin or the
+    arrival base no longer belongs to it (a base changed hands on the way):
+    the fuel isn't the convoy's own side's any more.
+    """
     load = truck_load(unit_type) * count
     if load <= 0 or origin is arrival:
+        return None
+    owner = side if side is not None else origin.captured
+    if origin.captured != owner or arrival.captured != owner:
         return None
     source = _fuel_stock(game, origin)
     target = _fuel_stock(game, arrival)
@@ -224,9 +238,15 @@ def deliver_truck_fuel(
 
 
 def lose_truck_fuel(
-    game: Any, origin: Any, unit_type: Any, count: int = 1
+    game: Any, origin: Any, unit_type: Any, count: int = 1, side: Any = None
 ) -> Optional[str]:
-    """Fuel trucks from origin were destroyed: their load is lost."""
+    """Fuel trucks from origin were destroyed: their load is lost.
+
+    Not when the origin now belongs to the other side (``side`` is the
+    convoy's owner): the enemy's fuel was never on the trucks.
+    """
+    if side is not None and origin.captured != side:
+        return None
     load = truck_load(unit_type) * count
     source = _fuel_stock(game, origin) if load > 0 else None
     if source is None:

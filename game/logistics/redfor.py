@@ -34,6 +34,8 @@ import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Tuple
 
+from game.logistics import RED_CAPACITY
+
 if TYPE_CHECKING:
     from game import Game
 
@@ -44,7 +46,6 @@ AMMO_PER_A2A_AIRCRAFT = 1.0
 #: Ammunition resupply per turn, as a fraction of the fuel resupply setting.
 AMMO_RESUPPLY_FRACTION = 2 / 3
 DEFAULT_FUEL_PER_TURN = 60
-RED_CAPACITY = 2000.0
 
 EPSILON = 0.01
 
@@ -87,34 +88,22 @@ def flight_demand(flight: Any) -> Tuple[float, float]:
 
 def is_red_land_base(cp: Any) -> bool:
     """A REDFOR base that keeps a warehouse: not off-map, not a ship."""
-    from game.theater.controlpoint import OffMapSpawn
+    from game.logistics import keeps_warehouse
 
-    return (
-        cp.captured.is_red
-        and not isinstance(cp, OffMapSpawn)
-        and not getattr(cp, "is_fleet", False)
-    )
+    return bool(cp.captured.is_red) and keeps_warehouse(cp)
 
 
 def ensure_red_warehouses(game: Any) -> None:
     """Every REDFOR base gets a full warehouse if it has none yet."""
-    from game.logistics import Warehouse, WarehouseCategory
+    from game.logistics import new_base_warehouse
+    from game.theater.player import Player
 
     logistics = game.logistics
     for cp in game.theater.controlpoints:
         if not is_red_land_base(cp):
             continue
         if logistics.get_warehouse(cp.id) is None:
-            warehouse = Warehouse(cp_id=cp.id, cp_name=cp.name)
-            warehouse.coalition = "red"
-            for category in (
-                WarehouseCategory.FUEL,
-                WarehouseCategory.AMMUNITION,
-                WarehouseCategory.SUPPLIES,
-            ):
-                item = warehouse.stock[category]
-                item.capacity = item.quantity = RED_CAPACITY
-            logistics.add_warehouse(warehouse)
+            logistics.add_warehouse(new_base_warehouse(cp, Player.RED))
 
 
 def _stock(game: Any, cp: Any) -> Any:
