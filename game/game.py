@@ -348,14 +348,19 @@ class Game:
         try:
             from game.logistics.redfor import resupply as redfor_resupply
 
-            redfor_resupply(self)
+            from game.logistics.turn_report import add_to_latest
+
+            add_to_latest(self.logistics, "enemy", redfor_resupply(self))
         except Exception:
             logging.exception("REDFOR resupply failed")
         # ...and repair damaged air defence sites with it (logistics/repairs.py).
         try:
             from game.logistics.repairs import redfor_repair_air_defences
+            from game.logistics.turn_report import add_to_latest
 
-            redfor_repair_air_defences(self, events)
+            add_to_latest(
+                self.logistics, "enemy", redfor_repair_air_defences(self, events)
+            )
         except Exception:
             logging.exception("REDFOR air defence repairs failed")
 

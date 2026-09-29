@@ -87,6 +87,9 @@ class UnitMap:
         #: Names of every unit Retribution put in the mission file. Losses of
         #: other mission-file units were added in the mission editor.
         self.generated_unit_names: Optional[frozenset[str]] = None
+        #: Aircraft unit name -> index of its member in the flight's roster
+        #: (which loadout it carried; logistics/weapon_use.py).
+        self.aircraft_member_index: Dict[str, int] = {}
 
     def record_generated_units(self, mission: Any) -> None:
         """Remember every unit name in the generated mission (call last)."""
@@ -105,6 +108,10 @@ class UnitMap:
         self.generated_unit_names = frozenset(names)
 
     def add_aircraft(self, group: FlyingGroup[Any], flight: Flight) -> None:
+        if not hasattr(self, "aircraft_member_index"):
+            self.aircraft_member_index = {}
+        for index, unit in enumerate(group.units):
+            self.aircraft_member_index[str(unit.name)] = index
         for pilot, unit in zip(flight.roster.iter_pilots(), group.units):
             # The actual name is a String (the pydcs translatable string), which
             # doesn't define __eq__.

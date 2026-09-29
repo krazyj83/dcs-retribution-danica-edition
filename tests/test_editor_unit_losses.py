@@ -167,3 +167,43 @@ def test_mission_script_reports_mission_file_units_lost(tmp_path: Path) -> None:
         "category": "plane",
         "type": "Su-30",
     }
+
+
+SHOT_SCENARIO = r"""
+local function weapon(t) return {getTypeName = function() return t end} end
+fire_shot = function(unit, t)
+  for _, h in ipairs(handlers) do
+    h({id = world.event.S_EVENT_SHOT, initiator = obj(unit), weapon = weapon(t)})
+  end
+end
+fire_shot("Viper 1-1", "AIM_120C")
+fire_shot("Viper 1-1", "AIM_120C")
+fire_shot("Viper 1-1", "GBU_12")
+write_state()
+"""
+
+
+@pytest.mark.skipif(LUA is None, reason="lua5.1 not installed")
+def test_mission_script_reports_weapons_fired(tmp_path: Path) -> None:
+    mock = MOCK.replace(
+        "S_EVENT_MISSION_END = 12", "S_EVENT_MISSION_END = 12, S_EVENT_SHOT = 1"
+    )
+    script = "\n".join(
+        [
+            mock,
+            f'os.getenv = function(k) if k == "RETRIBUTION_EXPORT_DIR" then '
+            f'return "{tmp_path.as_posix()}/" end return nil end',
+            (BASE / "json.lua").read_text(encoding="utf-8"),
+            (BASE / "dcs_retribution.lua").read_text(encoding="utf-8"),
+            SHOT_SCENARIO,
+        ]
+    )
+    runner = tmp_path / "run.lua"
+    runner.write_text(script, encoding="utf-8")
+    result = subprocess.run(
+        [str(LUA), str(runner)], capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 0, result.stderr
+    (written,) = list(tmp_path.glob("*state.json"))
+    state = json.loads(written.read_text(encoding="utf-8"))
+    assert state["weapons_fired"] == {"Viper 1-1": {"AIM_120C": 2, "GBU_12": 1}}

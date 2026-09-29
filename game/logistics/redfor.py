@@ -257,6 +257,9 @@ def apply_supply_limits(game: Any, ato: Any) -> List[str]:
                 f"Intel: REDFOR short of {reason} at {base_name}",
                 f"{count} planned enemy package(s) grounded this turn.",
             )
+    from game.logistics.turn_report import add_to_latest
+
+    add_to_latest(logistics, "enemy", log)
     return log
 
 

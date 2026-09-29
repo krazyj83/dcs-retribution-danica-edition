@@ -481,6 +481,8 @@ class LogisticsManager:
         self._history: Dict[UUID, List[Any]] = {}
         #: Recon reports on REDFOR bases (see logistics/intel.py).
         self._red_intel: Dict[UUID, Any] = {}
+        #: Turn reports by turn (see logistics/turn_report.py).
+        self._turn_reports: Dict[int, Any] = {}
 
     # ── Drop zones ─────────────────────────────────────────────────────
 
@@ -1013,6 +1015,11 @@ class LogisticsManager:
         from game.theater.player import Player
 
         log: List[str] = []
+        from game.logistics import turn_report
+
+        report = turn_report.start_report(
+            game, debriefing, list(getattr(self, "_debrief_log", []))
+        )
         try:
             fuel_log = use_fuel_for_sorties(game)
         except Exception:
@@ -1020,6 +1027,16 @@ class LogisticsManager:
             fuel_log = []
         self.add_debrief_log(fuel_log)
         log.extend(fuel_log)
+        report.add("fuel", fuel_log)
+        try:
+            from game.logistics.weapon_use import charge_weapon_use
+
+            weapon_log = charge_weapon_use(game, debriefing)
+            self.add_debrief_log(weapon_log)
+            log.extend(weapon_log)
+            report.add("weapons", weapon_log)
+        except Exception:
+            logging.getLogger(__name__).exception("Weapon use failed")
         try:
             from game.logistics.redfor import use_red_sortie_stock
 
@@ -1032,8 +1049,10 @@ class LogisticsManager:
             recon_log = record_recon(game, debriefing)
             self.add_debrief_log(recon_log)
             log.extend(recon_log)
+            report.add("recon", recon_log)
         except Exception:
             logging.getLogger(__name__).exception("Recon intel failed")
+        flights_from = len(log)
         for t in self._transfers.values():
             if t.status is not TransferStatus.IN_FLIGHT:
                 continue
@@ -1126,6 +1145,11 @@ class LogisticsManager:
         log.extend(
             settle_naval(game, list(getattr(state, "naval_munitions", None) or []))
         )
+        report.add("flights", log[flights_from:])
+        try:
+            report.add("supply", turn_report.supply_warnings(game))
+        except Exception:
+            logging.getLogger(__name__).exception("Turn report supply warnings failed")
         return log
 
     # ── Base captures and the debrief log ─────────────────────────────

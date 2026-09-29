@@ -140,6 +140,12 @@ def update_logistics_from_debriefing(debriefing: "Debriefing") -> List[str]:
     # Applied when the results were committed (ControlPoint.capture and
     # LogisticsManager.on_state_processed, see logistics/capture.py and
     # logistics/fuel.py); only their log lines are collected here.
+    try:
+        from game.logistics.turn_report import add_to_latest
+
+        add_to_latest(logistics, "damage", list(log))
+    except Exception:
+        logger.exception("Turn report: depot damage lines failed")
     log.extend(logistics.pop_debrief_log())
 
     if log:

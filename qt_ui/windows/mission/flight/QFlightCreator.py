@@ -108,6 +108,14 @@ class QFlightCreator(QDialog):
         hbox.addWidget(QLabel("Loadout:"))
         hbox.addWidget(self.loadout_selector)
         layout.addLayout(hbox)
+        # Weapon stores warning follows the loadout and the flight size.
+        self.loadout_selector.currentIndexChanged.connect(
+            lambda _: self.update_fuel_warning(self.squadron_selector.currentData())
+        )
+        self.flight_size_spinner.valueChanged.connect(
+            lambda _: self.update_fuel_warning(self.squadron_selector.currentData())
+        )
+        self.update_fuel_warning(self.squadron_selector.currentData())
 
         required_start_type = None
         squadron = self.squadron_selector.currentData()
@@ -282,16 +290,39 @@ class QFlightCreator(QDialog):
             self.roster_editor.pilots_changed.emit()
 
     def update_fuel_warning(self, squadron: Optional[Squadron]) -> None:
+        """Warn (only) when the base is short of fuel or of the loadout's stores."""
         from game.logistics.fuel import fuel_warning
+        from game.logistics.weapon_use import weapon_shortages
 
-        warning = None
+        warnings = []
         if squadron is not None:
             try:
-                warning = fuel_warning(self.game, squadron.location)
+                fuel = fuel_warning(self.game, squadron.location)
+                if fuel:
+                    warnings.append(fuel)
             except Exception:
                 logging.exception("Could not check the base's fuel")
-        self.fuel_warning.setText(warning or "")
-        self.fuel_warning.setVisible(warning is not None)
+            # The loadout selector and size spinner are made after this label.
+            if hasattr(self, "loadout_selector") and hasattr(
+                self, "flight_size_spinner"
+            ):
+                try:
+                    short = weapon_shortages(
+                        self.game,
+                        squadron.location,
+                        self.current_loadout(),
+                        self.flight_size_spinner.value(),
+                    )
+                    if short:
+                        warnings.append(
+                            f"{squadron.location.name} is short of: "
+                            + ", ".join(short)
+                            + ". The flight can still be planned."
+                        )
+                except Exception:
+                    logging.exception("Could not check the base's weapon stores")
+        self.fuel_warning.setText("\n".join(warnings))
+        self.fuel_warning.setVisible(bool(warnings))
 
     def update_max_size(self, available: int) -> None:
         aircraft = self.aircraft_selector.currentData()

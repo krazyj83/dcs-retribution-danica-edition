@@ -163,6 +163,13 @@ class StateData:
     #: type}. Includes Retribution's own units; see Debriefing.editor_losses.
     miz_unit_losses: List[dict[str, Any]] = field(default_factory=list)
 
+    #: Weapons fired by aircraft: unit name -> {DCS weapon type name: count}.
+    weapons_fired: Dict[str, Dict[str, int]] = field(default_factory=dict)
+
+    #: What player aircraft that loaded on the ground carried (took off with
+    #: less landed with, or everything if lost): unit name -> {type: count}.
+    player_ammo_used: Dict[str, Dict[str, int]] = field(default_factory=dict)
+
     @classmethod
     def from_json(cls, data: Dict[str, Any], unit_map: UnitMap) -> StateData:
         def clean_unit_list(unit_list: List[Any]) -> List[str]:
@@ -211,6 +218,16 @@ class StateData:
                 for loss in data.get("miz_unit_losses") or []
                 if isinstance(loss, dict)
             ],
+            weapons_fired={
+                str(unit): {str(t): int(n) for t, n in shots.items()}
+                for unit, shots in (data.get("weapons_fired") or {}).items()
+                if isinstance(shots, dict)
+            },
+            player_ammo_used={
+                str(unit): {str(t): int(n) for t, n in used.items()}
+                for unit, used in (data.get("player_ammo_used") or {}).items()
+                if isinstance(used, dict)
+            },
         )
 
 

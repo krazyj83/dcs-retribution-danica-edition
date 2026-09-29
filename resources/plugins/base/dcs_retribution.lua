@@ -41,6 +41,186 @@ end)
 miz_unit_losses = {}
 local miz_unit_lost = {}
 
+-- Weapons fired by aircraft: unit name -> {weapon type name -> count}, from
+-- S_EVENT_SHOT (guns aren't reported). After the mission the stores fired by
+-- BLUEFOR aircraft come out of their base's weapon stores
+-- (game/logistics/weapon_use.py).
+weapons_fired = {}
+local weapons_fired_count = 0
+
+-- Player aircraft loading from the base's stores (logistics/ground_loading.py).
+-- dcsRetributionWarehouses = {unmatched = n, bases = {{airbase, fuel_kg,
+--   stores = {{key, per_store, count}, ...}}, ...}}
+-- Each store (as Retribution counts it: a missile, a bomb or a rack) is matched
+-- to the DCS weapon with the longest name contained in the store's name; DCS
+-- weapons no store matches get `unmatched` so they can still be loaded.
+local function norm(text)
+    return (string.upper(text):gsub("[^A-Z0-9]", ""))
+end
+
+function retribution_setup_warehouses()
+    local data = dcsRetributionWarehouses
+    if not data or not data.bases or #data.bases == 0 then return end
+    if not Warehouse or not Warehouse.getResourceMap then
+        env.info("DCSRetribution|warehouses: no Warehouse API")
+        return
+    end
+    local ok, map = pcall(Warehouse.getResourceMap)
+    if not ok or type(map) ~= "table" then
+        ok, map = pcall(Warehouse.getResourceMap, Warehouse)
+    end
+    if not ok or type(map) ~= "table" then
+        env.info("DCSRetribution|warehouses: no resource map")
+        return
+    end
+    local weapons = {}
+    for name, ws in pairs(map) do
+        if type(name) == "string" and string.sub(name, 1, 8) == "weapons." then
+            local short = norm(string.match(name, "[^%.]+$") or name)
+            if #short >= 4 then
+                weapons[#weapons + 1] = {name = name, short = short}
+            end
+        end
+    end
+    for _, base in ipairs(data.bases) do
+        local airbase = Airbase.getByName(base.airbase)
+        local wh = airbase and airbase.getWarehouse and airbase:getWarehouse()
+        if wh then
+            local counts = {}
+            for _, store in ipairs(base.stores or {}) do
+                local best = nil
+                for _, weapon in ipairs(weapons) do
+                    if string.find(store.key, weapon.short, 1, true)
+                        and (not best or #weapon.short > #best.short) then
+                        best = weapon
+                    end
+                end
+                if best then
+                    counts[best.name] = (counts[best.name] or 0)
+                        + store.count * (store.per_store or 1)
+                end
+            end
+            for _, weapon in ipairs(weapons) do
+                pcall(wh.setItem, wh, weapon.name, counts[weapon.name] or data.unmatched or 500)
+            end
+            if base.fuel_kg then
+                pcall(wh.setLiquidAmount, wh, 0, base.fuel_kg)
+            end
+            env.info("DCSRetribution|warehouses: stocked " .. base.airbase)
+        end
+    end
+end
+
+-- As early as possible (aircraft taking off later draw from the warehouse),
+-- and again a second in, in case the data table was set after this script.
+local warehouses_stocked = false
+local function stock_warehouses()
+    if warehouses_stocked or not dcsRetributionWarehouses then return nil end
+    local ok, err = pcall(retribution_setup_warehouses)
+    if ok then
+        warehouses_stocked = true
+    else
+        env.info("DCSRetribution|warehouses failed: " .. tostring(err))
+    end
+    return nil
+end
+stock_warehouses()
+timer.scheduleFunction(stock_warehouses, nil, timer.getTime() + 1)
+
+-- What each player aircraft carried: weapons on board at takeoff less those on
+-- board when it landed; everything on board if it was lost in the air.
+-- player_ammo_used = {unit name = {weapon type = count}}.
+player_ammo_used = {}
+local player_airborne = {}  -- unit name -> ammo at takeoff
+
+local function ammo_of(unit)
+    local ammo = {}
+    local ok, list = pcall(unit.getAmmo, unit)
+    if ok and type(list) == "table" then
+        for _, entry in ipairs(list) do
+            local type_name = entry.desc and entry.desc.typeName
+            if type_name then
+                type_name = string.match(type_name, "[^%.]+$") or type_name
+                ammo[type_name] = (ammo[type_name] or 0) + (entry.count or 0)
+            end
+        end
+    end
+    return ammo
+end
+
+local function is_player(unit)
+    if not unit or not unit.getPlayerName then return false end
+    local ok, name = pcall(unit.getPlayerName, unit)
+    return ok and name ~= nil
+end
+
+local function add_used(name, taken, left)
+    local used = player_ammo_used[name] or {}
+    for type_name, count in pairs(taken) do
+        local spent = count - ((left and left[type_name]) or 0)
+        if spent > 0 then used[type_name] = (used[type_name] or 0) + spent end
+    end
+    if next(used) ~= nil then player_ammo_used[name] = used end
+end
+
+local function note_player_sortie(event)
+    local unit = event.initiator
+    if not is_player(unit) then return end
+    local name = unit:getName()
+    if event.id == world.event.S_EVENT_TAKEOFF then
+        player_airborne[name] = ammo_of(unit)
+    elseif event.id == world.event.S_EVENT_LAND and player_airborne[name] then
+        add_used(name, player_airborne[name], ammo_of(unit))
+        player_airborne[name] = nil
+    end
+end
+
+local function note_player_lost(name)
+    if name and player_airborne[name] then
+        add_used(name, player_airborne[name], nil)
+        player_airborne[name] = nil
+    end
+end
+
+-- For write_state: sorties still in the air count what is used so far.
+local function player_ammo_report()
+    local report = {}
+    for name, used in pairs(player_ammo_used) do
+        report[name] = {}
+        for t, n in pairs(used) do report[name][t] = n end
+    end
+    for name, taken in pairs(player_airborne) do
+        local unit = Unit.getByName(name)
+        local left = (unit and unit:isExist()) and ammo_of(unit) or nil
+        local used = report[name] or {}
+        for t, count in pairs(taken) do
+            local spent = count - ((left and left[t]) or 0)
+            if spent > 0 then used[t] = (used[t] or 0) + spent end
+        end
+        if next(used) ~= nil then report[name] = used end
+    end
+    return report
+end
+
+local function note_shot(event)
+    local unit, weapon = event.initiator, event.weapon
+    if not unit or not weapon or not unit.getName or not weapon.getTypeName then
+        return
+    end
+    local ok_name, name = pcall(unit.getName, unit)
+    local ok_type, type_name = pcall(weapon.getTypeName, weapon)
+    if not ok_name or not ok_type or not name or not type_name then
+        return
+    end
+    local shots = weapons_fired[name]
+    if not shots then
+        shots = {}
+        weapons_fired[name] = shots
+        weapons_fired_count = weapons_fired_count + 1
+    end
+    shots[type_name] = (shots[type_name] or 0) + 1
+end
+
 local function note_miz_unit_loss(name)
     local info = name and miz_units[name]
     if info and not miz_unit_lost[name] then
@@ -142,6 +322,15 @@ function write_state()
         if cargo_ok and cargo_crates and #cargo_crates > 0 then
             game_state["cargo_crates"] = cargo_crates
         end
+    end
+    -- What player aircraft carried (see note_player_sortie above), if any.
+    local ammo_used = player_ammo_report()
+    if next(ammo_used) ~= nil then
+        game_state["player_ammo_used"] = ammo_used
+    end
+    -- Weapons fired by aircraft (see note_shot above), if any.
+    if weapons_fired_count > 0 then
+        game_state["weapons_fired"] = weapons_fired
     end
     -- Mission-file units that were lost (see miz_units above), if any.
     if #miz_unit_losses > 0 then
@@ -293,6 +482,21 @@ local function onEvent(event)
     if being_respawned(event) then
         return
     end
+    if event.id == world.event.S_EVENT_SHOT then
+        note_shot(event)
+        dirty_state = true
+        return
+    end
+    if event.id == world.event.S_EVENT_TAKEOFF or event.id == world.event.S_EVENT_LAND then
+        note_player_sortie(event)
+        dirty_state = true
+    end
+    if event.id == world.event.S_EVENT_CRASH or event.id == world.event.S_EVENT_DEAD
+        or event.id == world.event.S_EVENT_PILOT_DEAD or event.id == world.event.S_EVENT_EJECTION
+        or event.id == world.event.S_EVENT_UNIT_LOST then
+        note_player_lost(object_name(event.initiator))
+    end
+
     if event.id == world.event.S_EVENT_CRASH or event.id == world.event.S_EVENT_UNIT_LOST
         or event.id == world.event.S_EVENT_DEAD then
         note_miz_unit_loss(object_name(event.initiator))

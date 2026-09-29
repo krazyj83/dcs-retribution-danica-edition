@@ -208,6 +208,21 @@ class MissionGenerator:
             from game.logistics.naval_munitions import script_data
             from game.missiongenerator.transfercargogenerator import to_lua
 
+            from game.logistics.ground_loading import (
+                script_data as warehouse_script_data,
+            )
+
+            trigger = TriggerStart(comment="Set DCS Retribution warehouse data")
+            trigger.add_action(
+                DoScript(
+                    String(
+                        "dcsRetributionWarehouses = "
+                        f"{to_lua(warehouse_script_data(self.game))}"
+                    )
+                )
+            )
+            self.mission.triggerrules.triggers.append(trigger)
+
             trigger = TriggerStart(comment="Set DCS Retribution naval munitions data")
             trigger.add_action(
                 DoScript(
@@ -573,6 +588,15 @@ class MissionGenerator:
                     warehouse["dynamicSpawn"] = settings.dynamic_slots
                     warehouse["allowHotStart"] = settings.dynamic_slots_hot
                 self.mission.warehouses.warehouses[tmu.dcs_unit.id] = warehouse
+
+        # Friendly airfields' fuel and munitions come from the base's stores
+        # (logistics/ground_loading.py).
+        try:
+            from game.logistics.ground_loading import configure_airports
+
+            configure_airports(self.game, self.mission)
+        except Exception:
+            logging.exception("MissionGenerator: warehouse limits failed")
 
         # configure dynamic spawn, hot start of DS & dynamic cargo for airfields
         for ap in self.mission.terrain.airports.values():

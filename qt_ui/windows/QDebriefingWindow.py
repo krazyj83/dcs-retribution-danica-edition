@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QGridLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QScrollArea,
@@ -116,9 +117,20 @@ class QDebriefingWindow(QDialog):
         self._logistics_log: list[str] = []
         self._add_logistics_summary(layout)
 
+        buttons = QHBoxLayout()
+        report = QPushButton("Turn report…")
+        report.clicked.connect(self._open_turn_report)
+        buttons.addWidget(report)
         okay = QPushButton("Okay")
         okay.clicked.connect(self.close)
-        layout.addWidget(okay)
+        buttons.addWidget(okay, 1)
+        layout.addLayout(buttons)
+
+    def _open_turn_report(self) -> None:
+        from qt_ui.windows.QTurnReportWindow import QTurnReportWindow
+
+        self._turn_report = QTurnReportWindow(self.debriefing.game)
+        self._turn_report.show()
 
     def _add_logistics_summary(self, layout: QVBoxLayout) -> None:
         """Run the logistics debrief hook and display a summary if anything changed."""

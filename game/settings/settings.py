@@ -540,6 +540,19 @@ class Settings:
             "100 units)."
         ),
     )
+    logistics_players_load_on_ground: bool = boolean_option(
+        "Player aircraft load from base stores",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=GENERAL_SECTION,
+        default=True,
+        detail=(
+            "Player aircraft starting on the ground at a friendly airfield spawn "
+            "with no weapons and 10% fuel; load them with the ground crew. The "
+            "airfield's DCS warehouse holds the base's fuel and weapon stores, "
+            "and what you carried (fired, brought back or lost) is taken from "
+            "the stores after the mission. AI flights keep their loadouts."
+        ),
+    )
     redfor_logistics: bool = boolean_option(
         "REDFOR logistics (fuel and ammunition limit enemy sorties)",
         page=CAMPAIGN_MANAGEMENT_PAGE,

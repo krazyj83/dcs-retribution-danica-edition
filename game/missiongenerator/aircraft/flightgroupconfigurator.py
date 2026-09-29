@@ -417,6 +417,13 @@ class FlightGroupConfigurator:
     def setup_payload(self, unit: FlyingUnit, member: FlightMember) -> None:
         unit.pylons.clear()
 
+        from game.logistics.ground_loading import applies_to
+
+        if applies_to(self.game, self.flight, member):
+            # Loads its weapons from the base's stores with the ground crew
+            # (logistics/ground_loading.py).
+            return
+
         loadout = member.loadout
         if self.game.settings.restrict_weapons_by_date:
             # Always apply target overrides for AI, only for players if setting is enabled
@@ -464,8 +471,13 @@ class FlightGroupConfigurator:
                 "starting fuel to 100kg."
             )
             fuel = 100
-        for unit, pilot in zip(self.group.units, self.flight.roster.iter_pilots()):
-            if pilot is not None and pilot.player:
+        from game.logistics.ground_loading import applies_to, empty_fuel
+
+        for unit, member in zip(self.group.units, self.flight.iter_members()):
+            if applies_to(self.game, self.flight, member):
+                # Refuels from the base's stores with the ground crew.
+                unit.fuel = min(fuel, empty_fuel(self.flight.unit_type))
+            elif member.is_player:
                 unit.fuel = fuel
             else:
                 unit.fuel = self.flight.fuel
