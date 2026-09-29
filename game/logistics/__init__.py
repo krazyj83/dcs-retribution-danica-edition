@@ -65,14 +65,16 @@ class StockItem:
     @property
     def level(self) -> float:
         """Supply level as a fraction 0.0-1.0."""
-        if self.capacity <= 0:
-            return 0.0
-        return min(1.0, self.quantity / self.capacity)
+        from game.logistics.levels import level
+
+        return level(self.quantity, self.capacity)
 
     @property
     def needs_resupply(self) -> bool:
-        """True when stock has dropped below the 40% resupply threshold."""
-        return self.level < 0.40
+        """True below the resupply threshold (levels.LOW_LEVEL)."""
+        from game.logistics.levels import LOW_LEVEL
+
+        return self.level < LOW_LEVEL
 
     def apply_delivery(self, amount: float) -> None:
         """Add stock from a completed logistic flight. Clamps to capacity."""
@@ -577,6 +579,20 @@ class LogisticsManager:
         self._red_intel: Dict[UUID, Any] = {}
         #: Turn reports by turn (see logistics/turn_report.py).
         self._turn_reports: Dict[int, Any] = {}
+        #: Lines for the debrief window (add_debrief_log / pop_debrief_log).
+        self._debrief_log: List[str] = []
+        #: REDFOR packages grounded this turn, by base (logistics/redfor.py).
+        self._red_grounded: Dict[str, Any] = {}
+        #: Last turn REDFOR was resupplied, so it happens once per turn.
+        self._red_resupply_turn: Optional[int] = None
+
+    def __setstate__(self, state: Dict[str, Any]) -> None:
+        """Saves from before a field existed get its default: the one place
+        that keeps old campaigns loading as fields are added."""
+        defaults = LogisticsManager().__dict__
+        for key, value in defaults.items():
+            state.setdefault(key, value)
+        self.__dict__.update(state)
 
     # ── Drop zones ─────────────────────────────────────────────────────
 
@@ -1048,7 +1064,7 @@ class LogisticsManager:
 
         from game.logistics.fuel import unlimited_fuel
 
-        if getattr(self, "_last_attrition_turn", None) != game.turn:
+        if self._last_attrition_turn != game.turn:
             self._last_attrition_turn = game.turn
             keep_fuel = unlimited_fuel(game)
             for wh in self._warehouses.values():
@@ -1100,9 +1116,7 @@ class LogisticsManager:
         log: List[str] = []
         from game.logistics import turn_report
 
-        report = turn_report.start_report(
-            game, debriefing, list(getattr(self, "_debrief_log", []))
-        )
+        report = turn_report.start_report(game, debriefing, list(self._debrief_log))
         # Depot and SAM damage first: REDFOR resupply, repairs and next turn's
         # planning (all at the end of the turn) must see it.
         try:
@@ -1258,12 +1272,10 @@ class LogisticsManager:
 
     def add_debrief_log(self, lines: List[str]) -> None:
         """Lines for the debrief window's "Logistics & Warehouse changes"."""
-        if not hasattr(self, "_debrief_log"):
-            self._debrief_log: List[str] = []
         self._debrief_log.extend(lines)
 
     def pop_debrief_log(self) -> List[str]:
-        lines = list(getattr(self, "_debrief_log", []))
+        lines = list(self._debrief_log)
         self._debrief_log = []
         return lines
 

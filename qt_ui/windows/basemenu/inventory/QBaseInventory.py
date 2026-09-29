@@ -39,15 +39,35 @@ from game.theater import ControlPoint
 from qt_ui.models import GameModel
 from qt_ui.windows.basemenu.inventory.QStockHistoryChart import QStockHistoryChart
 
-GOOD = "#27ae60"
-LOW = "#f39c12"
-EMPTY = "#e74c3c"
+from game.logistics.levels import COLORS, level_status
+
+GOOD = COLORS["ok"]
+LOW = COLORS["low"]
+EMPTY = COLORS["empty"]
+
+#: What each bar counts (hover text). Ammunition is bulk munitions; aircraft
+#: weapons are the separate weapon stores listed below the bars.
+_BAR_TIPS = {
+    "fuel": "Fuel for aircraft and vehicles. Sorties from this base use it.",
+    "ammunition": (
+        "Bulk munitions: shipped as crates to rearm ships, spent on SAM repairs "
+        "and lost in depot strikes.\nAircraft weapons are the weapon stores "
+        "below."
+    ),
+    "supplies": "General supplies: spent on SAM repairs, lost in depot strikes.",
+    "troops": "Troops moved by logistics transfers.",
+}
 
 
-def _level_color(level: float, needs_resupply: bool) -> str:
-    if level <= 0.0:
-        return EMPTY
-    return LOW if needs_resupply else GOOD
+def _status_text(fraction: float) -> str:
+    status = level_status(fraction)
+    if status == "empty":
+        return "Empty"
+    if status == "critical":
+        return "Critical"
+    if status == "low":
+        return "Needs resupply"
+    return f"{fraction:.0%}"
 
 
 class QBaseInventory(QFrame):
@@ -79,7 +99,11 @@ class QBaseInventory(QFrame):
             bar.setRange(0, 1000)
             bar.setTextVisible(True)
             status = QLabel()
-            grid.addWidget(QLabel(name), row, 0)
+            tip = _BAR_TIPS.get(cat.value, "")
+            bar.setToolTip(tip)
+            label = QLabel(name)
+            label.setToolTip(tip)
+            grid.addWidget(label, row, 0)
             grid.addWidget(bar, row, 1)
             grid.addWidget(status, row, 2)
             self._bars[cat.value] = (bar, status)
@@ -181,17 +205,12 @@ class QBaseInventory(QFrame):
             bar, status = self._bars[row.category.value]
             bar.setValue(int(row.level * 1000))
             bar.setFormat(f"{row.quantity:.0f} / {row.capacity:.0f}")
-            color = _level_color(row.level, row.needs_resupply)
+            color = COLORS[level_status(row.level)]
             bar.setStyleSheet(
                 f"QProgressBar::chunk {{ background-color: {color}; }}"
                 "QProgressBar { text-align: center; }"
             )
-            if row.level <= 0.0:
-                status.setText("Empty")
-            elif row.needs_resupply:
-                status.setText("Needs resupply")
-            else:
-                status.setText(f"{row.level:.0%}")
+            status.setText(_status_text(row.level))
             status.setStyleSheet(f"color: {color};")
 
         self.fuel_label.setText(self._fuel_text(inv))

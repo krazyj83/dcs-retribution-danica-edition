@@ -199,37 +199,31 @@ class MissionGenerator:
         except Exception:
             logging.exception("MissionGenerator: transfer cargo placement failed")
 
-        # Naval munitions crates for rearming ships at sea (ship_weapons plugin).
+        # Mission data for the scripts: each friendly airfield's stores
+        # (generate_warehouses sets the matching airport limits) and naval
+        # munitions.
         try:
-            from dcs.action import DoScript
-            from dcs.translation import String
-            from dcs.triggers import TriggerStart
+            from game.logistics.ground_loading import script_data
+            from game.missiongenerator.luadata import inject_data_table
 
-            from game.logistics.naval_munitions import script_data
-            from game.missiongenerator.transfercargogenerator import to_lua
-
-            from game.logistics.ground_loading import (
-                script_data as warehouse_script_data,
+            inject_data_table(
+                self.mission,
+                "dcsRetributionWarehouses",
+                script_data(self.game),
+                "warehouse",
             )
+        except Exception:
+            logging.exception("MissionGenerator: warehouse data failed")
+        try:
+            from game.logistics import naval_munitions
+            from game.missiongenerator.luadata import inject_data_table
 
-            trigger = TriggerStart(comment="Set DCS Retribution warehouse data")
-            trigger.add_action(
-                DoScript(
-                    String(
-                        "dcsRetributionWarehouses = "
-                        f"{to_lua(warehouse_script_data(self.game))}"
-                    )
-                )
+            inject_data_table(
+                self.mission,
+                "dcsRetributionNaval",
+                naval_munitions.script_data(self.game),
+                "naval munitions",
             )
-            self.mission.triggerrules.triggers.append(trigger)
-
-            trigger = TriggerStart(comment="Set DCS Retribution naval munitions data")
-            trigger.add_action(
-                DoScript(
-                    String(f"dcsRetributionNaval = {to_lua(script_data(self.game))}")
-                )
-            )
-            self.mission.triggerrules.triggers.append(trigger)
         except Exception:
             logging.exception("MissionGenerator: naval munitions data failed")
 
@@ -237,21 +231,14 @@ class MissionGenerator:
         """Route ends of player-drawn convoys, for arrival detection in the
         mission (resources/plugins/base/dcs_retribution.lua)."""
         try:
-            from dcs.action import DoScript
-            from dcs.translation import String
-            from dcs.triggers import TriggerStart
+            from game.missiongenerator.luadata import inject_data_table
 
-            from game.missiongenerator.transfercargogenerator import to_lua
-
-            trigger = TriggerStart(comment="Set DCS Retribution player convoy data")
-            trigger.add_action(
-                DoScript(
-                    String(
-                        f"dcsRetributionPlayerConvoys = {to_lua(convoys.script_data())}"
-                    )
-                )
+            inject_data_table(
+                self.mission,
+                "dcsRetributionPlayerConvoys",
+                convoys.script_data(),
+                "player convoy",
             )
-            self.mission.triggerrules.triggers.append(trigger)
         except Exception:
             logging.exception("MissionGenerator: player convoy data failed")
 
@@ -590,7 +577,8 @@ class MissionGenerator:
                 self.mission.warehouses.warehouses[tmu.dcs_unit.id] = warehouse
 
         # Friendly airfields' fuel and munitions come from the base's stores
-        # (logistics/ground_loading.py).
+        # (logistics/ground_loading.py). Last, as TriggerGenerator resets the
+        # airport flags; the contents are the dcsRetributionWarehouses table.
         try:
             from game.logistics.ground_loading import configure_airports
 

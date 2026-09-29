@@ -235,6 +235,8 @@ def import_warehouse_csv(
 ) -> Tuple[int, List[str]]:
     imported = 0
     warnings: List[str] = []
+    # Only the player's own depots can be edited: red stock is hidden intel.
+    blue_by_name = {w.cp_name: w for w in logistics.warehouses_for_coalition("blue")}
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         if reader.fieldnames:
@@ -247,11 +249,9 @@ def import_warehouse_csv(
         for row in reader:
             row = {k.strip(): v.strip() for k, v in row.items() if k}
             base = row.get("base", "").strip()
-            wh = next(
-                (w for w in logistics._warehouses.values() if w.cp_name == base), None
-            )
+            wh = blue_by_name.get(base)
             if wh is None:
-                warnings.append(f"Unknown base '{base}' - skipped")
+                warnings.append(f"Unknown or enemy base '{base}' - skipped")
                 continue
             for cat in WarehouseCategory:
                 val = row.get(cat.value, "").strip()
@@ -267,9 +267,17 @@ def import_warehouse_csv(
     return imported, warnings
 
 
+def _blue_inventories(logistics: LogisticsManager) -> List[WeaponInventory]:
+    """Weapon inventories of bases the player owns (captured bases drop out)."""
+    blue_ids = {w.cp_id for w in logistics.warehouses_for_coalition("blue")}
+    return [
+        inv for inv in logistics._weapon_inventories.values() if inv.cp_id in blue_ids
+    ]
+
+
 def export_inventory_csv(logistics: LogisticsManager, path: str) -> int:
     rows_data = []
-    for inv in sorted(logistics._weapon_inventories.values(), key=lambda i: i.cp_name):
+    for inv in sorted(_blue_inventories(logistics), key=lambda i: i.cp_name):
         for item in sorted(inv.items.values(), key=lambda i: (i.category, i.name)):
             rows_data.append(
                 {
@@ -294,7 +302,7 @@ def import_inventory_csv(
 ) -> Tuple[int, List[str]]:
     imported = 0
     warnings: List[str] = []
-    inv_by_name = {inv.cp_name: inv for inv in logistics._weapon_inventories.values()}
+    inv_by_name = {inv.cp_name: inv for inv in _blue_inventories(logistics)}
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         if reader.fieldnames:
@@ -317,7 +325,7 @@ def import_inventory_csv(
                 continue
             inv = inv_by_name.get(base)
             if inv is None:
-                warnings.append(f"Unknown base '{base}' - skipped")
+                warnings.append(f"Unknown or enemy base '{base}' - skipped")
                 continue
             try:
                 qty = int(float(qty_str)) if qty_str else 0

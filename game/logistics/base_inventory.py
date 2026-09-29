@@ -48,12 +48,16 @@ class StockRow:
 
     @property
     def level(self) -> float:
-        return 0.0 if self.capacity <= 0 else min(1.0, self.quantity / self.capacity)
+        from game.logistics.levels import level
+
+        return level(self.quantity, self.capacity)
 
     @property
     def needs_resupply(self) -> bool:
-        """Same 40% threshold as StockItem.needs_resupply."""
-        return self.level < 0.40
+        """Same threshold as StockItem.needs_resupply (levels.LOW_LEVEL)."""
+        from game.logistics.levels import LOW_LEVEL
+
+        return self.level < LOW_LEVEL
 
     @property
     def label(self) -> str:
@@ -108,6 +112,38 @@ class BaseInventory:
         )
 
 
+def weapon_rows(inventory: Any) -> Dict[str, List[WeaponRow]]:
+    """Weapon category -> weapons, both sorted by name; ground units left out.
+
+    The same weapon on different racks or launchers is one row.
+    """
+    weapons: Dict[str, List[WeaponRow]] = {}
+    for category, items in inventory.items_by_category().items():
+        if category in GROUND_UNIT_CATEGORIES:
+            continue
+        merged: Dict[str, WeaponRow] = {}
+        for i in items:
+            row = merged.get(i.name)
+            if row is None:
+                merged[i.name] = WeaponRow(i.name, int(i.quantity), int(i.capacity))
+            else:
+                row.quantity += int(i.quantity)
+                row.capacity += int(i.capacity)
+                row.variants += 1
+        weapons[category] = sorted(merged.values(), key=lambda r: r.name)
+    return weapons
+
+
+def weapon_counts(inventory: Any) -> tuple[int, int, int]:
+    """(weapon types, empty types, low types) of a base's weapon stores."""
+    rows = [r for rows in weapon_rows(inventory).values() for r in rows]
+    return (
+        len(rows),
+        sum(1 for r in rows if r.empty),
+        sum(1 for r in rows if r.low),
+    )
+
+
 def base_inventory(game: Game, cp: Any) -> BaseInventory:
     """Everything the base holds, for display."""
     from game.logistics.naval_munitions import AMMO_PER_CRATE
@@ -127,25 +163,12 @@ def base_inventory(game: Game, cp: Any) -> BaseInventory:
     weapons: Optional[Dict[str, List[WeaponRow]]] = None
     inventory = logistics.get_weapon_inventory(cp.id)
     if inventory is not None:
-        weapons = {}
-        for category, items in inventory.items_by_category().items():
-            if category in GROUND_UNIT_CATEGORIES:
-                continue
-            merged: Dict[str, WeaponRow] = {}
-            for i in items:
-                row = merged.get(i.name)
-                if row is None:
-                    merged[i.name] = WeaponRow(i.name, int(i.quantity), int(i.capacity))
-                else:
-                    row.quantity += int(i.quantity)
-                    row.capacity += int(i.capacity)
-                    row.variants += 1
-            weapons[category] = sorted(merged.values(), key=lambda r: r.name)
+        weapons = weapon_rows(inventory)
 
     incoming: List[str] = []
     outgoing: List[str] = []
     names = {c.id: c.name for c in game.theater.controlpoints}
-    for t in getattr(logistics, "_transfers", {}).values():
+    for t in logistics._transfers.values():
         if t.status not in (TransferStatus.PLANNED, TransferStatus.IN_FLIGHT):
             continue
         state = "in flight" if t.status is TransferStatus.IN_FLIGHT else "planned"

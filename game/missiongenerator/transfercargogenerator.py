@@ -27,14 +27,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Iterator, Optional, Tuple
 
-from dcs.action import DoScript
 from dcs.mapping import Point
 from dcs.statics import Cargo
-from dcs.translation import String
-from dcs.triggers import TriggerStart
 
 from game.ato.flighttype import FlightType
 from game.ato.starttype import StartType
+from game.missiongenerator.luadata import inject_data_table
 from game.logistics.cargo import (
     cargo_aircraft,
     loads_internally,
@@ -177,9 +175,7 @@ class TransferCargoGenerator:
             "stock": stock,
             "crates": self.crates,
         }
-        trigger = TriggerStart(comment="Set DCS Retribution cargo data")
-        trigger.add_action(DoScript(String(f"dcsRetributionCargo = {to_lua(data)}")))
-        self.mission.triggerrules.triggers.append(trigger)
+        inject_data_table(self.mission, "dcsRetributionCargo", data, "cargo")
 
     # ── Placement ─────────────────────────────────────────────────────
 
@@ -307,30 +303,3 @@ class TransferCargoGenerator:
         ]
         # The last free slots are usually the least used.
         return free[-1].position if free else None
-
-
-def to_lua(value: Any) -> str:
-    """A Python value (dict/list/str/number/bool/None) as a Lua literal."""
-    if value is None:
-        return "nil"
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (int, float)):
-        return repr(float(value)) if isinstance(value, float) else str(value)
-    if isinstance(value, str):
-        escaped = (
-            value.replace("\\", "\\\\")
-            .replace('"', '\\"')
-            .replace("\n", "\\n")
-            .replace("\r", "")
-        )
-        return f'"{escaped}"'
-    if isinstance(value, dict):
-        return (
-            "{"
-            + ", ".join(f"[{to_lua(str(k))}] = {to_lua(v)}" for k, v in value.items())
-            + "}"
-        )
-    if isinstance(value, (list, tuple)):
-        return "{" + ", ".join(to_lua(v) for v in value) + "}"
-    raise TypeError(f"Cannot write {type(value).__name__} to Lua")

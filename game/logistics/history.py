@@ -34,11 +34,7 @@ class HistoryPoint:
 
 
 def _history(logistics: LogisticsManager) -> Dict[UUID, List[HistoryPoint]]:
-    history = getattr(logistics, "_history", None)
-    if history is None:  # saves from before the history existed
-        history = {}
-        logistics._history = history
-    return history
+    return logistics._history
 
 
 def snapshot(logistics: Any, warehouse: Warehouse, turn: int) -> HistoryPoint:

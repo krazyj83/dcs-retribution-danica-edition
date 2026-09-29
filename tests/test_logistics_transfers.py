@@ -174,7 +174,10 @@ def test_attrition_is_one_percent_once_per_turn() -> None:
 
 def test_attrition_works_on_saves_from_before_it_existed() -> None:
     s = Setup()
-    del s.lm._last_attrition_turn  # pickled before the attribute existed
+    state = dict(s.lm.__dict__)
+    del state["_last_attrition_turn"]  # pickled before the attribute existed
+    s.lm.__dict__.clear()
+    s.lm.__setstate__(state)
     s.lm.on_turn_end(s.game)
     assert s.fuel(s.source) == pytest.approx(250 * 0.99)
 

@@ -116,4 +116,4 @@ def test_map_shows_enemy_bases_only_with_recon() -> None:
     (row,) = supply_status(game)
 
     assert row.cp is maykop and row.side == "red" and row.intel_age == 2
-    assert row.ammunition == 10 and row.status == "low"
+    assert row.ammunition == 10 and row.status == "critical"

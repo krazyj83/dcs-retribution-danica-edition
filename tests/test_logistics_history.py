@@ -78,7 +78,10 @@ def test_on_turn_end_records_after_attrition(monkeypatch: Any) -> None:
 def test_old_saves_without_history_still_record() -> None:
     base = _base("Larnaca")
     game = _game(base)
-    del game.logistics._history
+    state = dict(game.logistics.__dict__)
+    del state["_history"]  # a save made before stock history existed
+    game.logistics.__dict__.clear()
+    game.logistics.__setstate__(state)
     record_turn(game.logistics, 1)
     assert len(history_for(game.logistics, base.id)) == 1
 
@@ -105,7 +108,7 @@ def test_supply_status_covers_friendly_bases_only() -> None:
     (status,) = supply_status(game)
 
     assert status.cp is blue
-    assert status.status == "low" and status.reasons == ["ammunition 10%"]
+    assert status.status == "critical" and status.reasons == ["ammunition 10%"]
 
 
 def test_supply_status_endpoint() -> None:

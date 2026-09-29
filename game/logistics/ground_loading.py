@@ -74,7 +74,13 @@ def _airport_bases(game: Game) -> List[Any]:
 
 
 def configure_airports(game: Game, mission: Any) -> None:
-    """Limit fuel and munitions of the DCS warehouses of friendly airfields."""
+    """Limit fuel and munitions of the DCS warehouses of friendly airfields.
+
+    Runs at the end of mission generation (MissionGenerator.generate_warehouses)
+    because TriggerGenerator resets the airports' fuel and munitions flags.
+    The contents come from script_data(), written earlier with the other data
+    tables; both read the same stores.
+    """
     from game.logistics import WarehouseCategory
     from game.logistics.fuel import FUEL_KG_PER_UNIT, unlimited_fuel
 

@@ -1,10 +1,14 @@
 """How well supplied each friendly base is, for the map's "Base supply" layer.
 
-Each BLUEFOR base gets a status from its fuel and ammunition:
+Each BLUEFOR base gets a status from its fuel, its ammunition (bulk
+munitions: ship crates, repairs) and its weapon stores (the aircraft's
+missiles and bombs), with the thresholds of logistics/levels.py:
 
-    critical  fuel or ammunition empty, or fuel for less than 1 more turn
-    low       fuel or ammunition under 40% (the resupply threshold), or fuel
-              for less than 3 more turns at the last mission's rate
+    critical  fuel or ammunition under 20% or empty, fuel for less than 1
+              more turn, or half the weapon types in store empty
+    low       fuel or ammunition under 40% (the resupply threshold), fuel for
+              less than 3 more turns at the last mission's rate, or any
+              weapon type in store empty
     ok        everything else
 
 With "Unlimited warehouse fuel" on, fuel only counts when it is empty.
@@ -22,7 +26,8 @@ from typing import TYPE_CHECKING, Any, List, Optional
 if TYPE_CHECKING:
     from game import Game
 
-LOW_LEVEL = 0.40
+from game.logistics.levels import LOW_LEVEL  # noqa: F401  (kept for importers)
+
 CRITICAL_TURNS = 1.0
 LOW_TURNS = 3.0
 
@@ -50,23 +55,44 @@ def classify(
     ammo_level: float,
     turns_left: Optional[float],
     unlimited: bool,
+    weapon_types: int = 0,
+    weapons_empty: int = 0,
 ) -> tuple[str, List[str]]:
-    """(status, reasons) from stock levels (0..1) and fuel turns left."""
+    """(status, reasons) from stock levels (0..1), fuel turns left and the
+    weapon stores (types tracked, types empty)."""
+    from game.logistics.levels import level_status
+
     critical: List[str] = []
     low: List[str] = []
-    if fuel_level <= 0:
+
+    fuel = level_status(fuel_level)
+    if fuel == "empty":
         critical.append("out of fuel")
     elif not unlimited:
+        if fuel == "critical":
+            critical.append(f"fuel {fuel_level:.0%}")
+        elif fuel == "low":
+            low.append(f"fuel {fuel_level:.0%}")
         if turns_left is not None and turns_left < CRITICAL_TURNS:
             critical.append("fuel for less than 1 turn")
         elif turns_left is not None and turns_left < LOW_TURNS:
             low.append(f"fuel for {turns_left:.1f} turns")
-        if fuel_level < LOW_LEVEL:
-            low.append(f"fuel {fuel_level:.0%}")
-    if ammo_level <= 0:
+
+    ammo = level_status(ammo_level)
+    if ammo == "empty":
         critical.append("out of ammunition")
-    elif ammo_level < LOW_LEVEL:
+    elif ammo == "critical":
+        critical.append(f"ammunition {ammo_level:.0%}")
+    elif ammo == "low":
         low.append(f"ammunition {ammo_level:.0%}")
+
+    if weapons_empty > 0:
+        line = f"{weapons_empty} weapon type(s) empty"
+        if weapon_types and weapons_empty * 2 >= weapon_types:
+            critical.append(line)
+        else:
+            low.append(line)
+
     if critical:
         return "critical", critical + low
     if low:
@@ -75,13 +101,16 @@ def classify(
 
 
 def _level(quantity: float, capacity: float) -> float:
-    return 0.0 if capacity <= 0 else quantity / capacity
+    from game.logistics.levels import level
+
+    return level(quantity, capacity)
 
 
 def supply_status(game: Game) -> List[BaseSupply]:
     """Supply status of every BLUEFOR base (bases not yet given a warehouse
     show the default one, as the Base Inventory tab does)."""
     from game.logistics import WarehouseCategory, keeps_warehouse, new_base_warehouse
+    from game.logistics.base_inventory import weapon_counts
     from game.logistics.fuel import turns_left, unlimited_fuel
 
     logistics = getattr(game, "logistics", None)
@@ -99,11 +128,15 @@ def supply_status(game: Game) -> List[BaseSupply]:
         ammo = warehouse.stock[WarehouseCategory.AMMUNITION]
         supplies = warehouse.stock[WarehouseCategory.SUPPLIES]
         left = turns_left(warehouse)
+        inventory = logistics.get_weapon_inventory(cp.id)
+        types, empty, _ = weapon_counts(inventory) if inventory else (0, 0, 0)
         status, reasons = classify(
             _level(fuel.quantity, fuel.capacity),
             _level(ammo.quantity, ammo.capacity),
             left,
             unlimited,
+            weapon_types=types,
+            weapons_empty=empty,
         )
         result.append(
             BaseSupply(

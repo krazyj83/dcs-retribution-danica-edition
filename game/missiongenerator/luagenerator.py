@@ -18,15 +18,11 @@ from game.plugins import LuaPluginManager
 from game.theater import TheaterGroundObject
 from game.theater.iadsnetwork.iadsrole import IadsRole
 from game.utils import escape_string_for_lua
+from .luadata import DATA_TRIGGER_PREFIX
 from .missiondata import MissionData
 
 if TYPE_CHECKING:
     from game import Game
-
-
-#: Comment prefix of the start triggers that set the fork's data tables for the
-#: mission scripts (warehouses, naval munitions, player convoys, cargo).
-DATA_TRIGGER_PREFIX = "Set DCS Retribution"
 
 
 class LuaGenerator:

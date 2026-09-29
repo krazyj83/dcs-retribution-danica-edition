@@ -38,15 +38,14 @@ class IntelReport:
 
 
 def _reports(logistics: LogisticsManager) -> Dict[Any, IntelReport]:
-    reports = getattr(logistics, "_red_intel", None)
-    if reports is None:
-        reports = {}
-        logistics._red_intel = reports
+    reports: Dict[Any, IntelReport] = logistics._red_intel
     return reports
 
 
 def _level(item: Any) -> float:
-    return 0.0 if item.capacity <= 0 else item.quantity / item.capacity
+    from game.logistics.levels import level
+
+    return level(item.quantity, item.capacity)
 
 
 def seen_bases(game: Any, debriefing: Any) -> Dict[Any, Tuple[Any, str]]:
@@ -126,14 +125,9 @@ def forget(logistics: Any, cp_id: Any) -> None:
 
 def estimate(level: float) -> Tuple[str, str]:
     """(text, colour) for a stock level, rounded like an intel estimate."""
-    rounded = int(round(level * 10)) * 10
-    if level <= 0.02:
-        return "Exhausted", "#e74c3c"
-    if level < 0.2:
-        return f"Critical (~{rounded}%)", "#e74c3c"
-    if level < 0.4:
-        return f"Low (~{rounded}%)", "#f39c12"
-    return f"Good (~{rounded}%)", "#27ae60"
+    from game.logistics.levels import estimate as level_estimate
+
+    return level_estimate(level)
 
 
 def age_text(age: int) -> str:

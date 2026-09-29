@@ -180,6 +180,8 @@ class Game:
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__.update(state)
+        if not hasattr(self, "logistics"):
+            self.logistics = LogisticsManager()
         if not hasattr(self, "player_convoy_routes"):
             self.player_convoy_routes = {}
         if not hasattr(self, "laser_code_registry"):

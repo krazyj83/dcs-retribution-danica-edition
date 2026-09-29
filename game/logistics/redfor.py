@@ -277,7 +277,7 @@ def resupply(game: Any) -> List[str]:
         return []
     logistics = game.logistics
     turn = getattr(game, "turn", 0)
-    if getattr(logistics, "_red_resupply_turn", None) == turn:
+    if logistics._red_resupply_turn == turn:
         return []
     logistics._red_resupply_turn = turn
 
@@ -352,7 +352,7 @@ def intel_estimate(game: Any, cp: Any) -> List[Tuple[str, str, str]]:
         rows.append(("Fuel", *estimate(report.fuel)))
         rows.append(("Ammunition", *estimate(report.ammunition)))
         rows.append(("Source", age_text(age), "#95a5a6"))
-    grounded = getattr(game.logistics, "_red_grounded", {}).get(cp.name)
+    grounded = game.logistics._red_grounded.get(cp.name)
     if grounded and grounded[0] == getattr(game, "turn", 0):
         rows.append(
             (

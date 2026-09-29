@@ -66,10 +66,7 @@ class TurnReport:
 
 
 def _reports(logistics: Any) -> Dict[int, TurnReport]:
-    reports = getattr(logistics, "_turn_reports", None)
-    if reports is None:
-        reports = {}
-        logistics._turn_reports = reports
+    reports: Dict[int, TurnReport] = logistics._turn_reports
     return reports
 
 
