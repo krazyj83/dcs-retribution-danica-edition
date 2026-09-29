@@ -335,33 +335,31 @@ def sync_warehouse_sides(game: Any) -> None:
 # ── Intel estimate (base window, Intel tab) ───────────────────────────────
 
 
-def _estimate(level: float) -> Tuple[str, str]:
-    """(text, colour) for a stock level, rounded like an intel estimate."""
-    rounded = int(round(level * 10)) * 10
-    if level <= 0.02:
-        return "Exhausted", "#e74c3c"
-    if level < 0.2:
-        return f"Critical (~{rounded}%)", "#e74c3c"
-    if level < 0.4:
-        return f"Low (~{rounded}%)", "#f39c12"
-    return f"Good (~{rounded}%)", "#27ae60"
-
-
 def intel_estimate(game: Any, cp: Any) -> List[Tuple[str, str, str]]:
-    """(label, estimate, colour) rows for a REDFOR base, or [] when off."""
-    if not enabled(game) or not cp.captured.is_red:
+    """(label, estimate, colour) rows for a REDFOR base's Intel tab.
+
+    Stock is only known from recon (logistics/intel.py); without a recent
+    report the rows say so. [] when REDFOR logistics is off.
+    """
+    from game.logistics.intel import age_text, estimate, intel_for
+
+    if not enabled(game) or not cp.captured.is_red or getattr(cp, "is_fleet", False):
         return []
-    stock = _stock(game, cp)
-    if stock is None:
-        return []
-    fuel_item, ammo_item = stock
-    rows = [
-        ("Fuel", *_estimate(fuel_item.quantity / max(1.0, fuel_item.capacity))),
-        (
-            "Ammunition",
-            *_estimate(ammo_item.quantity / max(1.0, ammo_item.capacity)),
-        ),
-    ]
+    rows: List[Tuple[str, str, str]] = []
+    found = intel_for(game, cp)
+    if found is None:
+        rows.append(
+            (
+                "Stock",
+                "Unknown: fly near the base (30 km) to update",
+                "#95a5a6",
+            )
+        )
+    else:
+        report, age = found
+        rows.append(("Fuel", *estimate(report.fuel)))
+        rows.append(("Ammunition", *estimate(report.ammunition)))
+        rows.append(("Source", age_text(age), "#95a5a6"))
     grounded = getattr(game.logistics, "_red_grounded", {}).get(cp.name)
     if grounded and grounded[0] == getattr(game, "turn", 0):
         rows.append(

@@ -59,6 +59,7 @@ from PySide6.QtWidgets import (
 
 from game import Game
 from game.logistics import (
+    new_base_warehouse,
     DropZone,
     DropZoneType,
     Warehouse,
@@ -175,7 +176,7 @@ def blue_control_points(game: Game) -> List:
 def sync_warehouses_from_game(logistics: LogisticsManager, game: Game) -> None:
     for cp in blue_control_points(game):
         if cp.id not in logistics._warehouses:
-            logistics._warehouses[cp.id] = Warehouse(cp_id=cp.id, cp_name=cp.name)
+            logistics._warehouses[cp.id] = new_base_warehouse(cp)
         else:
             logistics._warehouses[cp.id].cp_name = cp.name
 

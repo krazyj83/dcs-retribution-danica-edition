@@ -32,7 +32,7 @@ AMMO_PER_CRATE = 50.0
 
 def script_data(game: Game) -> Dict[str, Any]:
     """The table the mission script reads: bases and crates available."""
-    from game.logistics import Warehouse, WarehouseCategory
+    from game.logistics import Warehouse, WarehouseCategory, new_base_warehouse
 
     logistics: LogisticsManager = game.logistics
     bases: List[Dict[str, Any]] = []
@@ -40,7 +40,7 @@ def script_data(game: Game) -> Dict[str, Any]:
         wh = logistics.get_warehouse(cp.id)
         if wh is None:
             # Same default warehouse the Logistics window creates for a base.
-            wh = Warehouse(cp_id=cp.id, cp_name=cp.name)
+            wh = new_base_warehouse(cp)
             logistics.add_warehouse(wh)
         ammo = wh.stock[WarehouseCategory.AMMUNITION].quantity
         bases.append(

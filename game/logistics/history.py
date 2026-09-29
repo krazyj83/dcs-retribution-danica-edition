@@ -66,15 +66,20 @@ def ensure_friendly_warehouses(game: Any) -> None:
     (Base Inventory tab, Logistics window) or uses fuel, so a new campaign
     starts with none; the history and the map's supply layer need them.
     """
-    from game.logistics import Warehouse
+    from game.logistics import new_base_warehouse, upgrade_blue_fuel_capacity
     from game.theater.controlpoint import OffMapSpawn
 
     logistics = game.logistics
     for cp in game.theater.controlpoints:
         if not cp.captured.is_blue or isinstance(cp, OffMapSpawn):
             continue
-        if logistics.get_warehouse(cp.id) is None:
-            logistics.add_warehouse(Warehouse(cp_id=cp.id, cp_name=cp.name))
+        if getattr(cp, "is_fleet", False):
+            continue  # ships are supplied at sea
+        warehouse = logistics.get_warehouse(cp.id)
+        if warehouse is None:
+            logistics.add_warehouse(new_base_warehouse(cp))
+        else:
+            upgrade_blue_fuel_capacity(warehouse)
 
 
 def record_turn(logistics: LogisticsManager, turn: int) -> None:

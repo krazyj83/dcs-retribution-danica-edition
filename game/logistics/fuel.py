@@ -65,6 +65,8 @@ def fuel_warning(game: Any, base: Any) -> Optional[str]:
 
     if unlimited_fuel(game) or not base.captured.is_blue:
         return None
+    if getattr(base, "is_fleet", False):
+        return None  # supplied at sea
     logistics = getattr(game, "logistics", None)
     warehouse = logistics.get_warehouse(base.id) if logistics else None
     if warehouse is None:
@@ -84,7 +86,7 @@ def use_fuel_for_sorties(game: Game) -> List[str]:
     Runs after the mission results are committed (captures applied) and before
     the ATO is cleared. Returns log lines.
     """
-    from game.logistics import Warehouse, WarehouseCategory
+    from game.logistics import Warehouse, WarehouseCategory, new_base_warehouse
 
     logistics = game.logistics
     for wh in logistics._warehouses.values():
@@ -101,6 +103,8 @@ def use_fuel_for_sorties(game: Game) -> List[str]:
             base = getattr(flight, "departure", None)
             if base is None or not base.captured.is_blue:
                 continue  # lost during the mission: its stock went with it
+            if getattr(base, "is_fleet", False):
+                continue  # carriers and LHAs are supplied at sea
             bases[base.id] = base
             used[base.id] += flight.count * fuel_per_aircraft(flight.unit_type)
             sorties[base.id] += flight.count
@@ -112,7 +116,7 @@ def use_fuel_for_sorties(game: Game) -> List[str]:
             continue
         found = logistics.get_warehouse(base.id)
         if found is None:
-            found = Warehouse(cp_id=base.id, cp_name=base.name)
+            found = new_base_warehouse(base)
             logistics.add_warehouse(found)
         warehouse: Warehouse = found
         fuel = warehouse.stock[WarehouseCategory.FUEL]
@@ -171,7 +175,7 @@ def _fuel_stock(game: Any, base: Any) -> Any:
 
     None for bases that don't keep warehouse fuel (not BLUEFOR).
     """
-    from game.logistics import Warehouse, WarehouseCategory
+    from game.logistics import Warehouse, WarehouseCategory, new_base_warehouse
 
     from game.logistics.redfor import enabled as redfor_enabled
 
@@ -184,7 +188,11 @@ def _fuel_stock(game: Any, base: Any) -> Any:
         return None
     warehouse = logistics.get_warehouse(base.id)
     if warehouse is None:
-        warehouse = Warehouse(cp_id=base.id, cp_name=base.name)
+        warehouse = (
+            new_base_warehouse(base)
+            if base.captured.is_blue
+            else Warehouse(cp_id=base.id, cp_name=base.name)
+        )
         logistics.add_warehouse(warehouse)
     return warehouse.stock[WarehouseCategory.FUEL]
 

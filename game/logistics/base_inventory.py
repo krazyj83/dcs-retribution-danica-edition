@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from game.logistics import (
+    new_base_warehouse,
     TransferStatus,
     Warehouse,
     WarehouseCategory,
@@ -115,7 +116,7 @@ def base_inventory(game: Game, cp: Any) -> BaseInventory:
     warehouse = logistics.get_warehouse(cp.id)
     if warehouse is None:
         # Same default warehouse the Logistics window creates for a base.
-        warehouse = Warehouse(cp_id=cp.id, cp_name=cp.name)
+        warehouse = new_base_warehouse(cp)
         logistics.add_warehouse(warehouse)
 
     stock = [
@@ -170,5 +171,6 @@ def base_inventory(game: Game, cp: Any) -> BaseInventory:
             getattr(warehouse, "fuel_used_last_mission", 0.0) or 0.0
         ),
         fuel_turns_left=turns_left(warehouse),
-        unlimited_fuel=unlimited_fuel(game),
+        # Ships are supplied at sea: their fuel isn't tracked.
+        unlimited_fuel=unlimited_fuel(game) or bool(getattr(cp, "is_fleet", False)),
     )

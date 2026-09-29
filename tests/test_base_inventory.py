@@ -48,7 +48,9 @@ def test_new_base_gets_the_default_warehouse() -> None:
     inv = base_inventory(game, home)
 
     assert [r.category for r in inv.stock] == list(WarehouseCategory)
-    assert all(r.quantity == 500 and r.capacity == 1000 for r in inv.stock)
+    fuel, *others = inv.stock  # fuel first: BLUE_FUEL_CAPACITY, full
+    assert fuel.quantity == fuel.capacity == 2000
+    assert all(r.quantity == 500 and r.capacity == 1000 for r in others)
     assert game.logistics.get_warehouse(home.id) is not None
     assert inv.weapons is None  # never synced
 
@@ -57,7 +59,7 @@ def test_stock_levels_and_resupply_flag() -> None:
     game, home, _ = _game()
     base_inventory(game, home)
     wh = game.logistics.get_warehouse(home.id)
-    wh.stock[WarehouseCategory.FUEL].quantity = 300  # 30%: needs resupply
+    wh.stock[WarehouseCategory.FUEL].quantity = 600  # 30%: needs resupply
     wh.stock[WarehouseCategory.AMMUNITION].quantity = 175
 
     inv = base_inventory(game, home)

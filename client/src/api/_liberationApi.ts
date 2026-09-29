@@ -529,6 +529,8 @@ export type BaseSupply = {
   unlimited_fuel: boolean;
   status: string;
   reasons: string[];
+  side?: string;
+  intel_age?: number | null;
 };
 export type Game = {
   convoy_routes: ConvoyRoute[];

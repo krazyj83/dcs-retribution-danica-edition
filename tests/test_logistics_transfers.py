@@ -193,12 +193,14 @@ def test_surviving_flight_delivers_the_cargo() -> None:
 
 
 def test_overflow_returns_to_the_source() -> None:
-    s = Setup(quantity=250, dest_fuel=900)
+    # Blue bases hold 2000 fuel (BLUE_FUEL_CAPACITY; on_turn_end upgrades
+    # the 1000 of older warehouses).
+    s = Setup(quantity=250, dest_fuel=1900)
     log = s.fly()
 
-    room = 1000 - 900 * 0.99
+    room = 2000 - 1900 * 0.99
     assert s.transfer.delivered == pytest.approx(room)
-    assert s.fuel(s.dest) == pytest.approx(1000)
+    assert s.fuel(s.dest) == pytest.approx(2000)
     assert s.fuel(s.source) == pytest.approx(250 * 0.99 + (250 - room))
     assert "returned to Source (no room)" in log[0]
 

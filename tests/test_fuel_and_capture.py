@@ -188,3 +188,31 @@ def test_base_inventory_reports_turns_left() -> None:
     assert inv.fuel_used_last_mission == pytest.approx(4 * 3249 / 200)
     assert inv.fuel_turns_left is not None and inv.fuel_turns_left > 1
     assert not inv.unlimited_fuel
+
+
+def test_ships_use_no_warehouse_fuel() -> None:
+    carrier = _cp("CVN-74")
+    carrier.is_fleet = True
+    game = _game([_flight(carrier, 4)], False, carrier)
+
+    assert use_fuel_for_sorties(game) == []
+    assert _fuel(game, carrier) == 500
+    assert fuel_warning(game, carrier) is None
+
+
+def test_blue_bases_get_bigger_fuel_tanks() -> None:
+    from game.logistics import BLUE_FUEL_CAPACITY, new_base_warehouse
+    from game.logistics.history import ensure_friendly_warehouses
+
+    base, old = _cp("Larnaca"), _cp("Paphos")
+    game = _game([], False, old)  # Paphos: a warehouse from an older save
+    game.theater.controlpoints = [base, old]
+
+    ensure_friendly_warehouses(game)
+
+    new_wh = game.logistics.get_warehouse(base.id)
+    assert new_wh.stock[FUEL].quantity == new_wh.stock[FUEL].capacity == 2000
+    old_wh = game.logistics.get_warehouse(old.id)
+    assert old_wh.stock[FUEL].capacity == BLUE_FUEL_CAPACITY
+    assert old_wh.stock[FUEL].quantity == 500  # bigger tank, same fuel
+    assert new_base_warehouse(base).stock[AMMO].quantity == 500

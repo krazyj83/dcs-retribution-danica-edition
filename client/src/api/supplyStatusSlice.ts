@@ -18,6 +18,10 @@ export interface BaseSupply {
   unlimited_fuel: boolean;
   status: "ok" | "low" | "critical" | string;
   reasons: string[];
+  // "red": an enemy base known from recon (game/logistics/intel.py); its
+  // amounts are percentages and intel_age is the report's age in turns.
+  side?: string;
+  intel_age?: number | null;
 }
 
 // Stock changes mid-turn too (Logistics window, supply flights), so the

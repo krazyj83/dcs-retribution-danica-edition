@@ -45,6 +45,10 @@ def on_base_captured(
         warehouse = Warehouse(cp_id=cp.id, cp_name=cp.name)
         logistics.add_warehouse(warehouse)
     warehouse.coalition = "blue" if new_owner.is_blue else "red"
+    if new_owner.is_blue:
+        from game.logistics import upgrade_blue_fuel_capacity
+
+        upgrade_blue_fuel_capacity(warehouse)
     for category in WarehouseCategory:
         if category is WarehouseCategory.FUEL:
             continue

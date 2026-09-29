@@ -218,7 +218,10 @@ class QBaseInventory(QFrame):
         from game.logistics import WarehouseCategory
 
         if inv.unlimited_fuel:
-            return "Fuel: unlimited (setting on), sorties don't use warehouse fuel."
+            return (
+                "Fuel: not tracked here (ships are supplied at sea, or the "
+                "Unlimited warehouse fuel setting is on)."
+            )
         fuel = next(r for r in inv.stock if r.category is WarehouseCategory.FUEL)
         if fuel.quantity <= 0:
             return (

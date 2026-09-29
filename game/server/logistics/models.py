@@ -29,6 +29,9 @@ class BaseSupplyJs(BaseModel):
     #: "ok", "low" or "critical" (see game/logistics/supply_status.py).
     status: str
     reasons: list[str]
+    #: "blue", or "red" for an enemy base known from recon (amounts in %).
+    side: str = "blue"
+    intel_age: Optional[int] = None
 
     class Config:
         title = "BaseSupply"
@@ -49,6 +52,8 @@ class BaseSupplyJs(BaseModel):
             unlimited_fuel=s.unlimited_fuel,
             status=s.status,
             reasons=s.reasons,
+            side=s.side,
+            intel_age=s.intel_age,
         )
 
     @staticmethod

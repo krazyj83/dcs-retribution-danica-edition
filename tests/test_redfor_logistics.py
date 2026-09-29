@@ -197,12 +197,25 @@ def test_capture_updates_the_warehouse_side() -> None:
     assert len(logistics.warehouses_for_coalition("red")) == 1
 
 
-def test_intel_estimate_rounds_like_intel() -> None:
+def test_intel_tab_needs_recon() -> None:
+    from game.logistics.intel import IntelReport
+
     maykop = _cp("Maykop")
     game = _game(maykop)
-    game.logistics.get_warehouse(maykop.id).stock[FUEL].quantity = 130
     rows = {label: text for label, text, _ in intel_estimate(game, maykop)}
-    assert rows == {"Fuel": "Critical (~10%)", "Ammunition": "Good (~50%)"}
+    assert rows == {"Stock": "Unknown: fly near the base (30 km) to update"}
+
+    game.logistics._red_intel = {
+        maykop.id: IntelReport(
+            turn=2, fuel=0.13, ammunition=0.5, supplies=1, source="x"
+        )
+    }
+    rows = {label: text for label, text, _ in intel_estimate(game, maykop)}
+    assert rows == {
+        "Fuel": "Critical (~10%)",
+        "Ammunition": "Good (~50%)",
+        "Source": "recon 1 turn old",
+    }
 
 
 def test_resupply_gives_back_what_was_used_scaled_by_depots() -> None:

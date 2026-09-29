@@ -2,7 +2,7 @@ import { renderWithProviders } from "../../testutils";
 import SupplyStatusLayer from "./SupplyStatusLayer";
 import { screen, waitFor } from "@testing-library/react";
 import { PropsWithChildren } from "react";
-import { statusColor, supplyLines } from "./supplyText";
+import { ringOpacity, statusColor, supplyLines, supplyTitle } from "./supplyText";
 import type { BaseSupply } from "../../api/supplyStatusSlice";
 
 const rings: any[] = [];
@@ -72,5 +72,29 @@ describe("SupplyStatusLayer", () => {
     expect(lines[0]).toMatch(/\(unlimited\)/);
     expect(lines[lines.length - 1]).toBe("⚠ out of ammunition");
     expect(statusColor("critical")).toBe("#e74c3c");
+  });
+
+  it("shows enemy bases from recon as percentages with the report's age", () => {
+    const enemy = base({
+      name: "Maykop",
+      side: "red",
+      intel_age: 2,
+      fuel: 34,
+      fuel_capacity: 100,
+      ammunition: 81,
+      ammunition_capacity: 100,
+      status: "low",
+      reasons: ["fuel 34%"],
+    });
+    expect(supplyTitle(enemy)).toBe(
+      "Maykop — enemy supply Low (recon 2 turns old)"
+    );
+    expect(supplyLines(enemy)).toEqual([
+      "Fuel ~30%",
+      "Ammunition ~80%",
+      "⚠ fuel 34%",
+    ]);
+    expect(ringOpacity(enemy)).toBeCloseTo(0.6);
+    expect(ringOpacity({ ...enemy, intel_age: 0 })).toBeCloseTo(0.9);
   });
 });

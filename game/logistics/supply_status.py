@@ -8,6 +8,10 @@ Each BLUEFOR base gets a status from its fuel and ammunition:
     ok        everything else
 
 With "Unlimited warehouse fuel" on, fuel only counts when it is empty.
+
+REDFOR bases are shown only while there is a recent recon report on them
+(logistics/intel.py): their amounts are the report's levels in percent, and
+intel_age says how many turns old it is.
 """
 
 from __future__ import annotations
@@ -36,6 +40,9 @@ class BaseSupply:
     unlimited_fuel: bool
     status: str
     reasons: List[str]
+    side: str = "blue"
+    #: REDFOR only: turns since the recon report the numbers come from.
+    intel_age: Optional[int] = None
 
 
 def classify(
@@ -74,7 +81,7 @@ def _level(quantity: float, capacity: float) -> float:
 def supply_status(game: Game) -> List[BaseSupply]:
     """Supply status of every BLUEFOR base (bases not yet given a warehouse
     show the default one, as the Base Inventory tab does)."""
-    from game.logistics import Warehouse, WarehouseCategory
+    from game.logistics import WarehouseCategory, new_base_warehouse
     from game.logistics.fuel import turns_left, unlimited_fuel
     from game.theater.controlpoint import OffMapSpawn
 
@@ -86,9 +93,11 @@ def supply_status(game: Game) -> List[BaseSupply]:
     for cp in game.theater.controlpoints:
         if not cp.captured.is_blue or isinstance(cp, OffMapSpawn):
             continue
+        if getattr(cp, "is_fleet", False):
+            continue  # ships are supplied at sea
         warehouse = logistics.get_warehouse(cp.id)
         if warehouse is None:
-            warehouse = Warehouse(cp_id=cp.id, cp_name=cp.name)
+            warehouse = new_base_warehouse(cp)
         fuel = warehouse.stock[WarehouseCategory.FUEL]
         ammo = warehouse.stock[WarehouseCategory.AMMUNITION]
         supplies = warehouse.stock[WarehouseCategory.SUPPLIES]
@@ -114,4 +123,40 @@ def supply_status(game: Game) -> List[BaseSupply]:
                 reasons=reasons,
             )
         )
+    result.extend(_enemy_bases_from_intel(game))
     return result
+
+
+def _enemy_bases_from_intel(game: Any) -> List[BaseSupply]:
+    from game.logistics.intel import intel_for
+    from game.logistics.redfor import enabled, is_red_land_base
+
+    if not enabled(game):
+        return []
+    rows: List[BaseSupply] = []
+    for cp in game.theater.controlpoints:
+        if not is_red_land_base(cp):
+            continue
+        found = intel_for(game, cp)
+        if found is None:
+            continue
+        report, age = found
+        status, reasons = classify(report.fuel, report.ammunition, None, False)
+        rows.append(
+            BaseSupply(
+                cp=cp,
+                fuel=report.fuel * 100,
+                fuel_capacity=100,
+                ammunition=report.ammunition * 100,
+                ammunition_capacity=100,
+                supplies=report.supplies * 100,
+                supplies_capacity=100,
+                fuel_turns_left=None,
+                unlimited_fuel=False,
+                status=status,
+                reasons=reasons,
+                side="red",
+                intel_age=age,
+            )
+        )
+    return rows

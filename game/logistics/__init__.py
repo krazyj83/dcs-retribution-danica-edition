@@ -371,6 +371,29 @@ class Warehouse:
         return transferred
 
 
+#: BLUEFOR bases' fuel tank farm: a busy airfield flies 600-800 fuel worth of
+#: sorties a turn, so 1000 ran dry within a turn or two.
+BLUE_FUEL_CAPACITY = 2000.0
+
+
+def new_base_warehouse(cp: Any) -> Warehouse:
+    """The warehouse a BLUEFOR base gets the first time it needs one.
+
+    Default stock, except fuel: BLUE_FUEL_CAPACITY, full.
+    """
+    warehouse = Warehouse(cp_id=cp.id, cp_name=cp.name)
+    fuel = warehouse.stock[WarehouseCategory.FUEL]
+    fuel.capacity = fuel.quantity = BLUE_FUEL_CAPACITY
+    return warehouse
+
+
+def upgrade_blue_fuel_capacity(warehouse: Warehouse) -> None:
+    """Saves from before BLUE_FUEL_CAPACITY: bigger tanks, same fuel in them."""
+    fuel = warehouse.stock[WarehouseCategory.FUEL]
+    if fuel.capacity < BLUE_FUEL_CAPACITY:
+        fuel.capacity = BLUE_FUEL_CAPACITY
+
+
 # ======================================================================
 # Transfers
 # ======================================================================
@@ -456,6 +479,8 @@ class LogisticsManager:
         self._last_attrition_turn: Optional[int] = None
         #: Stock per base, turn by turn (see logistics/history.py).
         self._history: Dict[UUID, List[Any]] = {}
+        #: Recon reports on REDFOR bases (see logistics/intel.py).
+        self._red_intel: Dict[UUID, Any] = {}
 
     # ── Drop zones ─────────────────────────────────────────────────────
 
@@ -1001,6 +1026,14 @@ class LogisticsManager:
             use_red_sortie_stock(game)
         except Exception:
             logging.getLogger(__name__).exception("REDFOR sortie stock use failed")
+        try:
+            from game.logistics.intel import record_recon
+
+            recon_log = record_recon(game, debriefing)
+            self.add_debrief_log(recon_log)
+            log.extend(recon_log)
+        except Exception:
+            logging.getLogger(__name__).exception("Recon intel failed")
         for t in self._transfers.values():
             if t.status is not TransferStatus.IN_FLIGHT:
                 continue
@@ -1100,6 +1133,9 @@ class LogisticsManager:
     def on_base_captured(self, cp: Any, new_owner: Any) -> List[str]:
         """A base changed hands: weapons to 0, fuel kept (see logistics/capture.py)."""
         from game.logistics.capture import on_base_captured
+        from game.logistics.intel import forget
+
+        forget(self, cp.id)
 
         log = on_base_captured(self, cp, new_owner)
         self.add_debrief_log(log)
