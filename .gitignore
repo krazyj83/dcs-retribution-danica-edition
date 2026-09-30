@@ -25,9 +25,8 @@ env/
 /resources/plugins/pretense/pretense_output.lua
 
 *.psd
-   
-   # Local environments and leftovers from merges and editors
-   .venv/
-   *.bak
-   *.orig
-   *.log
+# Local environments and leftovers from merges and editors
+.venv/
+*.bak
+*.orig
+*.log
