@@ -1,3 +1,28 @@
+# Danica Edition (fork of Retribution v1.6.0, unreleased)
+
+Features of the krazyj83/dcs-retribution-danica-edition fork. The full guide is
+the Danica Edition Feature Manual.
+
+## Features/Improvements
+* **[Logistics]** Base warehouses: fuel, ammunition, supplies and troops per base, with 1% attrition per turn, transfers flown by player LOGISTIC flights, weapon cargo transfers with crates in the mission, and drop zones.
+* **[Logistics]** Fuel used by sorties (200 kg per unit), turns of fuel left, fuel trucks in convoys, and the Unlimited warehouse fuel setting. BLUEFOR bases hold 2000 fuel; carriers and LHAs don't use warehouse fuel.
+* **[Logistics]** Weapons fired or lost come out of the base's weapon stores. Player aircraft can spawn empty at friendly airfields and load from DCS warehouses stocked from the base.
+* **[Logistics]** Base capture: weapon stores go to 0 and fuel is kept; ammunition, supplies and troops go to 0 for either side.
+* **[Logistics]** Repairs cost warehouse supplies and ammunition.
+* **[Logistics]** UH-60L and MH-60L DAP cargo loads are now weight-checked (mod data: 3622 kg at full fuel).
+* **[Logistics]** A knocked-out SAM site costs its base 10 ammunition per vehicle in the site (min 20, max 200) instead of every destroyed SAM vehicle counting as an ammo depot.
+* **[Plugins]** Ship rearming at sea: a helicopter loads a naval munitions crate (500 kg, from the base's ammunition stock) at a friendly base via F10 > Naval munitions, lands on a friendly ship and stays 15 min on the deck to deliver a 20% rearm load (one per 30 min per group). When the loads cover the most depleted weapon the group respawns in place fully armed (DCS cannot add ammo to ships). Damaged ships and carrier groups are not rearmed; REDFOR ships rearm on their own (option). F10 > Ship Weapons shows each ship's weapons, load and rearm state.
+* **[UI]** Base Inventory tab with stock bars, stock history chart and weapon stores; supply status rings on the map (critical under 20%, low under 40%, empty weapon types); turn report window.
+* **[REDFOR]** REDFOR logistics: fuel and ammunition limit enemy sorties; need-based resupply with a main supply base, transport tiers and SHORAD convoy escorts; REDFOR repairs damaged SAM/EWR sites.
+* **[REDFOR]** Enemy supply is only known from recon (dotted map rings, Intel tab, reports expire after 4 turns).
+* **[Convoys]** Player-drawn convoy routes (one turn or standing), delivery on arrival, drive-time estimate, and a Convoy Escort flight plan.
+* **[Campaigns]** Units spawn as placed (`use_placed_units`), automatic advanced IADS for new campaigns, a bigger unit recognition list, and losses of units added in the mission editor counted per side.
+* **[Options]** Fork settings sit in their own Campaign Management sections: Base Supplies, REDFOR Logistics and Battlefield.
+
+## Fixes
+* **[Logistics]** Depot and SAM damage is applied when the mission results are processed, the mission data tables load before the plugin scripts, and one set of supply thresholds is used everywhere (29/30 Sep quality check).
+* **[Logistics]** Weapon categories: BR-250 bombs, LR-25 rockets and TER/MER racks are no longer filed as air-to-air.
+
 # Retribution v1.6.0
 
 ## Features/Improvements
@@ -13,11 +38,8 @@
 * **[Campaigns]** New campaign: Syria - Desert Trident (Starfire), with the new `USA-Israel 2000` and `Iraq 2000` factions. Campaign format 10.9 (motor pools).
 * **[Data]** Added the F-100D Super Sabre (DCS module) to the USA 1955-1975 and Vietnam War factions, and the F-14A Tomcat (Block 95-GR Export).
 * **[Data]** Weapons data updated to upstream: 74 new weapon groups and wider CLSID coverage (Super Hornet, JAS-39, CH packs and more), with introduction years for date-restricted loadouts.
-* **[Logistics]** UH-60L and MH-60L DAP cargo loads are now weight-checked (mod data: 3622 kg at full fuel).
-* **[Logistics]** A knocked-out SAM site costs its base 10 ammunition per vehicle in the site (min 20, max 200) instead of every destroyed SAM vehicle counting as an ammo depot.
 * **[Map]** Hovering a SAM threat or detection ring highlights its emitter, and hovering an emitter highlights its rings, making it easy to tell which site a ring belongs to. Can be switched off in the map's layer control (remembered). (upstream #750)
 * **[Campaign]** REDFOR transfers are labelled "Enemy transfer" again, and old saves with transfers load (side stored as true/false). (upstream #759)
-* **[Plugins]** Ship rearming at sea: a helicopter loads a naval munitions crate (500 kg, from the base's ammunition stock) at a friendly base via F10 > Naval munitions, lands on a friendly ship and stays 15 min on the deck to deliver a 20% rearm load (one per 30 min per group). When the loads cover the most depleted weapon the group respawns in place fully armed (DCS cannot add ammo to ships). Damaged ships and carrier groups are not rearmed; REDFOR ships rearm on their own (option). F10 > Ship Weapons shows each ship's weapons, load and rearm state.
 * **[Mission Generator]** Native DTC data cartridges for the F/A-18C and F-16C: every blue client flight spawns with its steerpoints and push times, recovery TACAN/ICLS/ACLS and the SA/HSD picture already loaded, and multiplayer clients receive the cartridge with the mission download. Campaign setting `Pre-load DTC data cartridges`, on by default.
 * **[Campaigns]** Ability to define motor pool objects which spawn reserve armor
 * **[Campaigns]** Motorpool placement is Garage_A-anchored and empty reserve pools are excluded from attack planning
