@@ -13,6 +13,9 @@ jobs:
         with:
           src: "."
           options: "--check"
+          # Same version as requirements.txt and .pre-commit-config.yaml, so
+          # CI, the pre-commit hook and a local `black .` agree.
+          version: "26.3.1"
 
   mypy:
     name: Type checking

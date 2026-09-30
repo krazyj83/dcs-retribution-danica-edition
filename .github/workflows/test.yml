@@ -20,6 +20,34 @@ jobs:
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v3
 
+  # The Windows runner has no Lua, so the mission-script tests (tests/*lua*,
+  # editor losses, ground loading) are skipped there. This job runs the whole
+  # suite on Linux with lua5.1 installed, so those tests run too.
+  python-lua-tests:
+    name: Python + Lua tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Lua 5.1
+        run: sudo apt-get update && sudo apt-get install -y lua5.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: pytest -rs tests
+
   ts-tests:
     name: Typescript tests
     runs-on: windows-latest
