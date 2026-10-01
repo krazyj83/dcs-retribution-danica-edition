@@ -41,6 +41,7 @@ class FastForwardStopCondition(Enum):
     PLAYER_TAKEOFF = "Player takeoff time"
     PLAYER_TAXI = "Player taxi time"
     PLAYER_STARTUP = "Player startup time"
+    PLAYER_AT_IP = "Player at IP"
     MANUAL = "Manual fast forward control"
 
 
@@ -49,6 +50,12 @@ class CombatResolutionMethod(Enum):
     PAUSE = "Pause simulation"
     RESOLVE = "Resolve combat"
     SKIP = "Skip combat"
+
+
+@unique
+class DefaultPlayerLaserCode(Enum):
+    DEFAULT_1688 = "Default (1688)"
+    ALLOCATE_OWN = "Allocate own (unique per flight)"
 
 
 DIFFICULTY_PAGE = "Difficulty"
@@ -1010,6 +1017,7 @@ class Settings:
             "Player startup time": FastForwardStopCondition.PLAYER_STARTUP,
             "Player taxi time": FastForwardStopCondition.PLAYER_TAXI,
             "Player takeoff time": FastForwardStopCondition.PLAYER_TAKEOFF,
+            "Player at IP": FastForwardStopCondition.PLAYER_AT_IP,
             "First contact": FastForwardStopCondition.FIRST_CONTACT,
             "Manual": FastForwardStopCondition.MANUAL,
         },
@@ -1130,6 +1138,19 @@ class Settings:
         choices={v.value: v for v in StartType},
         default=StartType.COLD,
         detail="Default start type for flights containing Player/Client slots.",
+    )
+    default_player_laser_code: DefaultPlayerLaserCode = choices_option(
+        "Default laser code for Player flights",
+        page=MISSION_GENERATOR_PAGE,
+        section=GAMEPLAY_SECTION,
+        choices={v.value: v for v in DefaultPlayerLaserCode},
+        default=DefaultPlayerLaserCode.ALLOCATE_OWN,
+        detail=(
+            "Allocate own gives every newly-created player flight a unique TGP/"
+            "weapon laser code. Default (1688) leaves the code unset so bombs "
+            "and the cockpit TGP fall back to 1688. Affects newly-created "
+            "flights only; existing flights are unchanged."
+        ),
     )
     nevatim_parking_fix: bool = boolean_option(
         "Force air-starts for aircraft at Nevatim and Ramon Airbase inoperable parking slots",

@@ -17,7 +17,7 @@ from dcs.unitgroup import FlyingGroup
 from game.ato import Flight, FlightType
 from game.ato.flightplans.shiprecoverytanker import RecoveryTankerFlightPlan
 from game.callsigns import callsign_for_support_unit
-from game.data.weapons import Pylon, WeaponType
+from game.data.weapons import Pylon, Weapon, WeaponType
 from game.lasercodes.lasercode import LaserCode
 from game.missiongenerator.logisticsgenerator import LogisticsGenerator
 from game.missiongenerator.missiondata import MissionData, AwacsInfo, TankerInfo
@@ -338,32 +338,11 @@ class FlightGroupConfigurator:
             unit.set_player()
 
     def skill_level_for(self, unit: FlyingUnit, pilot: Optional[Pilot]) -> Skill:
-        if self.flight.squadron.player.is_blue:
-            base_skill = Skill(self.game.settings.player_skill)
-        else:
-            base_skill = Skill(self.game.settings.enemy_skill)
-
+        squadron = self.flight.squadron
         if pilot is None:
             logging.error(f"Cannot determine skill level: {unit.name} has not pilot")
-            return base_skill
-
-        levels = [
-            Skill.Average,
-            Skill.Good,
-            Skill.High,
-            Skill.Excellent,
-        ]
-        current_level = levels.index(base_skill)
-        missions_for_skill_increase = 4
-        increase = pilot.record.missions_flown // missions_for_skill_increase
-        capped_increase = min(current_level + increase, len(levels) - 1)
-
-        if self.game.settings.ai_pilot_levelling:
-            new_level = capped_increase
-        else:
-            new_level = current_level
-
-        return levels[new_level]
+            return squadron.base_skill
+        return squadron.pilot_skill(pilot)
 
     def setup_props(self) -> None:
         unit: FlyingUnit
@@ -445,7 +424,7 @@ class FlightGroupConfigurator:
             pylon = Pylon.for_aircraft(self.flight.unit_type, pylon_number)
             settings = self._merge_laser_code(
                 loadout.pylon_settings.get(pylon_number),
-                weapon.accepts_laser_code(),
+                weapon,
                 member.weapon_laser_code,
             )
             pylon.equip(unit, weapon, settings)
@@ -453,14 +432,22 @@ class FlightGroupConfigurator:
     @staticmethod
     def _merge_laser_code(
         base: Optional[dict[str, Any]],
-        accepts_laser_code: bool,
+        weapon: Weapon,
         laser_code: Optional[LaserCode],
     ) -> Optional[dict[str, Any]]:
-        if laser_code is None or not accepts_laser_code:
+        """Settings to write for this pylon, laser code included.
+
+        DCS reads a weapon's settings table as the whole truth: a key that is absent
+        is not fitted, and a bomb's fuze lives in that table. Start from the weapon's
+        own defaults, which is what DCS applies when no table is written at all.
+        """
+        if laser_code is None or not weapon.accepts_laser_code():
             return base
-        settings = dict(base or {})
-        settings["laser_code"] = laser_code.code
-        return settings
+        settings = weapon.create_settings()
+        defaults = settings.to_dict() if settings is not None else {}
+        merged = {**defaults, **(base or {})}
+        merged["laser_code"] = laser_code.code
+        return merged
 
     def setup_fuel(self) -> None:
         fuel = self.flight.state.estimate_fuel()
