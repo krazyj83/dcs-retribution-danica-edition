@@ -595,6 +595,8 @@ class LogisticsManager:
         self._last_attrition_turn: Optional[int] = None
         #: Stock per base, turn by turn (see logistics/history.py).
         self._history: Dict[UUID, List[Any]] = {}
+        #: Per-turn activity, turn -> TurnStats (logistics/campaign_stats.py).
+        self._turn_stats: Dict[int, Any] = {}
         #: Recon reports on REDFOR bases (see logistics/intel.py).
         self._red_intel: Dict[UUID, Any] = {}
         #: Turn reports by turn (see logistics/turn_report.py).
@@ -1146,17 +1148,22 @@ class LogisticsManager:
         log: List[str] = []
         from game.logistics import turn_report
 
+        from game.logistics.campaign_stats import StatsRecorder
+
         report = turn_report.start_report(game, debriefing, list(self._debrief_log))
+        stats = StatsRecorder(self, game.turn)
         # Depot and SAM damage first: REDFOR resupply, repairs and next turn's
         # planning (all at the end of the turn) must see it.
         try:
             from game.logistics.debrief_hook import apply_damage
 
-            log.extend(apply_damage(debriefing))
+            log.extend(stats.measure("damage", lambda: apply_damage(debriefing)))
         except Exception:
             logging.getLogger(__name__).exception("Depot/SAM damage failed")
         try:
-            fuel_log = use_fuel_for_sorties(game)
+            fuel_log = stats.measure(
+                "fuel", lambda: use_fuel_for_sorties(game, debriefing)
+            )
         except Exception:
             logging.getLogger(__name__).exception("Sortie fuel use failed")
             fuel_log = []
@@ -1166,7 +1173,9 @@ class LogisticsManager:
         try:
             from game.logistics.weapon_use import charge_weapon_use
 
-            weapon_log = charge_weapon_use(game, debriefing)
+            weapon_log = stats.measure(
+                "weapons", lambda: charge_weapon_use(game, debriefing)
+            )
             self.add_debrief_log(weapon_log)
             log.extend(weapon_log)
             report.add("weapons", weapon_log)
@@ -1188,6 +1197,7 @@ class LogisticsManager:
         except Exception:
             logging.getLogger(__name__).exception("Recon intel failed")
         flights_from = len(log)
+        stats.start("transfers")
         for t in self._transfers.values():
             if t.status is not TransferStatus.IN_FLIGHT:
                 continue
@@ -1272,6 +1282,9 @@ class LogisticsManager:
                 else:
                     line += f", {overflow:.0f} lost (no room)"
             log.append(line)
+
+        stats.stop("transfers")
+        stats.save()
 
         # Naval munitions crates flown to ships (ship_weapons plugin).
         from game.logistics.naval_munitions import settle as settle_naval

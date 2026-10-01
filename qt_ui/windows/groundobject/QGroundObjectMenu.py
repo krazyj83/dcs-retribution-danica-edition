@@ -285,12 +285,14 @@ class QGroundObjectMenu(QDialog):
 
     def repair_unit(self, unit, price):
         from game.logistics.repairs import charge_repair, repair_shortfall
+        from game.logistics.supply_status import notify_changed
 
         if repair_shortfall(self.game, unit) is not None:
             return
         if self.game.blue.budget > price:
             self.game.blue.budget -= price
             charge_repair(self.game, unit)
+            notify_changed()
             unit.alive = True
             GameUpdateSignal.get_instance().updateGame(self.game)
 

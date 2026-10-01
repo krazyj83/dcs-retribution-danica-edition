@@ -1,5 +1,6 @@
 import { AppDispatch } from "../app/store";
 import { gameUnloaded } from "./actions";
+import { fetchSupplyStatus } from "./supplyStatusSlice";
 import Combat from "./combat";
 import { endCombats, newCombats, updateCombats } from "./combatSlice";
 import { updateControlPoint } from "./controlPointsSlice";
@@ -58,6 +59,8 @@ interface GameUpdateEvents {
   reset_on_map_center: LatLng | null;
   game_unloaded: boolean;
   new_turn: boolean;
+  // Base stock changed mid-turn: reload the supply rings.
+  supply_status_changed?: boolean;
 }
 
 export const handleStreamedEvents = (
@@ -152,5 +155,9 @@ export const handleStreamedEvents = (
 
   if (events.new_turn) {
     reloadGameState(dispatch, true);
+  }
+
+  if (events.supply_status_changed) {
+    dispatch(fetchSupplyStatus()).catch(() => undefined);
   }
 };

@@ -9,6 +9,14 @@ from game.debriefing import Debriefing
 from game.game import TurnState
 
 
+def _supply_changed() -> None:
+    # Purchases and ATO changes (a deleted flight cancels its transfer) can
+    # change base stock: have the map reload its supply rings.
+    from game.logistics.supply_status import notify_changed
+
+    notify_changed()
+
+
 class GameUpdateSignal(QObject):
     instance = None
     gameupdated = Signal(Game)
@@ -32,6 +40,7 @@ class GameUpdateSignal(QObject):
     def updateBudget(self, game: Game):
         # noinspection PyUnresolvedReferences
         self.budgetupdated.emit(game)
+        _supply_changed()
 
     def sendDebriefing(self, debriefing: Debriefing) -> None:
         # noinspection PyUnresolvedReferences
@@ -44,6 +53,7 @@ class GameUpdateSignal(QObject):
 
     def atoChanged(self) -> None:
         self.ato_changed.emit()
+        _supply_changed()
 
     @staticmethod
     def get_instance() -> GameUpdateSignal:

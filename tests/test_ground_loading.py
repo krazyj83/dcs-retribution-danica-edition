@@ -139,7 +139,8 @@ Warehouse = {getResourceMap = function() return {
   ["LAU-61"] = {1, 2, 3, 4},
 } end}
 local wh = {setItem = function(self, n, c) set_items[n] = c end,
-            setLiquidAmount = function(self, t, a) liquids[t] = a end}
+            setLiquidAmount = function(self, t, a) liquids[t] = a end,
+            getLiquidAmount = function(self, t) return liquids[t] end}
 Airbase = {getByName = function(n) return {getWarehouse = function() return wh end} end}
 ammo = {}
 alive = {}
@@ -175,6 +176,7 @@ loaded("Viper 1-2", 4, 2); fire(world.event.S_EVENT_TAKEOFF, "Viper 1-2")
 fire(world.event.S_EVENT_CRASH, "Viper 1-2")
 loaded("Viper 1-3", 2, 0); fire(world.event.S_EVENT_TAKEOFF, "Viper 1-3")
 loaded("Viper 1-3", 1, 0)
+liquids[0] = liquids[0] - 9500  -- what the jets took from the warehouse
 write_state()
 local f = io.open(os.getenv("RETRIBUTION_EXPORT_DIR") .. "warehouses.json", "w")
 f:write(json:encode({items = set_items, fuel = liquids[0]}))
@@ -209,7 +211,7 @@ def test_mission_script_stocks_warehouses_and_counts_player_loads(
         "weapons.bombs.GBU_12": 10,  # 5 racks of 2
         "weapons.missiles.AIM_9X": 500,  # no store: still loadable
     }
-    assert wh["fuel"] == 400000
+    assert wh["fuel"] == 400000 - 9500
 
     (state_file,) = [p for p in tmp_path.glob("*state.json")]
     state = json.loads(state_file.read_text(encoding="utf-8"))
@@ -218,3 +220,4 @@ def test_mission_script_stocks_warehouses_and_counts_player_loads(
         "Viper 1-2": {"AIM_120C": 4, "GBU_12": 2},  # lost with everything
         "Viper 1-3": {"AIM_120C": 1},  # still flying at the end
     }
+    assert state["warehouse_fuel"] == {"Kutaisi": {"start": 400000, "left": 390500}}

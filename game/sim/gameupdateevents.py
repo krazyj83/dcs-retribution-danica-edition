@@ -42,6 +42,9 @@ class GameUpdateEvents:
     reset_on_map_center: LatLng | None = None
     game_unloaded: bool = False
     new_turn: bool = False
+    #: Base stock changed mid-turn (Logistics window, repairs, ...): the map
+    #: reloads its supply rings.
+    supply_status_changed: bool = False
     shutting_down: bool = False
 
     @property
@@ -151,6 +154,10 @@ class GameUpdateEvents:
                 game.theater.terrain.map_view_default.position.latlng()
             )
             self.game_unloaded = False
+        return self
+
+    def update_supply_status(self) -> GameUpdateEvents:
+        self.supply_status_changed = True
         return self
 
     def begin_new_turn(self) -> GameUpdateEvents:

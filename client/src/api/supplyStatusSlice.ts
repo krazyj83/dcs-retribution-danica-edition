@@ -24,8 +24,8 @@ export interface BaseSupply {
   intel_age?: number | null;
 }
 
-// Stock changes mid-turn too (Logistics window, supply flights), so the
-// layer refreshes this now and then on top of every game (re)load.
+// Loaded with the game and on every new turn; mid-turn stock changes
+// (Logistics window, repairs) arrive as a supply_status_changed event.
 export const fetchSupplyStatus = createAsyncThunk(
   "supplyStatus/fetch",
   async (): Promise<BaseSupply[]> => {

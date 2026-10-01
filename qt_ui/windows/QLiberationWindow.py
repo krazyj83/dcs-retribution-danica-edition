@@ -3,7 +3,7 @@ import traceback
 import webbrowser
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from PySide6.QtCore import QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QIcon, QAction, QGuiApplication, QActionGroup
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 import qt_ui.uiconstants as CONST
 from game import Game, VERSION, persistency, Migrator
+from game.ato import Flight
 from game.debriefing import Debriefing
 from game.game import TurnState
 from game.layout import LAYOUTS
@@ -59,6 +60,7 @@ class QLiberationWindow(QMainWindow):
     tgo_info_signal = Signal(TheaterGroundObject)
     control_point_info_signal = Signal(ControlPoint)
     open_drop_zone_dialog_signal = Signal(float, float)
+    select_flight_signal = Signal(Flight)
 
     def __init__(self, game: Game | None, ui_flags: UiFlags) -> None:
         super().__init__()
@@ -77,12 +79,14 @@ class QLiberationWindow(QMainWindow):
         self.tgo_info_signal.connect(self.open_tgo_info_dialog)
         self.control_point_info_signal.connect(self.open_control_point_info_dialog)
         self.open_drop_zone_dialog_signal.connect(self._open_drop_zone_at)
+        self.select_flight_signal.connect(self.on_select_flight)
         QtContext.set_callbacks(
             QtCallbacks(
                 lambda target: self.new_package_signal.emit(target),
                 lambda tgo: self.tgo_info_signal.emit(tgo),
                 lambda cp: self.control_point_info_signal.emit(cp),
                 lambda lat, lng: self.open_drop_zone_dialog_signal.emit(lat, lng),
+                lambda flight: self.select_flight_signal.emit(flight),
             )
         )
         Dialog.set_game(self.game_model)
@@ -241,7 +245,7 @@ class QLiberationWindow(QMainWindow):
         self.openNotesAction.triggered.connect(self.showNotesDialog)
 
         self.openLogisticsAction = QAction("Logistics", self)
-        self.openLogisticsAction.triggered.connect(self.showLogisticsDialog)
+        self.openLogisticsAction.triggered.connect(lambda: self.showLogisticsDialog())
 
         self.openTurnReportAction = QAction("Turn report", self)
         self.openTurnReportAction.triggered.connect(self.showTurnReportDialog)
@@ -642,9 +646,11 @@ class QLiberationWindow(QMainWindow):
         self.dialog = QNotesWindow(self.game)
         self.dialog.show()
 
-    def showLogisticsDialog(self):
+    def showLogisticsDialog(self, cp_id: Any = None) -> None:
         if self._logistics_window is None or not self._logistics_window.isVisible():
             self._logistics_window = QLogisticsWindow(self.game)
+        if cp_id is not None:
+            self._logistics_window.focus_base(cp_id)
         self._logistics_window.show()
         self._logistics_window.raise_()
 
@@ -673,6 +679,9 @@ class QLiberationWindow(QMainWindow):
     def open_control_point_info_dialog(self, cp: ControlPoint) -> None:
         self._cp_dialog = QBaseMenu2(None, cp, self.game_model)
         self._cp_dialog.show()
+
+    def on_select_flight(self, flight: Flight) -> None:
+        self.ato_panel.select_flight_on_map(flight)
 
     def _qsettings(self) -> QSettings:
         return QSettings("DCS Retribution", "Qt UI")

@@ -190,3 +190,15 @@ def _enemy_bases_from_intel(game: Any) -> List[BaseSupply]:
             )
         )
     return rows
+
+
+def notify_changed() -> None:
+    """Tell the map that base stock changed, so it reloads the supply rings.
+
+    Called by the windows that change stock mid-turn; new turns and game loads
+    reload the rings anyway.
+    """
+    from game.server import EventStream
+    from game.sim import GameUpdateEvents
+
+    EventStream.put_nowait(GameUpdateEvents().update_supply_status())

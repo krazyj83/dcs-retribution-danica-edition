@@ -18,6 +18,10 @@ the Danica Edition Feature Manual.
 * **[Convoys]** Player-drawn convoy routes (one turn or standing), delivery on arrival, drive-time estimate, and a Convoy Escort flight plan.
 * **[Campaigns]** Units spawn as placed (`use_placed_units`), automatic advanced IADS for new campaigns, a bigger unit recognition list, and losses of units added in the mission editor counted per side.
 * **[Options]** Fork settings sit in their own Campaign Management sections: Base Supplies, REDFOR Logistics and Battlefield.
+* **[Logistics]** Campaign tab in the Logistics window: headline numbers, BLUEFOR stock over the campaign, what each mission cost (fuel, weapons, stock lost to strikes) and every base's supply status.
+* **[Logistics]** Airfields stocked for ground loading are charged the fuel the aircraft actually took from the DCS warehouse instead of a full-tank estimate.
+* **[UI]** "Open in Logistics" on the Base Inventory tab opens the Logistics window on that base. The debrief window shows a short logistics summary and points to the Turn report.
+* **[Map]** Supply rings update when stock changes (Logistics window, repairs, purchases) instead of polling every 15 seconds.
 
 ## Fixes
 * **[Logistics]** Depot and SAM damage is applied when the mission results are processed, the mission data tables load before the plugin scripts, and one set of supply thresholds is used everywhere (29/30 Sep quality check).
@@ -40,6 +44,7 @@ the Danica Edition Feature Manual.
 * **[Data]** Weapons data updated to upstream: 74 new weapon groups and wider CLSID coverage (Super Hornet, JAS-39, CH packs and more), with introduction years for date-restricted loadouts.
 * **[Map]** Hovering a SAM threat or detection ring highlights its emitter, and hovering an emitter highlights its rings, making it easy to tell which site a ring belongs to. Can be switched off in the map's layer control (remembered). (upstream #750)
 * **[Campaign]** REDFOR transfers are labelled "Enemy transfer" again, and old saves with transfers load (side stored as true/false). (upstream #759)
+* **[Map]** Hovering a friendly flight's route line highlights it, and clicking it selects that flight and its package in the ATO panel. (upstream #761)
 * **[Mission Generator]** Native DTC data cartridges for the F/A-18C and F-16C: every blue client flight spawns with its steerpoints and push times, recovery TACAN/ICLS/ACLS and the SA/HSD picture already loaded, and multiplayer clients receive the cartridge with the mission download. Campaign setting `Pre-load DTC data cartridges`, on by default.
 * **[Campaigns]** Ability to define motor pool objects which spawn reserve armor
 * **[Campaigns]** Motorpool placement is Garage_A-anchored and empty reserve pools are excluded from attack planning

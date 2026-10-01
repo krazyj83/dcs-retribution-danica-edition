@@ -145,20 +145,23 @@ class QDebriefingWindow(QDialog):
         if not self._logistics_log:
             return
 
-        group = QGroupBox("Logistics & Warehouse changes:")
-        scroll_content = QWidget()
-        log_layout = QVBoxLayout(scroll_content)
+        from game.logistics.debrief_hook import debrief_highlights
 
-        for line in self._logistics_log:
-            log_layout.addWidget(QLabel(line))
-        log_layout.addStretch()
-
-        scroll_area = QScrollArea()
-        scroll_area.setWidget(scroll_content)
-        scroll_area.setMaximumHeight(120)
-
+        # Only a summary here: the turn report has every line, per section.
+        group = QGroupBox("Logistics")
         group_layout = QVBoxLayout()
-        group_layout.addWidget(scroll_area)
+        count = len(self._logistics_log)
+        summary = QLabel(
+            f"{count} logistics change{'s' if count != 1 else ''} this mission. "
+            "Open the <b>Turn report</b> for fuel, weapons, transfers and intel."
+        )
+        summary.setWordWrap(True)
+        group_layout.addWidget(summary)
+        for line in debrief_highlights(self._logistics_log):
+            label = QLabel(f"• {line}")
+            label.setWordWrap(True)
+            label.setStyleSheet("color: #e67e22;")
+            group_layout.addWidget(label)
         group.setLayout(group_layout)
         layout.addWidget(group)
 

@@ -215,3 +215,53 @@ def test_blue_bases_get_bigger_fuel_tanks() -> None:
     assert old_wh.stock[FUEL].capacity == BLUE_FUEL_CAPACITY
     assert old_wh.stock[FUEL].quantity == 500  # bigger tank, same fuel
     assert new_base_warehouse(base).stock[AMMO].quantity == 500
+
+
+# --- Fuel measured in DCS (stocked airfields, ground loading) -----------------
+
+
+def _airfield(name: str) -> Any:
+    cp = _cp(name)
+    cp.airport = SimpleNamespace(name=name)
+    return cp
+
+
+def _debriefing(fuel: dict[str, dict[str, float]]) -> Any:
+    return SimpleNamespace(state_data=SimpleNamespace(warehouse_fuel=fuel))
+
+
+def test_stocked_airfield_is_charged_what_dcs_measured() -> None:
+    from game.ato.starttype import StartType
+
+    base = _airfield("Kutaisi")
+    ground = _flight(base, 4)
+    ground.start_type = StartType.COLD
+    air = _flight(base, 2)
+    air.start_type = StartType.IN_FLIGHT
+    game = _game([ground, air], False, base)
+    # Players and AI took 12,000 kg from the DCS warehouse = 60 units.
+    debriefing = _debriefing({"Kutaisi": {"start": 100_000.0, "left": 88_000.0}})
+
+    log = use_fuel_for_sorties(game, debriefing)
+
+    air_start = 2 * 3249 / 200  # air starts don't use the warehouse: estimate
+    assert _fuel(game, base) == pytest.approx(500 - 60 - air_start)
+    assert "measured in DCS" in log[0] and "6 sortie(s)" in log[0]
+
+
+def test_measured_fuel_never_adds_fuel() -> None:
+    base = _airfield("Kutaisi")
+    game = _game([], False, base)
+    debriefing = _debriefing({"Kutaisi": {"start": 1000.0, "left": 1500.0}})
+
+    assert use_fuel_for_sorties(game, debriefing) == []
+    assert _fuel(game, base) == 500
+
+
+def test_without_a_report_the_estimate_is_used() -> None:
+    base = _airfield("Kutaisi")
+    game = _game([_flight(base, 4)], False, base)
+
+    use_fuel_for_sorties(game, _debriefing({}))
+
+    assert _fuel(game, base) == pytest.approx(500 - 4 * 3249 / 200)

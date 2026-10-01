@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import csv
 import logging
-from typing import Optional, List, Tuple
+from typing import Any, Optional, List, Tuple
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QColor
@@ -1791,12 +1791,16 @@ class QLogisticsWindow(QDialog):
         self.inv_tab = InventoryTab(logistics, self.game)
         self.tr_tab = TransfersTab(logistics, self.game, current_turn=turn)
         self.mb_tab = MainBaseTab(logistics, self.game)
+        from qt_ui.windows.logistics.QCampaignTab import CampaignTab
+
+        self.campaign_tab = CampaignTab(logistics, self.game, self.focus_base)
 
         self._tabs.addTab(self.dz_tab, "Drop Zones")
         self._tabs.addTab(self.wh_tab, "Warehouses")
         self._tabs.addTab(self.inv_tab, "Inventory")
         self._tabs.addTab(self.tr_tab, "Transfers")
         self._tabs.addTab(self.mb_tab, "Main Base")
+        self._tabs.addTab(self.campaign_tab, "Campaign")
         layout.addWidget(self._tabs)
 
         btn_row = QHBoxLayout()
@@ -1806,6 +1810,17 @@ class QLogisticsWindow(QDialog):
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)
 
+    def focus_base(self, cp_id: Any) -> None:
+        """Show one base: the Warehouses tab filtered to it, and the same base
+        picked on the Inventory tab (opened from that base's Base Inventory)."""
+        if not hasattr(self, "wh_tab"):
+            return
+        for combo in (self.wh_tab.base_filter_combo, self.inv_tab.base_combo):
+            idx = combo.findData(cp_id)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+        self._tabs.setCurrentWidget(self.wh_tab)
+
     def open_add_drop_zone_at(
         self, lat: float, lon: float, cp_id: Optional[int] = None
     ) -> None:
@@ -1813,8 +1828,19 @@ class QLogisticsWindow(QDialog):
             self._tabs.setCurrentWidget(self.dz_tab)
             self.dz_tab.add_drop_zone_at(lat, lon, cp_id)
 
+    def hideEvent(self, event: Any) -> None:
+        # Whatever was changed here (transfers, restocks, CSV imports) shows on
+        # the map's supply rings once the window is put away.
+        from game.logistics.supply_status import notify_changed
+
+        notify_changed()
+        super().hideEvent(event)
+
     def refresh(self) -> None:
-        for attr in ("dz_tab", "wh_tab", "inv_tab", "tr_tab", "mb_tab"):
+        from game.logistics.supply_status import notify_changed
+
+        notify_changed()
+        for attr in ("dz_tab", "wh_tab", "inv_tab", "tr_tab", "mb_tab", "campaign_tab"):
             tab = getattr(self, attr, None)
             if tab and hasattr(tab, "refresh"):
                 tab.refresh()

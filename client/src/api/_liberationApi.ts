@@ -165,6 +165,15 @@ const injectedRtkApi = api.injectEndpoints({
         method: "POST",
       }),
     }),
+    selectFlight: build.mutation<
+      SelectFlightApiResponse,
+      SelectFlightApiArg
+    >({
+      query: (queryArg) => ({
+        url: `/qt/select-flight/${queryArg.flightId}`,
+        method: "POST",
+      }),
+    }),
     listSupplyRoutes: build.query<
       ListSupplyRoutesApiResponse,
       ListSupplyRoutesApiArg
@@ -338,6 +347,11 @@ export type OpenControlPointInfoDialogApiResponse =
   /** status 200 Successful Response */ any;
 export type OpenControlPointInfoDialogApiArg = {
   cpId: string;
+};
+export type SelectFlightApiResponse =
+  /** status 200 Successful Response */ any;
+export type SelectFlightApiArg = {
+  flightId: string;
 };
 export type ListSupplyRoutesApiResponse =
   /** status 200 Successful Response */ SupplyRoute[];
@@ -579,6 +593,7 @@ export const {
   useOpenTgoInfoDialogMutation,
   useOpenNewControlPointPackageDialogMutation,
   useOpenControlPointInfoDialogMutation,
+  useSelectFlightMutation,
   useListSupplyRoutesQuery,
   useListTgosQuery,
   useGetTgoByIdQuery,

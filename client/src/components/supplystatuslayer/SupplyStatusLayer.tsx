@@ -4,8 +4,6 @@ import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import { fetchSupplyStatus, selectSupplyStatus } from "../../api/supplyStatusSlice";
 import { isEnemy, ringOpacity, statusColor, supplyLines, supplyTitle } from "./supplyText";
 
-const REFRESH_MS = 15000;
-
 // A coloured ring around every friendly base: green = fine, amber = low,
 // red = critical (see game/logistics/supply_status.py). Enemy bases get a
 // dotted ring while there is recent recon on them, fading as it ages
@@ -15,13 +13,11 @@ export default function SupplyStatusLayer() {
   const dispatch = useAppDispatch();
   const bases = useAppSelector(selectSupplyStatus);
 
+  // Loaded once here; game loads and new turns bring fresh data, and the
+  // server sends supply_status_changed when stock changes mid-turn
+  // (api/eventstream.tsx), so there is no polling.
   useEffect(() => {
-    const refresh = () => {
-      dispatch(fetchSupplyStatus()).catch(() => undefined);
-    };
-    refresh();
-    const timer = setInterval(refresh, REFRESH_MS);
-    return () => clearInterval(timer);
+    dispatch(fetchSupplyStatus()).catch(() => undefined);
   }, [dispatch]);
 
   return (

@@ -198,3 +198,16 @@ def _is_ammo_depot(tgo: Any) -> bool:
         return "ammo" in name or "ammunition" in name or "depot" in name
     except Exception:
         return False
+
+
+#: Words that make a logistics line worth showing in the debrief window; the
+#: rest is only in the turn report.
+_IMPORTANT = ("out of", "lost", "captured", "failed", "destroyed", "grounded")
+MAX_DEBRIEF_HIGHLIGHTS = 5
+
+
+def debrief_highlights(lines: List[str]) -> List[str]:
+    """The lines the debrief window shows (losses, empty stock, captures),
+    at most MAX_DEBRIEF_HIGHLIGHTS; the turn report has everything."""
+    important = [l for l in lines if any(w in l.lower() for w in _IMPORTANT)]
+    return important[:MAX_DEBRIEF_HIGHLIGHTS]

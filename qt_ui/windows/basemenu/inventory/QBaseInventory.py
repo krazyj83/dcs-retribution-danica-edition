@@ -172,7 +172,10 @@ class QBaseInventory(QFrame):
         side.addWidget(naval_box)
 
         side.addStretch()
-        open_logistics = QPushButton("Open Logistics window…")
+        open_logistics = QPushButton("Open in Logistics…")
+        open_logistics.setToolTip(
+            "Warehouses and inventory of this base: transfers, restock, weapons"
+        )
         open_logistics.clicked.connect(self._open_logistics)
         side.addWidget(open_logistics)
         side_widget = QWidget()
@@ -328,17 +331,21 @@ class QBaseInventory(QFrame):
     # ── Actions ────────────────────────────────────────────────────────
 
     def _on_sync(self) -> None:
+        from game.logistics.supply_status import notify_changed
+
         self.game.logistics.sync_weapon_inventories(self.game)
         self.refresh()
+        notify_changed()
 
     def _open_logistics(self) -> None:
         # Reuse the main window's Logistics window so only one is open.
         for widget in QApplication.topLevelWidgets():
             opener = getattr(widget, "showLogisticsDialog", None)
             if callable(opener):
-                opener()
+                opener(self.cp.id)
                 return
         from qt_ui.windows.logistics.QLogisticsWindow import QLogisticsWindow
 
         self._logistics_window = QLogisticsWindow(self.game)
+        self._logistics_window.focus_base(self.cp.id)
         self._logistics_window.show()

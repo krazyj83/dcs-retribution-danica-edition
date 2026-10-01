@@ -14,6 +14,11 @@ What each base used is kept, so the Base Inventory tab can show how many
 turns the stock lasts at that rate. A base that runs dry only gets a
 warning: flights can still be planned.
 
+Airfields whose DCS warehouse was stocked for ground loading
+(logistics/ground_loading.py) are charged what the aircraft actually took:
+the mission script reports the warehouse fuel after stocking and at the end.
+Their ground-start flights then skip the estimate; air starts keep it.
+
 Setting "Unlimited warehouse fuel" turns this off (and the 1% per turn fuel
 attrition): fuel then only goes down when fuel depots are destroyed.
 """
@@ -80,12 +85,37 @@ def fuel_warning(game: Any, base: Any) -> Optional[str]:
     return None
 
 
-def use_fuel_for_sorties(game: Game) -> List[str]:
+def measured_fuel_use(game: Any, debriefing: Any) -> Dict[Any, float]:
+    """Warehouse units taken from each stocked airfield in the mission, from the
+    DCS warehouse fuel the mission script reported: base id -> units."""
+    state = getattr(debriefing, "state_data", None)
+    reported: Dict[str, Dict[str, float]] = getattr(state, "warehouse_fuel", None) or {}
+    if not reported:
+        return {}
+    by_airfield = {}
+    for cp in game.theater.controlpoints:
+        airport = getattr(cp, "airport", None)
+        if airport is not None and cp.captured.is_blue:
+            by_airfield[airport.name] = cp
+    measured: Dict[Any, float] = {}
+    for name, fuel in reported.items():
+        cp = by_airfield.get(name)
+        if cp is None:
+            continue
+        taken_kg = max(0.0, fuel["start"] - fuel["left"])
+        measured[cp.id] = taken_kg / FUEL_KG_PER_UNIT
+    return measured
+
+
+def use_fuel_for_sorties(game: Game, debriefing: Any = None) -> List[str]:
     """Take the fuel for every BLUEFOR aircraft of the mission just flown.
 
-    Runs after the mission results are committed (captures applied) and before
-    the ATO is cleared. Returns log lines.
+    Stocked airfields are charged the fuel measured in DCS (see
+    measured_fuel_use); other flights the full-tank estimate. Runs after the
+    mission results are committed (captures applied) and before the ATO is
+    cleared. Returns log lines.
     """
+    from game.ato.starttype import StartType
     from game.logistics import (
         Warehouse,
         WarehouseCategory,
@@ -100,9 +130,15 @@ def use_fuel_for_sorties(game: Game) -> List[str]:
     if unlimited_fuel(game) or blue is None:
         return []
 
+    measured = measured_fuel_use(game, debriefing)
     used: Dict[Any, float] = defaultdict(float)
     sorties: Dict[Any, int] = defaultdict(int)
     bases: Dict[Any, Any] = {}
+    if measured:
+        for cp in game.theater.controlpoints:
+            if cp.id in measured:
+                bases[cp.id] = cp
+                used[cp.id] += measured[cp.id]
     for package in blue.ato.packages:
         for flight in package.flights:
             base = getattr(flight, "departure", None)
@@ -111,8 +147,11 @@ def use_fuel_for_sorties(game: Game) -> List[str]:
             if not keeps_warehouse(base):
                 continue  # carriers, LHAs and off-map spawns: no warehouse
             bases[base.id] = base
-            used[base.id] += flight.count * fuel_per_aircraft(flight.unit_type)
             sorties[base.id] += flight.count
+            in_air = getattr(flight, "start_type", None) is StartType.IN_FLIGHT
+            if base.id in measured and not in_air:
+                continue  # already in the fuel measured in DCS
+            used[base.id] += flight.count * fuel_per_aircraft(flight.unit_type)
 
     log: List[str] = []
     for base_id, amount in used.items():
@@ -128,9 +167,11 @@ def use_fuel_for_sorties(game: Game) -> List[str]:
         before = fuel.quantity
         fuel.quantity = max(0.0, before - amount)
         warehouse.fuel_used_last_mission = amount
+        how = " (measured in DCS)" if base_id in measured else ""
+        who = f"{sorties[base_id]} sortie(s)" if sorties[base_id] else "aircraft"
         line = (
-            f"{base.name}: {sorties[base_id]} sortie(s) used {before - fuel.quantity:.0f} "
-            f"fuel, {fuel.quantity:.0f} left"
+            f"{base.name}: {who} used "
+            f"{before - fuel.quantity:.0f} fuel{how}, {fuel.quantity:.0f} left"
         )
         if fuel.quantity <= 0:
             line += " — OUT OF FUEL"

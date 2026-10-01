@@ -58,6 +58,18 @@ local function norm(text)
     return (string.upper(text):gsub("[^A-Z0-9]", ""))
 end
 
+-- Fuel in each stocked airfield's DCS warehouse: airbase -> {start, left}, in
+-- the units setLiquidAmount was given (kg). Whatever the aircraft took (players
+-- and AI starting on the ground) is start - left; logistics/fuel.py charges it
+-- instead of the full-tank estimate.
+warehouse_fuel = {}
+
+local function liquid_fuel(wh)
+    local ok, amount = pcall(wh.getLiquidAmount, wh, 0)
+    if ok and type(amount) == "number" then return amount end
+    return nil
+end
+
 function retribution_setup_warehouses()
     local data = dcsRetributionWarehouses
     if not data or not data.bases or #data.bases == 0 then return end
@@ -114,6 +126,10 @@ function retribution_setup_warehouses()
             end
             if base.fuel_kg then
                 pcall(wh.setLiquidAmount, wh, 0, base.fuel_kg)
+                local start = liquid_fuel(wh)
+                if start then
+                    warehouse_fuel[base.airbase] = {start = start}
+                end
             end
             env.info("DCSRetribution|warehouses: stocked " .. base.airbase)
         end
@@ -319,6 +335,19 @@ timer.scheduleFunction(function(_, t)
     return t + 15
 end, nil, timer.getTime() + 15)
 
+local function warehouse_fuel_report()
+    local report = {}
+    for name, fuel in pairs(warehouse_fuel) do
+        local airbase = Airbase.getByName(name)
+        local wh = airbase and airbase.getWarehouse and airbase:getWarehouse()
+        local left = wh and liquid_fuel(wh)
+        if left then
+            report[name] = {start = fuel.start, left = left}
+        end
+    end
+    return report
+end
+
 function write_state()
     local _debriefing_file_location = debriefing_file_location
     if not debriefing_file_location or debriefing_file_location == "" then
@@ -353,6 +382,11 @@ function write_state()
     local ammo_used = player_ammo_report()
     if next(ammo_used) ~= nil then
         game_state["player_ammo_used"] = ammo_used
+    end
+    -- Fuel taken from the stocked airfield warehouses, if any.
+    local fuel_ok, fuel_report = pcall(warehouse_fuel_report)
+    if fuel_ok and next(fuel_report) ~= nil then
+        game_state["warehouse_fuel"] = fuel_report
     end
     -- Weapons fired by aircraft (see note_shot above), if any.
     if weapons_fired_count > 0 then

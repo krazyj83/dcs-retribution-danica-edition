@@ -170,6 +170,10 @@ class StateData:
     #: less landed with, or everything if lost): unit name -> {type: count}.
     player_ammo_used: Dict[str, Dict[str, int]] = field(default_factory=dict)
 
+    #: Fuel in stocked airfield warehouses (ground loading): airbase name ->
+    #: {"start": after stocking, "left": at the last state write}, in kg.
+    warehouse_fuel: Dict[str, Dict[str, float]] = field(default_factory=dict)
+
     @classmethod
     def from_json(cls, data: Dict[str, Any], unit_map: UnitMap) -> StateData:
         def clean_unit_list(unit_list: List[Any]) -> List[str]:
@@ -227,6 +231,13 @@ class StateData:
                 str(unit): {str(t): int(n) for t, n in used.items()}
                 for unit, used in (data.get("player_ammo_used") or {}).items()
                 if isinstance(used, dict)
+            },
+            warehouse_fuel={
+                str(base): {"start": float(fuel["start"]), "left": float(fuel["left"])}
+                for base, fuel in (data.get("warehouse_fuel") or {}).items()
+                if isinstance(fuel, dict)
+                and isinstance(fuel.get("start"), (int, float))
+                and isinstance(fuel.get("left"), (int, float))
             },
         )
 
