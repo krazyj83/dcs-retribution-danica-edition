@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import pickle
+import re
 import shutil
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING, Any
@@ -418,6 +419,11 @@ def _autosave_path() -> str:
     return str(save_dir() / "autosave.retribution")
 
 
+def turn_backups_dir() -> Path:
+    """Saves/TurnBackups: one folder per campaign (see turn_backup)."""
+    return save_dir() / "TurnBackups"
+
+
 def mission_path_for(name: str) -> Path:
     return base_path() / "Missions" / name
 
@@ -474,3 +480,45 @@ def autosave(game: Game) -> bool:
     except Exception:
         logging.exception("Could not save game")
         return False
+
+
+_BACKUP_NAME = re.compile(r"^turn_(\d+)\.retribution$")
+
+
+def _campaign_folder_name(game: Game) -> str:
+    """A safe folder name for the campaign's backups."""
+    name = str(getattr(game, "campaign_name", "") or "")
+    if not name and getattr(game, "savepath", None):
+        name = Path(game.savepath).stem
+    name = re.sub(r"[^A-Za-z0-9 _.-]+", "_", name).strip(" ._") or "campaign"
+    return name[:80]
+
+
+def turn_backup(game: Game, source: Optional[str] = None) -> Optional[Path]:
+    """Keep a copy of the save made at the start of this turn.
+
+    Copies the autosave (or `source`) to
+    Saves/TurnBackups/<campaign>/turn_NNN.retribution and deletes the oldest
+    backups of that campaign beyond the "Save backups to keep" setting. Each
+    campaign has its own folder, so campaigns never delete each other's
+    backups. Returns the new backup's path, or None when backups are off or
+    the copy failed (a failed backup never stops the turn).
+    """
+    keep = int(getattr(game.settings, "turn_backups_kept", 0) or 0)
+    if keep <= 0:
+        return None
+    try:
+        folder = _create_dir_if_needed(turn_backups_dir() / _campaign_folder_name(game))
+        target = folder / f"turn_{int(game.turn):03d}.retribution"
+        shutil.copy(source or _autosave_path(), target)
+        backups = sorted(
+            (int(m.group(1)), path)
+            for path in folder.iterdir()
+            if (m := _BACKUP_NAME.match(path.name))
+        )
+        for _, old in backups[:-keep]:
+            old.unlink()
+        return target
+    except Exception:
+        logging.exception("Could not make the turn backup")
+        return None

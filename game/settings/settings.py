@@ -536,6 +536,33 @@ class Settings:
             "extremely incomplete so does not affect all weapons."
         ),
     )
+    turn_backups_kept: int = bounded_int_option(
+        "Save backups to keep (one per turn)",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=GENERAL_SECTION,
+        default=10,
+        min=0,
+        max=100,
+        detail=(
+            "After every turn the game is also saved as "
+            "Saves/TurnBackups/<campaign>/turn_NNN.retribution, so you can go "
+            "back to an earlier turn (for example after a crashed mission). "
+            "The oldest backups are deleted once there are more than this. "
+            "0 turns the backups off."
+        ),
+    )
+    kneeboard_base_supply_page: bool = boolean_option(
+        "Base supply page on player kneeboards",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=BASE_SUPPLIES_SECTION,
+        default=True,
+        detail=(
+            "Adds a Base Supply page to every player flight's kneeboard: fuel, "
+            "ammunition and supplies at the departure, arrival and divert "
+            "bases, and the weapons in store there that the aircraft can carry "
+            "(empty and low ones first)."
+        ),
+    )
     logistics_unlimited_fuel: bool = boolean_option(
         "Unlimited warehouse fuel",
         page=CAMPAIGN_MANAGEMENT_PAGE,

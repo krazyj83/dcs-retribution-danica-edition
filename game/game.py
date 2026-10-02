@@ -494,8 +494,9 @@ class Game:
 
         EventStream.put_nowait(events)
 
-        # Autosave progress
-        persistency.autosave(self)
+        # Autosave progress, and keep a copy per turn (Saves/TurnBackups).
+        if persistency.autosave(self):
+            persistency.turn_backup(self)
 
     def check_win_loss(self) -> TurnState:
         if not self.theater.player_points(state_check=True):

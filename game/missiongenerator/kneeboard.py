@@ -946,6 +946,69 @@ class LoadSheetPage(KneeboardPage):
         writer.write(path)
 
 
+class BaseSupplyPage(KneeboardPage):
+    """Stock and weapon stores at the flight's bases (logistics/kneeboard_supply.py)."""
+
+    NAME_MAX_LEN = 34
+
+    def __init__(self, flight: FlightData, game: "Game", dark_kneeboard: bool) -> None:
+        self.flight = flight
+        self.game = game
+        self.dark_kneeboard = dark_kneeboard
+
+    def write(self, path: Path) -> None:
+        from game.logistics.kneeboard_supply import flight_bases, short_name
+
+        writer = KneeboardPageWriter(dark_theme=self.dark_kneeboard)
+        custom = f' ("{self.flight.custom_name}")' if self.flight.custom_name else ""
+        writer.title(f"{self.flight.callsign} Base Supply{custom}")
+        bases = flight_bases(self.game, self.flight)
+        if not bases:
+            writer.text("No friendly base with a warehouse on this flight's route.")
+        aircraft = self.flight.aircraft_type.display_name
+        for base in bases:
+            writer.heading(f"{base.role}: {base.name}")
+            if not base.has_warehouse:
+                writer.text("Ship or off-map spawn: no warehouse.")
+                continue
+            writer.table(
+                [
+                    [
+                        line.label,
+                        f"{line.quantity:,.0f} / {line.capacity:,.0f}",
+                        line.percent,
+                        line.status.upper(),
+                    ]
+                    for line in base.stock
+                ]
+            )
+            if base.fuel_turns_left is not None:
+                writer.text(
+                    f"Fuel lasts ~{base.fuel_turns_left:.1f} turns at last "
+                    "mission's rate."
+                )
+            if base.warnings:
+                writer.text("! " + ", ".join(base.warnings), wrap=True)
+            if base.weapons is None:
+                writer.text("Weapon stores not synced yet (Logistics window).")
+            elif base.role != "Departure":
+                writer.text(base.summary, font=writer.content_font, wrap=True)
+            elif not base.weapons:
+                writer.text(f"No weapons in store for the {aircraft}.")
+            else:
+                writer.table(
+                    [
+                        [short_name(w.name, self.NAME_MAX_LEN), str(w.quantity), w.flag]
+                        for w in base.weapons
+                    ],
+                    headers=[f"Weapons for the {aircraft}", "Qty", ""],
+                    font=writer.content_font,
+                )
+                if base.hidden_weapons:
+                    writer.text(f"+{base.hidden_weapons} more in the Logistics window.")
+        writer.write(path)
+
+
 class NotesPage(KneeboardPage):
     """A kneeboard page containing the campaign owner's notes."""
 
@@ -1064,4 +1127,14 @@ class KneeboardGenerator(MissionInfoGenerator):
         if (target_page := self.generate_task_page(flight)) is not None:
             pages.append(target_page)
 
+        if self._wants_base_supply_page(flight):
+            pages.append(BaseSupplyPage(flight, self.game, self.dark_kneeboard))
+
         return pages
+
+    def _wants_base_supply_page(self, flight: FlightData) -> bool:
+        """BLUEFOR player flights, when the setting is on."""
+        settings = self.game.settings
+        if not getattr(settings, "kneeboard_base_supply_page", True):
+            return False
+        return bool(flight.friendly.is_blue)

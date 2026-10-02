@@ -1,14 +1,17 @@
 """Turn report window: what happened in a turn, on one page.
 
 Data from game/logistics/turn_report.py. Opened from the toolbar ("Turn
-report") and from the debrief window.
+report") and from the debrief window. "Copy for Discord" puts the shown turn
+on the clipboard as Discord text (game/logistics/discord_summary.py); a long
+report is copied in parts, one click per part.
 """
 
 from __future__ import annotations
 
 from html import escape
-from typing import Any, Optional
+from typing import Any, List, Optional
 
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -19,6 +22,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from game.logistics.discord_summary import discord_messages, stats_for_turn
 from game.logistics.turn_report import (
     LOSS_LABELS,
     SECTIONS,
@@ -97,9 +101,24 @@ class QTurnReportWindow(QDialog):
         self.view = QTextBrowser()
         layout.addWidget(self.view, 1)
 
+        buttons = QHBoxLayout()
+        self.discord = QPushButton("Copy for Discord")
+        self.discord.setToolTip(
+            "Copy this turn as text to paste in Discord. A long report is "
+            "copied in parts: click again for the next part."
+        )
+        self.discord.clicked.connect(self._copy_for_discord)
+        buttons.addWidget(self.discord)
+        self.copied = QLabel("")
+        self.copied.setStyleSheet("color:#95a5a6")
+        buttons.addWidget(self.copied, 1)
         close = QPushButton("Close")
         close.clicked.connect(self.close)
-        layout.addWidget(close)
+        buttons.addWidget(close)
+        layout.addLayout(buttons)
+
+        self._parts: List[str] = []
+        self._next_part = 0
 
         self.refresh()
 
@@ -116,6 +135,12 @@ class QTurnReportWindow(QDialog):
         self._show(0)
 
     def _show(self, index: int) -> None:
+        self._parts = []
+        self._next_part = 0
+        if hasattr(self, "discord"):
+            self.discord.setText("Copy for Discord")
+            self.discord.setEnabled(bool(self.reports))
+            self.copied.setText("")
         if not self.reports:
             self.view.setHtml(
                 "<p>No turn reports yet: a report is made when a mission's "
@@ -123,3 +148,33 @@ class QTurnReportWindow(QDialog):
             )
             return
         self.view.setHtml(report_html(self.reports[max(0, index)]))
+
+    def _messages(self) -> List[str]:
+        report = self.reports[max(0, self.turns.currentIndex())]
+        return discord_messages(
+            report,
+            str(getattr(self.game, "campaign_name", "") or ""),
+            stats_for_turn(self.game.logistics, report.turn),
+        )
+
+    def _copy_for_discord(self) -> None:
+        if not self.reports:
+            return
+        if not self._parts or self._next_part >= len(self._parts):
+            self._parts = self._messages()
+            self._next_part = 0
+        part = self._parts[self._next_part]
+        QGuiApplication.clipboard().setText(part)
+        self._next_part += 1
+        total = len(self._parts)
+        if total == 1:
+            self.copied.setText("Copied - paste it in Discord.")
+            return
+        self.copied.setText(
+            f"Part {self._next_part} of {total} copied - paste it, then copy "
+            "the next part."
+        )
+        if self._next_part < total:
+            self.discord.setText(f"Copy part {self._next_part + 1} of {total}")
+        else:
+            self.discord.setText("Copy for Discord")

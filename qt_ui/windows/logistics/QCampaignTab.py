@@ -10,7 +10,9 @@
 
 Data from game/logistics/campaign_stats.py (per-turn activity and the stock
 history added up) and game/logistics/supply_status.py (each base now).
-Double-click a base to show it on the Warehouses tab.
+Double-click a base to show it on the Warehouses tab. "Copy charts image" /
+"Save charts as image" take a picture of the headline numbers and the charts,
+to paste in Discord next to the turn report.
 """
 
 from __future__ import annotations
@@ -18,14 +20,25 @@ from __future__ import annotations
 from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QGuiApplication,
+    QMouseEvent,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QFileDialog,
     QFrame,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QPushButton,
     QScrollArea,
     QSizePolicy,
     QTableWidget,
@@ -241,6 +254,23 @@ class CampaignTab(QWidget):
         scroll.setWidget(body)
         outer.addWidget(scroll)
 
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        copy_image = QPushButton("Copy charts image")
+        copy_image.setToolTip("Copy the numbers and charts below, to paste in Discord")
+        copy_image.clicked.connect(self._copy_image)
+        actions.addWidget(copy_image)
+        save_image = QPushButton("Save charts as image...")
+        save_image.clicked.connect(self._save_image)
+        actions.addWidget(save_image)
+        layout.addLayout(actions)
+
+        # Everything in the picture lives in charts_area.
+        self.charts_area = QWidget()
+        charts = QVBoxLayout(self.charts_area)
+        charts.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.charts_area)
+
         tiles = QHBoxLayout()
         frame, self.bases_value, self.bases_detail = _tile("Bases")
         tiles.addWidget(frame)
@@ -250,14 +280,14 @@ class CampaignTab(QWidget):
         tiles.addWidget(frame)
         frame, self.transfers_value, self.transfers_detail = _tile("Transfers")
         tiles.addWidget(frame)
-        layout.addLayout(tiles)
+        charts.addLayout(tiles)
 
         stock_box = QGroupBox("Stock, all BLUEFOR bases (hover for numbers)")
         stock_layout = QVBoxLayout(stock_box)
         self.stock_chart = QStockHistoryChart()
         self.stock_chart.setMinimumHeight(200)
         stock_layout.addWidget(self.stock_chart)
-        layout.addWidget(stock_box)
+        charts.addWidget(stock_box)
 
         activity_box = QGroupBox("What each mission cost")
         activity = QHBoxLayout(activity_box)
@@ -266,7 +296,7 @@ class CampaignTab(QWidget):
             chart = QTurnBarChart(title, color)
             self.activity_charts[key] = chart
             activity.addWidget(chart)
-        layout.addWidget(activity_box)
+        charts.addWidget(activity_box)
 
         bases_box = QGroupBox("Bases now (double-click to open on Warehouses)")
         bl = QVBoxLayout(bases_box)
@@ -299,6 +329,23 @@ class CampaignTab(QWidget):
         )
         tl.addWidget(self.turns_table)
         layout.addWidget(turns_box)
+
+    def charts_image(self) -> QPixmap:
+        """A picture of the headline numbers and the charts."""
+        return self.charts_area.grab()
+
+    def _copy_image(self) -> None:
+        QGuiApplication.clipboard().setPixmap(self.charts_image())
+
+    def _save_image(self) -> None:
+        from game.persistency import save_dir
+
+        default = str(save_dir() / f"turn_{self.game.turn}_logistics.png")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save charts as image", default, "PNG image (*.png)"
+        )
+        if path:
+            self.charts_image().save(path, "PNG")
 
     @staticmethod
     def _setup_table(table: QTableWidget) -> None:
