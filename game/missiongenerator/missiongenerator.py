@@ -120,6 +120,14 @@ class MissionGenerator:
         player_convoys = PlayerConvoyGenerator(self.mission, self.game, self.unit_map)
         player_convoys.generate()
         self._write_player_convoy_data(player_convoys)
+        # Parked ground units off slopes, roads and town centres at mission
+        # start (game/livingworld/terrain.py, plugins/base/terrain_place.lua).
+        try:
+            from game.livingworld.terrain import write_mission_data
+
+            write_mission_data(self.game, self.mission)
+        except Exception:
+            logging.exception("MissionGenerator: terrain placement data failed")
 
         self.generate_destroyed_units()
 

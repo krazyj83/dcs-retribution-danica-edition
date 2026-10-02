@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import TypeVar, Generic, Any
+from typing import TypeVar, Generic, Any, Optional
 
 from game import Game
 from game.coalition import Coalition
@@ -57,7 +57,18 @@ class PurchaseAdapter(Generic[ItemType]):
         return self.current_quantity_of(item) + self.pending_delivery_quantity(item)
 
     def can_buy(self, item: ItemType) -> bool:
-        return self.coalition.budget >= self.price_of(item)
+        return (
+            self.coalition.budget >= self.price_of(item)
+            and self.blocked_reason(item) is None
+        )
+
+    def blocked_reason(self, item: ItemType) -> Optional[str]:
+        """Why the item can't be bought regardless of money, or None
+        (livingworld/era.py: not in service yet at the campaign date)."""
+        from game.livingworld.era import not_in_service_reason
+
+        game = getattr(self.coalition, "game", None)
+        return not_in_service_reason(self.unit_type_of(item), game)
 
     def can_sell_or_cancel(self, item: ItemType) -> bool:
         return self.can_sell(item) or self.has_pending_orders(item)

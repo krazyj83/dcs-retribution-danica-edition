@@ -536,6 +536,18 @@ class Settings:
             "extremely incomplete so does not affect all weapons."
         ),
     )
+    restrict_units_by_date: bool = boolean_option(
+        "Restrict unit purchases by date",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=GENERAL_SECTION,
+        default=True,
+        detail=(
+            "Aircraft, ground units and ships can only be bought (by you and "
+            "the AI) once they are in service at the current campaign date, "
+            "from the 'introduced' year in their unit data. Units already "
+            "owned stay. Units with no year in their data are always allowed."
+        ),
+    )
     turn_backups_kept: int = bounded_int_option(
         "Save backups to keep (one per turn)",
         page=CAMPAIGN_MANAGEMENT_PAGE,
@@ -626,6 +638,21 @@ class Settings:
             "REDFOR SAM or EWR site that still has a unit standing gets one "
             "destroyed unit back (radars first), paid with supplies and "
             "ammunition from its base. Sites with every unit destroyed stay down."
+        ),
+    )
+    terrain_placement: bool = boolean_option(
+        "Move parked ground units off slopes, roads and town centres",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=BATTLEFIELD_SECTION,
+        default=True,
+        detail=(
+            "At mission start, ground-object groups (SAM and EWR sites, "
+            "armour, missile and coastal sites, motorpools) standing on a "
+            "steep slope (over about 11 degrees) or on a road are moved, as a "
+            "whole group, to the nearest good spot within 1.2 km. SAMs, EWRs, "
+            "armour and missile sites are also moved out of town centres "
+            "(500 m), using the towns of your DCS install's map. Nothing is "
+            "moved if no better spot is found."
         ),
     )
     advanced_iads_auto: bool = boolean_option(

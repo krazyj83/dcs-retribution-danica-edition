@@ -186,6 +186,12 @@ class TheaterConfiguration(QtWidgets.QWizardPage):
         self.calendar = QLiberationCalendar()
         self.calendar.setSelectedDate(QDate())
         self.calendar.setDisabled(True)
+        # Warns when the date is outside the map's period (livingworld).
+        self.period_warning = QLabel("")
+        self.period_warning.setWordWrap(True)
+        self.period_warning.setStyleSheet("color: #f39c12")
+        self.period_warning.setVisible(False)
+        self.calendar.selectionChanged.connect(self.update_period_warning)
 
         def onTimePeriodChanged():
             self.calendar.setSelectedDate(
@@ -247,6 +253,7 @@ class TheaterConfiguration(QtWidgets.QWizardPage):
             else:
                 self.advanced_iads.setToolTip("Enable Advanced IADS")
 
+            self.update_period_warning()
             self.campaign_selected.emit(campaign)
 
         self.campaignList.selectionModel().setCurrentIndex(
@@ -279,6 +286,7 @@ class TheaterConfiguration(QtWidgets.QWizardPage):
         timeGroupLayout.addWidget(timePeriod, 1, 0)
         timeGroupLayout.addWidget(timePeriodSelect, 1, 1)
         timeGroupLayout.addWidget(self.calendar, 0, 2, 3, 1)
+        timeGroupLayout.addWidget(self.period_warning, 3, 0, 1, 3)
         timeGroup.setLayout(timeGroupLayout)
 
         layout = QtWidgets.QGridLayout()
@@ -291,6 +299,19 @@ class TheaterConfiguration(QtWidgets.QWizardPage):
         layout.addWidget(mapSettingsGroup, 2, 1, 1, 1)
         layout.addWidget(timeGroup, 3, 1, 3, 1)
         self.setLayout(layout)
+
+    def update_period_warning(self) -> None:
+        """Show a warning when the start date is outside the map's period."""
+        from game.livingworld.theaterperiod import date_warning
+
+        campaign = self.campaignList.selected_campaign
+        if campaign is None:
+            self.period_warning.setVisible(False)
+            return
+        day = self.calendar.selectedDate().toPython()
+        warning = date_warning(str(campaign.data.get("theater", "")), day)
+        self.period_warning.setText(warning or "")
+        self.period_warning.setVisible(warning is not None)
 
     def on_filter_changed(self) -> None:
         """Handle changes in filter or sort options."""

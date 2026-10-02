@@ -127,8 +127,13 @@ class ProcurementAi:
     def affordable_ground_unit_of_class(
         self, budget: float, unit_class: UnitClass
     ) -> Optional[GroundUnitType]:
-        faction_units = set(self.faction.frontline_units) | set(
-            self.faction.artillery_units
+        from game.livingworld.era import in_service_only
+
+        faction_units = set(
+            in_service_only(
+                set(self.faction.frontline_units) | set(self.faction.artillery_units),
+                self.game,
+            )
         )
         of_class = {u for u in faction_units if u.unit_class is unit_class}
 
@@ -212,7 +217,11 @@ class ProcurementAi:
 
     def purchase_aircraft(self, budget: float) -> float:
         for request in self.game.coalition_for(self.is_player).procurement_requests:
-            squadrons = list(self.best_squadrons_for(request))
+            from game.livingworld.era import in_service_only
+
+            squadrons = in_service_only(
+                self.best_squadrons_for(request), self.game, key=lambda s: s.aircraft
+            )
             if not squadrons:
                 # No airbases in range of this request. Skip it.
                 continue

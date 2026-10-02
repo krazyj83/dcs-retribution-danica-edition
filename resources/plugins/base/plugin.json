@@ -31,6 +31,10 @@
         {
             "file": "land_relocate.lua",
             "mnemonic": "land_relocate"
+        },
+        {
+            "file": "terrain_place.lua",
+            "mnemonic": "terrain_place"
         }
     ],
     "configurationWorkOrders": []

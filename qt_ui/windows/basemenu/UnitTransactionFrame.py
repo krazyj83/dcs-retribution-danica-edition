@@ -92,8 +92,11 @@ class PurchaseGroup(QGroupBox, Generic[TransactionItemType]):
 
     def update_state(self) -> None:
         self.buy_button.setEnabled(self.recruiter.enable_purchase(self.item))
+        reason = self.recruiter.purchase_adapter.blocked_reason(self.item)
         self.buy_button.setToolTip(
-            self.recruiter.purchase_tooltip(self.buy_button.isEnabled())
+            reason
+            if reason
+            else self.recruiter.purchase_tooltip(self.buy_button.isEnabled())
         )
         self.sell_button.setEnabled(self.recruiter.enable_sale(self.item))
         self.sell_button.setToolTip(
@@ -160,7 +163,10 @@ class UnitTransactionFrame(QFrame, Generic[TransactionItemType]):
 
         existing_units = self.current_quantity_of(item)
 
-        unitName = QLabel(f"<b>{self.display_name_of(item, multiline=True)}</b>")
+        name = f"<b>{self.display_name_of(item, multiline=True)}</b>"
+        if reason := self.purchase_adapter.blocked_reason(item):
+            name += f"<br /><span style='color:#95a5a6'>{reason}</span>"
+        unitName = QLabel(name)
         unitName.setSizePolicy(
             QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         )

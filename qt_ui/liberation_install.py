@@ -96,6 +96,7 @@ def init():
     persistency.setup(
         __dcs_saved_game_directory, __prefer_liberation_payloads, __server_port
     )
+    persistency.set_dcs_install_dir(__dcs_installation_directory)
     return is_first_start
 
 
@@ -117,6 +118,7 @@ def setup(
     __setup_preferences_on_every_start = setup_preferences_on_every_start
     __server_port = port
     persistency.setup(saved_game_dir, prefer_liberation_payloads, port)
+    persistency.set_dcs_install_dir(install_dir)
 
 
 def setup_last_save_file(last_save_file):

@@ -129,7 +129,9 @@ class RedforAdaptivePlanner:
             count,
         )
 
-        faction_units = self.red.faction.frontline_units
+        from game.livingworld.era import in_service_only
+
+        faction_units = in_service_only(self.red.faction.frontline_units, self.game)
         candidates = [u for u in faction_units if u.unit_class is UnitClass.SHORAD]
         if not candidates:
             candidates = [u for u in faction_units if u.unit_class is UnitClass.AAA]
@@ -226,7 +228,9 @@ class RedforAdaptivePlanner:
         """The faction's SHORAD units, or its AAA if it has no SHORAD."""
         from game.data.units import UnitClass
 
-        faction_units = self.red.faction.frontline_units
+        from game.livingworld.era import in_service_only
+
+        faction_units = in_service_only(self.red.faction.frontline_units, self.game)
         candidates = [u for u in faction_units if u.unit_class is UnitClass.SHORAD]
         if not candidates:
             candidates = [u for u in faction_units if u.unit_class is UnitClass.AAA]

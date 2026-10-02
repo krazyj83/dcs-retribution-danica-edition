@@ -340,6 +340,20 @@ def setup(user_folder: str, prefer_liberation_payloads: bool, port: int) -> None
     _create_dir_if_needed(save_dir())
 
 
+_dcs_install_dir: str = ""
+
+
+def set_dcs_install_dir(path: str) -> None:
+    """The DCS install folder from the preferences (map data such as towns is
+    read from it; see game/livingworld/terrain.py)."""
+    global _dcs_install_dir
+    _dcs_install_dir = path or ""
+
+
+def dcs_install_dir() -> str:
+    return _dcs_install_dir
+
+
 def base_path() -> Path:
     global _dcs_saved_game_folder
     assert _dcs_saved_game_folder

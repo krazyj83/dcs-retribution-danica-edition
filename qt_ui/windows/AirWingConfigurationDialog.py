@@ -716,6 +716,13 @@ class AirWingConfigurationTab(QWidget):
             if isinstance(aircraft, AircraftType)
             and any(base.can_operate(aircraft) for base in bases)
         }
+        # Not in service yet at the campaign date: can't form a squadron
+        # (livingworld/era.py). Keep the full list if nothing would be left.
+        from game.livingworld.era import in_service_only
+
+        in_era = set(in_service_only(possible_aircrafts, self.game))
+        if in_era:
+            possible_aircrafts = in_era
 
         popup = SquadronConfigPopup(
             selected_aircraft,

@@ -1,7 +1,7 @@
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Type
+from typing import Any, Type
 
 from PySide6.QtCore import Signal
 from PySide6.QtGui import Qt
@@ -66,7 +66,9 @@ class QTgoLayout:
 class QTgoLayoutGroupRow(QWidget):
     group_template_changed = Signal()
 
-    def __init__(self, force_group: ForceGroup, group: TgoLayoutUnitGroup) -> None:
+    def __init__(
+        self, force_group: ForceGroup, group: TgoLayoutUnitGroup, game: Any = None
+    ) -> None:
         super().__init__()
         self.grid_layout = QGridLayout()
         self.setLayout(self.grid_layout)
@@ -76,8 +78,11 @@ class QTgoLayoutGroupRow(QWidget):
         self.unit_selector.setMinimumWidth(250)
         self.group_selector = QCheckBox()
 
-        # Add all possible units with the price
-        for unit_type in force_group.unit_types_for_group(group):
+        # Add all possible units with the price; units not in service yet at
+        # the campaign date are left out (livingworld/era.py).
+        from game.livingworld.era import in_service_only
+
+        for unit_type in in_service_only(force_group.unit_types_for_group(group), game):
             self.unit_selector.addItem(
                 f"{unit_type.display_name} [${unit_type.price}M]",
                 userData=(unit_type.dcs_unit_type, unit_type.price),
@@ -201,7 +206,7 @@ class QGroundObjectTemplateLayout(QGroupBox):
         vbox_layout = QVBoxLayout()
         for group in groups:
             try:
-                group_row = QTgoLayoutGroupRow(force_group, group)
+                group_row = QTgoLayoutGroupRow(force_group, group, self.game)
             except LayoutException:
                 continue
             self.layout_model.groups[group_name].append(group_row.group_layout)

@@ -419,10 +419,15 @@ class SquadronDialog(QDialog):
         )
         can_buy = self.purchase_adapter.can_buy(self.squadron)
         self.buy_aircraft_button.setEnabled(can_buy)
+        reason = self.purchase_adapter.blocked_reason(self.squadron)
         self.buy_aircraft_button.setToolTip(
             "Buy aircraft. Use Shift or Ctrl to buy 10 or 5 at once."
             if can_buy
-            else "Cannot buy: insufficient budget, parking or squadron capacity."
+            else (
+                f"Cannot buy: {reason}."
+                if reason
+                else "Cannot buy: insufficient budget, parking or squadron capacity."
+            )
         )
         can_sell = self.purchase_adapter.can_sell_or_cancel(self.squadron)
         self.sell_aircraft_button.setEnabled(can_sell)
