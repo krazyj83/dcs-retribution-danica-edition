@@ -53,14 +53,21 @@ class SquadronDelegate(TwoColumnRowDelegate):
         elif (row, column) == (0, 1):
             return squadron.aircraft.display_name
         elif (row, column) == (1, 0):
+            if squadron.destination is not None:
+                return (
+                    f"{squadron.location.name} - transfer ordered to "
+                    f"{squadron.destination.name}"
+                )
             return squadron.location.name
         elif (row, column) == (1, 1):
             pilots = len(squadron.living_pilots)
             aircraft = squadron.owned_aircraft
-            unassigned = squadron.untasked_aircraft
+            # "unassigned" counted airframes with no free pilot to fly them, which
+            # overstated the real force available. Cap it at the crewed count.
+            unassigned = squadron.untasked_crewed_aircraft
             return (
                 f"{pilots} {'pilot' if pilots == 1 else 'pilots'}, "
-                f"{aircraft} aircraft ({unassigned} unassigned)"
+                f"{aircraft} aircraft ({unassigned} crewed unassigned)"
             )
         return ""
 

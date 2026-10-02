@@ -23,6 +23,14 @@
         {
             "file": "Moose.lua",
             "mnemonic": "moose"
+        },
+        {
+            "file": "water_relocate.lua",
+            "mnemonic": "water_relocate"
+        },
+        {
+            "file": "land_relocate.lua",
+            "mnemonic": "land_relocate"
         }
     ],
     "configurationWorkOrders": []

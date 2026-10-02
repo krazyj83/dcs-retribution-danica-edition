@@ -26,7 +26,7 @@ the Danica Edition Feature Manual.
 ## Fixes
 * **[Logistics]** Depot and SAM damage is applied when the mission results are processed, the mission data tables load before the plugin scripts, and one set of supply thresholds is used everywhere (29/30 Sep quality check).
 * **[Logistics]** Weapon categories: BR-250 bombs, LR-25 rockets and TER/MER racks are no longer filed as air-to-air.
-* **[Upstream]** Synced 39 upstream changes from June–August 2026 that the fork was missing (listed under v1.6.0), including the escort leash, laser bomb fuzes, TACAN/VOR channel clashes and the duplicate convoy unit crash.
+* **[Upstream]** Merged all upstream changes up to 28 Aug 2026 (#886), keeping the fork's own versions where both changed the same code. Before that: synced 39 upstream changes from June–August 2026 that the fork was missing (listed under v1.6.0), including the escort leash, laser bomb fuzes, TACAN/VOR channel clashes and the duplicate convoy unit crash.
 
 # Retribution v1.6.0
 
@@ -58,6 +58,17 @@ the Danica Edition Feature Manual.
 * **[Mission Generator]** New campaign setting "Default laser code for Player flights" controls whether newly-created player flights are assigned a unique allocated TGP/weapon laser code (the new default, matching existing behavior) or stay on 1688. When a code is allocated it is applied to both the TGP/kneeboard code and the weapon code by default, so LGBs home on the player's own code without extra clicks; both remain independently overridable in the payload tab.
 * **[UX]** Add the ability to filter campaigns by version, map, and performance
 * **[Map]** Right-clicking a front line under a blue flight-plan route now opens the new-package dialog instead of the browser context menu (the route's invisible hover overlay swallowed the click).
+* **[UX]** Show an "End of Mission Detected, processing Mission Data" busy dialog while turn results are processed, so the wait is not mistaken for a missed detection
+* **[Map]** Hovering a SAM threat or detection ring highlights its emitter — and hovering an emitter highlights its ring — making it easy to tell which site a ring belongs to. Can be disabled from the map's layer control.
+* **[Engine]** Support for DCS 2.9.28.26283 including F-100D, F-14A (Export), and F-14BU.
+* **[Modding]** Update to CJS Super Hornet Mod to v2.4.5.260501.RC1
+* **[Modding]** Update Community A4EC Mod to 2.3.0 (May 2025)
+* **[Mission Generator]** Squadrons now spawn using the proper country instead of CTJF, enabling various DCS AI voiceovers
+* **[Options]** New option to restrict helmet devices by date
+* **[Flight Plans]** Renaming a waypoint in the flight-plan list now propagates to the aircraft CDU/HUD and the kneeboard, not just the list — one name in all three places (#695).
+* **[Campaigns]** Motorpool placement is Garage_A-anchored and empty reserve pools are excluded from attack planning; updated placement measurements are documented.
+* **[Engine]** Bump campaign version to 10.9 for motorpool support
+* **[Modding]** Update UH-60L mod to v2.1.5 including MH-60L DAP
 
 ## Fixes
 * **[Performance]** Improved robustness w.r.t. state.json handling to avoid corruption and thus save loss.
@@ -74,6 +85,14 @@ the Danica Edition Feature Manual.
 * **[Data]** The F-14A-135-GR Early's payload file declared the wrong unitType, so the Early Tomcat flew every tasking unarmed; its loadouts now resolve (with a guard test pinning the payload to the airframe). (#889)
 * **[Mission Generator]** Dynamically allocated TACAN channels no longer collide with map beacons: DME/VOR-DME beacons (which share TACAN's channelization) are now blacklisted alongside TACAN/VORTAC, and beacons whose DCS data omits a channel (e.g. Syria's KALDE "KAD" VOR-DME) have their channel/band derived from the beacon's VHF frequency per the ICAO VOR/TACAN channelling plan instead of being silently skipped. The "Assign TACAN" dialog now warns in real time when the selected channel/band is already in use by a map beacon or another carrier/airfield/flight. (#36)
 * **[Mission Generation]** Fix mission generation dying on "Duplicate convoy unit": convoy and cargo-ship names no longer reset each turn onto a convoy still in transit.
+* **[Mission Generator]** EWR sites now get the DCS "EWR" enroute task and come up on RED alarm, so their radars actually scan and report contacts (previously they could sit inert, especially with the "red alert state" performance option off). Works with or without the Skynet IADS plugin.
+* **[Mission]** Reliably auto-detect end of mission, even when DCS wrote the final state.json before the wait dialog started watching
+* **[Performance]** Faster post-mission turn processing
+* **[AirWing]** Air Wing list shows a "transfer ordered to X" indicator, and Airfield Command lists the units transferring into the base next turn
+* **[AirWing]** Squadron transfer-destination parking now accounts for already-ordered incoming transfers, matching the Airfield Command hangar count
+* **[Mission Generation]** Air assault drop-off zones are kept on land, so coastal objectives no longer drop the troops into the sea.
+* **[Mission Generation]** Relocate ground units that spawn on inland water (ponds, rivers, lakes) to the nearest land at mission start, fixing armor and SAM sites spawning underwater (#59).
+* **[Mission Generation]** Relocate ships that spawn on land (e.g. carrier escorts when the carrier hugs the shore) to the nearest deep water at mission start (#59).
 
 # Retribution v1.5.0
 
