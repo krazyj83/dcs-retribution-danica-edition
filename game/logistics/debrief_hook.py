@@ -84,7 +84,7 @@ def apply_damage(debriefing: "Debriefing") -> List[str]:
     if not hasattr(game, "logistics") or game.logistics is None:
         return []
 
-    from game.logistics import LogisticsManager, WarehouseCategory
+    from game.logistics import WarehouseCategory
 
     logistics: LogisticsManager = game.logistics
     log: List[str] = []

@@ -138,7 +138,7 @@ def blue_stock_history(logistics: Any) -> List[HistoryPoint]:
     Bases count with the side they are on now: a base lost to REDFOR drops out
     of the earlier turns too.
     """
-    from game.logistics.history import HistoryPoint, history_for
+    from game.logistics.history import history_for
 
     by_turn: Dict[int, List[HistoryPoint]] = {}
     for wh in logistics.warehouses_for_coalition("blue"):

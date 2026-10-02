@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from game.logistics import (
     new_base_warehouse,
     TransferStatus,
-    Warehouse,
     WarehouseCategory,
 )
 

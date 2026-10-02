@@ -95,6 +95,13 @@ def add_unreported(logistics: Any, section: str, lines: List[str]) -> None:
     report.add(section, [line for line in lines if line not in known])
 
 
+def file_skipped_turn(logistics: Any) -> None:
+    """A skipped turn has no debrief window: move the lines queued for it
+    (convoys arriving, captures) into the turn report, so they don't show up
+    in the next mission's debrief instead."""
+    add_unreported(logistics, "events", logistics.pop_debrief_log())
+
+
 def _loss_table(counts: Any) -> Dict[str, int]:
     names = {f.name for f in fields(counts)}
     return {

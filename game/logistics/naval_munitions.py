@@ -32,7 +32,7 @@ AMMO_PER_CRATE = 50.0
 
 def script_data(game: Game) -> Dict[str, Any]:
     """The table the mission script reads: bases and crates available."""
-    from game.logistics import Warehouse, WarehouseCategory, new_base_warehouse
+    from game.logistics import WarehouseCategory, new_base_warehouse
 
     logistics: LogisticsManager = game.logistics
     bases: List[Dict[str, Any]] = []

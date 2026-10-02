@@ -277,6 +277,20 @@ check(units["Moskva-1"].ammo == 100, "full again")
 """)
 
 
+def test_redfor_rearm_option_set_after_the_script_loads_is_respected() -> None:
+    # B3 (29 Sep quality check): the mission sets the plugin options after the
+    # plugin's scripts have loaded, so the script must read them in init().
+    _run(r"""
+dcsRetribution = {plugins = {ship_weapons = {redforAutoRearm = false}}}
+FULL = {["Moskva-1"] = 100}
+local g = make_ship_group("Moskva", coalition.side.RED, {100})
+run_until(6)
+g.units[1].ammo = 15
+run_until(6 + 30 * 60 * 5 + 30)
+check(#respawns == 0, "REDFOR ships stay empty with the option off")
+""")
+
+
 def test_remaining_route_starts_after_the_current_leg() -> None:
     _run(r"""
 local pts = {{x = 0, y = 0}, {x = 10000, y = 0}, {x = 20000, y = 0}, {x = 30000, y = 0}}

@@ -32,12 +32,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Tuple
-
-from game.logistics import RED_CAPACITY
-
-if TYPE_CHECKING:
-    from game import Game
+from typing import Any, Dict, Iterable, List, Tuple
 
 logger = logging.getLogger(__name__)
 

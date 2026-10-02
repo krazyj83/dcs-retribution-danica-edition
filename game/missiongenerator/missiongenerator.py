@@ -16,7 +16,6 @@ from dcs.unit import Static
 from dcs.unitgroup import Group
 
 from game.atcdata import AtcData
-from game.ato.flighttype import FlightType
 from game.dcs.beacons import Beacons
 from game.dcs.helpers import unit_type_from_name
 from game.missiongenerator.aircraft.aircraftgenerator import (

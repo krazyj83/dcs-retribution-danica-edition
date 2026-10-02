@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from starlette.responses import Response
 
 from game.server.dependencies import GameContext
@@ -106,7 +106,6 @@ def create_drop_zone(body: CreateDropZoneRequest) -> DropZoneJs:
             # already imported below) — it raised ImportError every time and
             # was silently swallowed by this try/except, meaning this entire
             # nearest-CP lookup never ran. Removed; nothing here needs Point.
-            from dcs.mapping import LatLng
 
             nearest = None
             nearest_dist = float("inf")

@@ -401,11 +401,9 @@ class Game:
         # it show up in the next mission's debrief.
         if skipped:
             try:
-                from game.logistics.turn_report import add_unreported
+                from game.logistics.turn_report import file_skipped_turn
 
-                add_unreported(
-                    self.logistics, "events", self.logistics.pop_debrief_log()
-                )
+                file_skipped_turn(self.logistics)
             except Exception:
                 logging.exception("Turn report: skipped turn lines failed")
 

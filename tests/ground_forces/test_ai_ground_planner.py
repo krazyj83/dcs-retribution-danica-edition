@@ -7,7 +7,6 @@ from game.data.units import UnitClass
 from game.dcs.groundunittype import GroundUnitType
 from game.ground_forces.ai_ground_planner import CombatGroup, CombatGroupRole
 from game.ground_forces.ai_ground_planner import (
-    Cluster,
     CLUSTER_DEPTH_OFFSET,
     WEDGE_ROLES,
     assemble_clusters,

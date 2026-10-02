@@ -117,7 +117,6 @@ def use_fuel_for_sorties(game: Game, debriefing: Any = None) -> List[str]:
     """
     from game.ato.starttype import StartType
     from game.logistics import (
-        Warehouse,
         WarehouseCategory,
         keeps_warehouse,
         new_base_warehouse,
@@ -221,7 +220,7 @@ def _fuel_stock(game: Any, base: Any) -> Any:
 
     None for bases that don't keep warehouse fuel (not BLUEFOR).
     """
-    from game.logistics import Warehouse, WarehouseCategory, new_base_warehouse
+    from game.logistics import WarehouseCategory, new_base_warehouse
 
     from game.logistics.redfor import enabled as redfor_enabled
 
