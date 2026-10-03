@@ -6,7 +6,10 @@ import EmitterHighlightToggle from "../airdefenserangelayer/EmitterHighlightTogg
 import CombatLayer from "../combatlayer";
 import ControlPointsLayer from "../controlpointslayer";
 import CullingExclusionZones from "../cullingexclusionzones/CullingExclusionZones";
-import DropZoneLayer from "../dropzonelayer";
+import DropZoneLayer, {
+  DROP_ZONE_OVERLAY,
+  MapRightClickHandler,
+} from "../dropzonelayer";
 import FlightPlansLayer from "../flightplanslayer";
 import FrontLinesLayer from "../frontlineslayer";
 import Iadsnetworklayer from "../iadsnetworklayer";
@@ -39,6 +42,7 @@ export default function LiberationMap() {
       <ScaleControl />
       <LeafletRuler />
       <LayerPersistor />
+      <MapRightClickHandler />
       <LayersControl collapsed={false}>
         <MapBaseLayer name="Imagery Clarity" defaultChecked>
           <BasemapLayer name="ImageryClarity" />
@@ -133,7 +137,7 @@ export default function LiberationMap() {
         <MapOverlay name="Base supply status" defaultChecked={true}>
           <SupplyStatusLayer />
         </MapOverlay>
-        <MapOverlay name="Drop zones & Convoy routes" defaultChecked={true}>
+        <MapOverlay name={DROP_ZONE_OVERLAY} defaultChecked={true}>
           <DropZoneLayer />
         </MapOverlay>
         <MapOverlay name="Front lines" defaultChecked={true}>

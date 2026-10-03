@@ -5,7 +5,11 @@ import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import { DropZone, createDropZone, deleteDropZone, selectDropZones, serverBase } from "../../api/dropZonesSlice";
 import { createConvoyRoute, deleteConvoyRoute, selectConvoyRoutes, setConvoyRouteRepeat } from "../../api/convoyRoutesSlice";
 import type { ConvoyRoute } from "../../api/convoyRoutesSlice";
+import { setOverlayState } from "../../api/mapSlice";
 import { describeDrive } from "./convoyTime";
+
+// Name of the layer-list check box that shows drop zones and convoy routes.
+export const DROP_ZONE_OVERLAY = "Drop zones & Convoy routes";
 
 // Dark panel, like the right-click menu: the light title text was unreadable
 // on Leaflet's default white popup.
@@ -67,12 +71,21 @@ const ROUTE_COLOR = "#f5a623";
 const PENDING_COLOR = "#ecf0f1";
 const DZ_COLOR = "#27ae60";
 
-// Green diamond SVG icon for drop zones
-function makeDiamondIcon(color: string, size: number = 18) {
+// Marker sizes in pixels. Doubled from the first version (20/18/14): the
+// small diamonds were easy to lose among the base and SAM icons.
+export const DZ_ICON_SIZE = 40;
+const ROUTE_START_ICON_SIZE = 36;
+const ROUTE_END_ICON_SIZE = 28;
+const PENDING_START_RADIUS = 16;
+const PENDING_DOT_RADIUS = 12;
+
+// Diamond SVG icon for drop zones and route ends
+function makeDiamondIcon(color: string, size: number = 36) {
   const half = size / 2;
+  const inset = Math.max(2, Math.round(size / 10));
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}' viewBox='0 0 ${size} ${size}'>
-    <polygon points='${half},2 ${size - 2},${half} ${half},${size - 2} 2,${half}'
-      fill='${color}' stroke='#fff' stroke-width='1.5'/>
+    <polygon points='${half},${inset} ${size - inset},${half} ${half},${size - inset} ${inset},${half}'
+      fill='${color}' stroke='#fff' stroke-width='2.5'/>
   </svg>`;
   return new DivIcon({
     html: svg,
@@ -207,10 +220,17 @@ export function NameForm(props: {
   );
 }
 
-function MapRightClickHandler() {
+// The right-click menu lives outside the "Drop zones & Convoy routes" overlay
+// (see LiberationMap), so the menu and the orange preview are always visible.
+// Choosing an action ticks that overlay again: with it unticked the menu still
+// worked and the server saved the zone or route, but the result was drawn on a
+// hidden layer, so nothing seemed to happen.
+export function MapRightClickHandler() {
   const dispatch = useAppDispatch();
   const [pending, setPending] = useState<Pending | null>(null);
   const cancel = () => setPending(null);
+  const showLayer = () =>
+    dispatch(setOverlayState({ name: DROP_ZONE_OVERLAY, checked: true }));
 
   useMapEvents({
     contextmenu(e) {
@@ -253,7 +273,10 @@ function MapRightClickHandler() {
             style={menuItem}
             onMouseEnter={(e) => (e.currentTarget.style.background = "#2c3e50")}
             onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            onClick={() => setPending({ kind: "dz-name", latlng })}
+            onClick={() => {
+              showLayer();
+              setPending({ kind: "dz-name", latlng });
+            }}
           >
             🎯 Add Drop Zone
           </button>
@@ -262,7 +285,10 @@ function MapRightClickHandler() {
             style={menuItem}
             onMouseEnter={(e) => (e.currentTarget.style.background = "#2c3e50")}
             onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            onClick={() => setPending({ kind: "route-start", start: latlng })}
+            onClick={() => {
+              showLayer();
+              setPending({ kind: "route-start", start: latlng });
+            }}
           >
             🚛 Add Convoy Route
           </button>
@@ -275,11 +301,12 @@ function MapRightClickHandler() {
     const latlng = pending.latlng;
     const save = async (name: string) => {
       await dispatch(createDropZone({ name, lat: latlng.lat, lng: latlng.lng })).unwrap();
+      showLayer();
       setPending(null);
     };
     return (
       <>
-        <Marker position={latlng} icon={makeDiamondIcon(PENDING_COLOR, 20)} />
+        <Marker position={latlng} icon={makeDiamondIcon(PENDING_COLOR, DZ_ICON_SIZE)} />
         <Popup key="dz-name" position={latlng} closeButton={false} autoClose={false} closeOnClick={false}>
           <NameForm title="🎯 New Drop Zone" defaultName="Drop Zone" onSave={save} onCancel={cancel} />
         </Popup>
@@ -293,13 +320,13 @@ function MapRightClickHandler() {
       <>
         {cursor && (
           <Polyline positions={[pending.start, cursor]} pathOptions={{ color: PENDING_COLOR, weight: 2, dashArray: "6 4", opacity: 0.7 }}>
-            <Tooltip permanent direction="right" offset={[12, 0]}>
+            <Tooltip permanent direction="right" offset={[PENDING_START_RADIUS + 4, 0]}>
               {describeDrive(pending.start, cursor)}
             </Tooltip>
           </Polyline>
         )}
-      <CircleMarker center={pending.start} radius={8} pathOptions={{ color: PENDING_COLOR, fillColor: PENDING_COLOR, fillOpacity: 0.9, weight: 2 }}>
-        <Tooltip permanent direction="top" offset={[0, -12]}>
+      <CircleMarker center={pending.start} radius={PENDING_START_RADIUS} pathOptions={{ color: PENDING_COLOR, fillColor: PENDING_COLOR, fillOpacity: 0.9, weight: 2 }}>
+        <Tooltip permanent direction="top" offset={[0, -(PENDING_START_RADIUS + 4)]}>
           Route start — right-click to set end point (Esc cancels)
         </Tooltip>
       </CircleMarker>
@@ -312,12 +339,13 @@ function MapRightClickHandler() {
     await dispatch(
       createConvoyRoute({ name, start_lat: start.lat, start_lng: start.lng, end_lat: end.lat, end_lng: end.lng, repeat })
     ).unwrap();
+    showLayer();
     setPending(null);
   };
   return (
     <>
       <Polyline positions={[start, end]} pathOptions={{ color: PENDING_COLOR, weight: 2, dashArray: "6 4", opacity: 0.7 }} />
-      <CircleMarker center={start} radius={6} pathOptions={{ color: PENDING_COLOR, fillColor: PENDING_COLOR, fillOpacity: 1 }} />
+      <CircleMarker center={start} radius={PENDING_DOT_RADIUS} pathOptions={{ color: PENDING_COLOR, fillColor: PENDING_COLOR, fillOpacity: 1 }} />
       <Popup key="route-name" position={end} closeButton={false} autoClose={false} closeOnClick={false}>
         <NameForm title="🚛 New Convoy Route" info={describeDrive(start, end)} defaultName="Convoy Route" repeatOption onSave={save} onCancel={cancel} />
       </Popup>
@@ -337,7 +365,7 @@ function DropZoneMarkers() {
         <Marker
           key={dz.id}
           position={[dz.position.lat, dz.position.lng]}
-          icon={makeDiamondIcon(DZ_COLOR, 20)}
+          icon={makeDiamondIcon(DZ_COLOR, DZ_ICON_SIZE)}
         >
           <Tooltip sticky>{dz.name}</Tooltip>
           <Popup>
@@ -383,7 +411,7 @@ function ConvoyRouteMarkers() {
                 {r.name} — {describeDrive(r.start, r.end)}
               </Tooltip>
             </Polyline>
-            <Marker position={start} icon={makeDiamondIcon(ROUTE_COLOR, 18)}>
+            <Marker position={start} icon={makeDiamondIcon(ROUTE_COLOR, ROUTE_START_ICON_SIZE)}>
               <Popup>
                 <div style={popupWrap}>
                   <strong style={{ fontSize: 13, color: "#ecf0f1" }}>
@@ -414,7 +442,7 @@ function ConvoyRouteMarkers() {
                 </div>
               </Popup>
             </Marker>
-            <Marker position={end} icon={makeDiamondIcon(ROUTE_COLOR, 14)} />
+            <Marker position={end} icon={makeDiamondIcon(ROUTE_COLOR, ROUTE_END_ICON_SIZE)} />
           </React.Fragment>
         );
       })}
@@ -422,15 +450,15 @@ function ConvoyRouteMarkers() {
   );
 }
 
-// Everything is drawn inside one LayerGroup: a LayersControl overlay takes a
-// single layer, and loose markers each registered themselves as a new
-// "Drop zones & Convoy routes" entry in the layer list.
+// The saved zones and routes are drawn inside one LayerGroup: a LayersControl
+// overlay takes a single layer, and loose markers each registered themselves
+// as a new "Drop zones & Convoy routes" entry in the layer list. The
+// right-click handler is not in here; LiberationMap puts it on the map itself.
 export default function DropZoneLayer() {
   return (
     <LayerGroup>
       <DropZoneMarkers />
       <ConvoyRouteMarkers />
-      <MapRightClickHandler />
     </LayerGroup>
   );
 }

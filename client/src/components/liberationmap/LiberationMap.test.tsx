@@ -75,7 +75,12 @@ jest.mock("../tgoslayer/TgosLayer", () => () => <div data-testid="layer-tgos" />
 jest.mock("../supplyrouteslayer", () => () => <div data-testid="layer-supply-routes" />);
 jest.mock("../frontlineslayer", () => () => <div data-testid="layer-front-lines" />);
 jest.mock("../airdefenserangelayer", () => () => <div data-testid="layer-air-defense" />);
-jest.mock("../dropzonelayer", () => () => <div data-testid="layer-drop-zones" />);
+jest.mock("../dropzonelayer", () => ({
+  __esModule: true,
+  default: () => <div data-testid="layer-drop-zones" />,
+  DROP_ZONE_OVERLAY: "Drop zones & Convoy routes",
+  MapRightClickHandler: () => <div data-testid="map-right-click" />,
+}));
 jest.mock("../supplystatuslayer", () => () => <div data-testid="layer-supply-status" />);
 jest.mock("../iadsnetworklayer", () => () => <div data-testid="layer-iads" />);
 jest.mock("../flightplanslayer", () => () => <div data-testid="layer-flight-plans" />);

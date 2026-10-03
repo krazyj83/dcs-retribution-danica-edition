@@ -390,3 +390,19 @@ squadrons:
       aircraft:
         - H-6J Badger
       size: 8
+            # Larnaca - 45
+  47:
+    - primary: TARCAP
+      secondary: air-to-air
+      aircraft:
+        - MiG-29A Fulcrum-A
+      size: 12
+    - primary: Strike
+      secondary: air-to-ground
+      aircraft:
+        - Su-24M Fencer-D
+      size: 12
+    - primary: AEW&C
+      aircraft:
+        - A-50
+      size: 2
