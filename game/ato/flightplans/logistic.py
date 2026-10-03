@@ -12,6 +12,10 @@ units, so it must NOT set ``flight.cargo`` (that would register it as a unit
 airlift and the results processor would try to move ground units). Instead the
 flight carries ``flight.transfer_id``, and the stops come from that warehouse
 transfer: its source base and destination base.
+
+A flight planned to a player drop zone delivers there instead of landing at
+the base: the drop zone belongs to a friendly base (the transfer's
+destination), and crates set down inside it count as delivered to that base.
 """
 
 from __future__ import annotations
@@ -30,12 +34,14 @@ from game.ato.flightplans.planningerror import PlanningError
 
 if TYPE_CHECKING:
     from game.theater import ControlPoint
+    from game.theater.missiontarget import MissionTarget
 
 
 @dataclass(frozen=True)
 class LogisticStops:
     origin: ControlPoint
-    next_stop: ControlPoint
+    #: The destination base, or the drop zone the flight delivers to.
+    next_stop: MissionTarget
 
 
 class Builder(AirliftBuilder):
@@ -57,6 +63,11 @@ class Builder(AirliftBuilder):
             destination = game.theater.find_control_point_by_id(transfer.dest_cp_id)
         except KeyError as ex:
             raise PlanningError(str(ex)) from ex
+        from game.logistics.custom_airdrop import CustomAirdropTarget
+
+        target = self.flight.package.target
+        if isinstance(target, CustomAirdropTarget) and transfer.dz_id:
+            return LogisticStops(origin, target)
         return LogisticStops(origin, destination)
 
     # Helicopter airlifts add CTLD pickup/drop-off zones, which only exist at

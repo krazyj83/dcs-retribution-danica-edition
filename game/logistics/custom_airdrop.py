@@ -23,6 +23,8 @@ class CustomAirdropTarget(MissionTarget):
     cargo_weight: int = 0
     requires_helicopter: bool = True
     _coalition: Any = field(default=None, repr=False)
+    #: The player drop zone this target was created from ("" for none).
+    dz_id: str = ""
 
     def is_friendly(self, to_player: Player) -> bool:
         return False

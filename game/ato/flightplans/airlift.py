@@ -130,23 +130,39 @@ class CargoStops(Protocol):
     """Where a transport flight picks up and drops off.
 
     A unit TransferOrder satisfies this; LogisticFlightPlan supplies its own for
-    warehouse transfers, which carry supplies rather than units.
+    warehouse transfers, which carry supplies rather than units. ``next_stop``
+    is a base, or a map point (a player drop zone) for flights planned to one.
     """
 
     @property
     def origin(self) -> ControlPoint: ...
 
     @property
-    def next_stop(self) -> ControlPoint: ...
+    def next_stop(self) -> MissionTarget: ...
+
+
+@dataclass(frozen=True)
+class PlannedStops:
+    """Stops of a transport flight planned by hand without cargo: from its own
+    base to the package target (a friendly base or a drop zone). The crew
+    loads whatever they need in the mission (CTLD, sling loads)."""
+
+    origin: ControlPoint
+    next_stop: MissionTarget
+
+
+def is_base(target: MissionTarget) -> bool:
+    from game.theater import ControlPoint
+
+    return isinstance(target, ControlPoint)
 
 
 class Builder(IBuilder[AirliftFlightPlan, AirliftLayout]):
     def cargo_stops(self) -> CargoStops:
         cargo = self.flight.cargo
         if cargo is None:
-            raise PlanningError(
-                "Cannot plan transport mission for flight with no cargo."
-            )
+            # Planned by hand, nothing assigned (yet): fly empty to the target.
+            return PlannedStops(self.flight.departure, self.flight.package.target)
         return cargo
 
     def layout(self) -> AirliftLayout:
@@ -182,8 +198,25 @@ class Builder(IBuilder[AirliftFlightPlan, AirliftLayout]):
                 altitude,
                 altitude_is_agl,
             )
-        if cargo.next_stop != self.flight.arrival:
-            drop_off = builder.cargo_stop(cargo.next_stop)
+        if not is_base(cargo.next_stop):
+            # A drop zone: open ground, not a base to land at.
+            drop_off = builder.drop_zone(cargo.next_stop)
+            drop_off_ascent = self._create_ascent_or_descent(
+                builder,
+                cargo.origin.position,
+                cargo.next_stop.position,
+                altitude,
+                altitude_is_agl,
+            )
+            drop_off_descent = self._create_ascent_or_descent(
+                builder,
+                cargo.next_stop.position,
+                cargo.origin.position,
+                altitude,
+                altitude_is_agl,
+            )
+        elif cargo.next_stop != self.flight.arrival:
+            drop_off = builder.cargo_stop(cargo.next_stop)  # type: ignore[arg-type]
             drop_off_ascent = self._create_ascent_or_descent(
                 builder,
                 cargo.origin.position,
@@ -279,12 +312,22 @@ class Builder(IBuilder[AirliftFlightPlan, AirliftLayout]):
         cargo = self.flight.cargo
         if cargo and cargo.origin and isinstance(cargo.origin, CTLD):
             return generate_random_ctld_point(cargo.origin)
+        if cargo is None:
+            origin = self.flight.departure
+            if isinstance(origin, CTLD):
+                return generate_random_ctld_point(origin)
+            return origin.position
         raise RuntimeError("Could not generate CTLD pickup")
 
     def _generate_ctld_dropoff(self) -> Point:
         cargo = self.flight.cargo
         if cargo and cargo.transport and isinstance(cargo.transport.destination, CTLD):
             return generate_random_ctld_point(cargo.transport.destination)
+        if cargo is None:
+            target = self.flight.package.target
+            if isinstance(target, CTLD):
+                return generate_random_ctld_point(target)
+            return target.position
         raise RuntimeError("Could not generate CTLD dropoff")
 
     @staticmethod

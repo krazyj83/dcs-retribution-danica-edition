@@ -8,7 +8,7 @@ always share the same data.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, status
@@ -107,17 +107,30 @@ def create_drop_zone(body: CreateDropZoneRequest) -> DropZoneJs:
             # was silently swallowed by this try/except, meaning this entire
             # nearest-CP lookup never ran. Removed; nothing here needs Point.
 
-            nearest = None
-            nearest_dist = float("inf")
-            for cp in game.theater.controlpoints:
-                try:
-                    ll = cp.position.latlng()
-                    dist = ((ll.lat - body.lat) ** 2 + (ll.lng - body.lng) ** 2) ** 0.5
-                    if dist < nearest_dist:
-                        nearest_dist = dist
-                        nearest = cp
-                except Exception:
-                    pass
+            # A player drop zone supplies the nearest friendly base (no
+            # ships); any nearest base only when there is no friendly one.
+            def nearest_of(cps: list[Any]) -> Any:
+                best, best_dist = None, float("inf")
+                for cp in cps:
+                    try:
+                        ll = cp.position.latlng()
+                        dist = (
+                            (ll.lat - body.lat) ** 2 + (ll.lng - body.lng) ** 2
+                        ) ** 0.5
+                    except Exception:
+                        continue
+                    if dist < best_dist:
+                        best, best_dist = cp, dist
+                return best
+
+            friendly = [
+                cp
+                for cp in game.theater.controlpoints
+                if cp.captured.is_blue and not cp.is_fleet
+            ]
+            nearest: Any = nearest_of(friendly) or nearest_of(
+                list(game.theater.controlpoints)
+            )
             if nearest is not None:
                 cp_id = nearest.id
                 cp_name = nearest.name

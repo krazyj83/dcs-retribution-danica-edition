@@ -1387,6 +1387,8 @@ class Airfield(ControlPoint, CTLD):
                 FlightType.ESCORT,
                 # TODO: FlightType.INTERCEPTION
                 FlightType.LOGISTIC,
+                # Planned by hand, with or without cargo assigned.
+                FlightType.TRANSPORT,
             ]
 
         yield FlightType.REFUELING
@@ -1801,6 +1803,7 @@ class Fob(ControlPoint, RadioFrequencyContainer, CTLD):
                 FlightType.ESCORT,
                 FlightType.REFUELING,
                 FlightType.LOGISTIC,  # supplies flown in by helicopter
+                FlightType.TRANSPORT,
             ]
         yield from super().mission_types(for_player)
 

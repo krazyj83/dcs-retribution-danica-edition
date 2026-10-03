@@ -710,6 +710,24 @@ class WaypointBuilder:
             pretty_name="Drop-off zone",
         )
 
+    def drop_zone(self, target: MissionTarget) -> FlightWaypoint:
+        """The drop zone of a transport or logistic flight to a map point.
+
+        Not a landing: a drop zone is open ground, not a base. Helicopters fly
+        it low (the player sets down or sling-drops there), cargo planes at
+        drop height for an airdrop.
+        """
+        alt = self.get_combat_altitude if self.flight.is_helo else meters(300)
+        return FlightWaypoint(
+            "DROPZONE",
+            FlightWaypointType.NAV,
+            target.position,
+            alt,
+            "RADIO",
+            description=f"Deliver cargo at drop zone {target.name}",
+            pretty_name=f"Drop zone {target.name}",
+        )
+
     @staticmethod
     def cargo_stop(control_point: ControlPoint) -> FlightWaypoint:
         """Creates a cargo stop waypoint.
