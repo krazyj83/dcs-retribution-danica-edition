@@ -27,6 +27,7 @@ SECTIONS = {
     "weapons": "Weapons used",
     "damage": "Depot and SAM damage",
     "recon": "Recon",
+    "garrison": "CTLD troops in the field",
     "enemy": "Enemy logistics",
     "supply": "Your bases short of supply",
 }

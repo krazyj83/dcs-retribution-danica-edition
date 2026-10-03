@@ -128,6 +128,13 @@ class MissionGenerator:
             write_mission_data(self.game, self.mission)
         except Exception:
             logging.exception("MissionGenerator: terrain placement data failed")
+        # CTLD troops left in the field last mission (game/livingworld/garrison.py).
+        try:
+            from game.livingworld.garrison import write_mission_data as garrison
+
+            garrison(self.game, self.mission)
+        except Exception:
+            logging.exception("MissionGenerator: CTLD garrison failed")
 
         self.generate_destroyed_units()
 

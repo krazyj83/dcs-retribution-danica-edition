@@ -21,6 +21,10 @@
             "mnemonic": "retribution_cargo"
         },
         {
+            "file": "ctld_garrison.lua",
+            "mnemonic": "ctld_garrison"
+        },
+        {
             "file": "Moose.lua",
             "mnemonic": "moose"
         },

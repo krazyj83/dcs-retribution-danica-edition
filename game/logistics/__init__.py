@@ -607,6 +607,8 @@ class LogisticsManager:
         self._red_grounded: Dict[str, Any] = {}
         #: Last turn REDFOR was resupplied, so it happens once per turn.
         self._red_resupply_turn: Optional[int] = None
+        #: CTLD troops left in the field (game/livingworld/garrison.py).
+        self._ctld_garrison: List[Any] = []
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         """Saves from before a field existed get its default: the one place
@@ -1196,6 +1198,17 @@ class LogisticsManager:
             report.add("recon", recon_log)
         except Exception:
             logging.getLogger(__name__).exception("Recon intel failed")
+        try:
+            from game.livingworld.garrison import settle
+
+            garrison_log = settle(
+                game, getattr(debriefing.state_data, "ctld_garrison", None)
+            )
+            self.add_debrief_log(garrison_log)
+            log.extend(garrison_log)
+            report.add("garrison", garrison_log)
+        except Exception:
+            logging.getLogger(__name__).exception("CTLD garrison failed")
         flights_from = len(log)
         stats.start("transfers")
         for t in self._transfers.values():

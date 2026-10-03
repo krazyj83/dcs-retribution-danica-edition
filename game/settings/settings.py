@@ -640,6 +640,19 @@ class Settings:
             "ammunition from its base. Sites with every unit destroyed stay down."
         ),
     )
+    ctld_garrison: bool = boolean_option(
+        "CTLD troops stay in the field between missions",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=BATTLEFIELD_SECTION,
+        default=True,
+        detail=(
+            "Troops and vehicles unloaded with the CTLD menu that are still "
+            "alive when the mission ends are placed again next mission where "
+            "they stood, and can be picked up and moved with CTLD as usual. "
+            "Killed units are gone. Groups left inside an enemy-held base are "
+            "lost. Needs the CTLD plugin."
+        ),
+    )
     terrain_placement: bool = boolean_option(
         "Move parked ground units off slopes, roads and town centres",
         page=CAMPAIGN_MANAGEMENT_PAGE,

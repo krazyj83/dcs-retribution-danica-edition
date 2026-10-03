@@ -378,6 +378,13 @@ function write_state()
             game_state["cargo_crates"] = cargo_crates
         end
     end
+    -- CTLD groups still alive (ctld_garrison.lua): they stay in the campaign.
+    if retribution_ctld_garrison_state then
+        local garrison_ok, garrison = pcall(retribution_ctld_garrison_state)
+        if garrison_ok and garrison then
+            game_state["ctld_garrison"] = garrison
+        end
+    end
     -- What player aircraft carried (see note_player_sortie above), if any.
     local ammo_used = player_ammo_report()
     if next(ammo_used) ~= nil then

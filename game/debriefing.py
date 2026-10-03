@@ -153,6 +153,10 @@ class StateData:
     #: (see game/logistics/crate_delivery.py).
     cargo_crates: List[dict[str, Any]] = field(default_factory=list)
 
+    #: CTLD groups alive at the end ({"groups": [...]}), None when the mission
+    #: script didn't report them (see game/livingworld/garrison.py).
+    ctld_garrison: Optional[dict[str, Any]] = None
+
     #: Naval munitions crates per base: loaded and delivered to ships
     #: (see game/logistics/naval_munitions.py).
     naval_munitions: List[dict[str, Any]] = field(default_factory=list)
@@ -215,6 +219,7 @@ class StateData:
             destroyed_statics=data.get("destroyed_objects_positions", []),
             base_capture_events=data.get("base_capture_events", []),
             cargo_crates=list(data.get("cargo_crates") or []),
+            ctld_garrison=data.get("ctld_garrison"),
             naval_munitions=list(data.get("naval_munitions") or []),
             player_convoy_arrivals=[
                 str(name) for name in data.get("player_convoy_arrivals") or []
