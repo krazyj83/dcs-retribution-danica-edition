@@ -1200,6 +1200,13 @@ class InventoryTab(QWidget):
         hint.setStyleSheet("color: grey; font-size: 11px;")
         layout.addWidget(hint)
 
+    def _used_for(self, cp_id: Any) -> Optional[set[str]]:
+        """Weapons the squadrons at this base carry (None: unknown base)."""
+        from game.logistics import squadron_weapon_names
+
+        cp = next((c for c in blue_control_points(self.game) if c.id == cp_id), None)
+        return squadron_weapon_names(self.game, cp) if cp is not None else None
+
     def _on_sync(self) -> None:
         self.logistics.sync_weapon_inventories(self.game)
         self.refresh()
@@ -1230,7 +1237,7 @@ class InventoryTab(QWidget):
         self.restock_item_btn.setEnabled(False)
         self.item_cost_label.setText("")
         if self._is_main_base:
-            cost = self.logistics.restock_inventory_cost(cp_id)
+            cost = self.logistics.restock_inventory_cost(cp_id, self._used_for(cp_id))
             budget = self.game.blue.budget if self.game else 0
             self.restock_inv_btn.setToolTip(
                 f"Restock ALL items to capacity.\n"
@@ -1291,6 +1298,13 @@ class InventoryTab(QWidget):
                 self.logistics.set_weapon_inventory(inv)
             else:
                 return
+        from game.logistics import complete_weapon_list, squadron_weapon_names
+
+        complete_weapon_list(self.game, inv)
+        cp = next((cp for cp in blue_control_points(self.game) if cp.id == cp_id), None)
+        self._used_here = (
+            squadron_weapon_names(self.game, cp) if cp is not None else None
+        )
         by_cat = inv.items_by_category()
         total_node = QTreeWidgetItem(self.category_tree)
         total_node.setText(0, f"All ({len(inv.items)})")
@@ -1334,15 +1348,22 @@ class InventoryTab(QWidget):
             self.items_table.setItem(row, 1, cat_cell)
             qty_cell = QTableWidgetItem(str(item.quantity))
             qty_cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            qty_cell.setForeground(
-                STOCK_CRITICAL_COLOR
-                if item.quantity == 0
-                else (
-                    STOCK_LOW_COLOR
-                    if item.quantity < item.capacity * 0.3
-                    else STOCK_OK_COLOR
+            used = getattr(self, "_used_here", None)
+            if item.quantity == 0 and used is not None and item.name not in used:
+                # Listed so every base shows every weapon; no squadron here
+                # carries it, so 0 is not a shortage.
+                qty_cell.setForeground(NEUTRAL_COLOR)
+                qty_cell.setToolTip("No squadron based here carries this weapon")
+            else:
+                qty_cell.setForeground(
+                    STOCK_CRITICAL_COLOR
+                    if item.quantity == 0
+                    else (
+                        STOCK_LOW_COLOR
+                        if item.quantity < item.capacity * 0.3
+                        else STOCK_OK_COLOR
+                    )
                 )
-            )
             self.items_table.setItem(row, 2, qty_cell)
             cap_cell = QTableWidgetItem(str(item.capacity))
             cap_cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1459,7 +1480,7 @@ class InventoryTab(QWidget):
                 "Set a main base in the Main Base tab first.",
             )
             return
-        cost = self.logistics.restock_inventory_cost(cp_id)
+        cost = self.logistics.restock_inventory_cost(cp_id, self._used_for(cp_id))
         if cost <= 0:
             QMessageBox.information(
                 self, "Already full", "All items are already at capacity."
@@ -1470,7 +1491,8 @@ class InventoryTab(QWidget):
         reply = QMessageBox.question(
             self,
             "Confirm Full Restock",
-            f"Restock ALL items at {base_name} to full capacity?\n\n"
+            f"Restock the weapons its squadrons carry, and everything already in "
+            f"stock, at {base_name} to full capacity?\n\n"
             f"Cost: ${cost:.1f}M\n"
             f"  Weapons/rounds: $0.01M per unit deficit\n"
             f"  Ground units: procurement price per unit deficit\n\n"
@@ -1486,7 +1508,7 @@ class InventoryTab(QWidget):
                 f"Cannot afford restock.\nCost: ${cost:.1f}M  Budget: ${budget:.1f}M",
             )
             return
-        self.logistics.restock_inventory(cp_id)
+        self.logistics.restock_inventory(cp_id, self._used_for(cp_id))
         self.game.blue.adjust_budget(-cost)
         self._refresh_view()
         self.status_label.setText(

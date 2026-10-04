@@ -137,11 +137,71 @@ class WeaponInventory:
         return dict(sorted(result.items()))
 
 
+def _blue_squadrons(game: Any) -> Optional[Dict[Any, Any]]:
+    """aircraft type -> squadrons of the BLUEFOR air wing (None if unknown)."""
+    air_wing = getattr(getattr(game, "blue", None), "air_wing", None)
+    return getattr(air_wing, "squadrons", None)
+
+
+def air_wing_weapons(game: "Game") -> Dict[str, str]:
+    """clsid -> name of every weapon any BLUEFOR squadron can carry."""
+    from game.data.weapons import Pylon
+
+    weapons: Dict[str, str] = {}
+    squadrons = _blue_squadrons(game)
+    if squadrons is None:
+        return weapons
+    try:
+        for aircraft_type in squadrons:
+            for pylon in Pylon.iter_pylons(aircraft_type):
+                for weapon in pylon.allowed:
+                    weapons.setdefault(weapon.clsid, weapon.name)
+    except Exception:
+        logging.getLogger(__name__).exception("Could not list the air wing's weapons")
+    return weapons
+
+
+def squadron_weapon_names(game: "Game", cp: Any) -> Optional[set[str]]:
+    """Names of the weapons the squadrons based at ``cp`` can carry: the ones
+    whose empty stock matters for the base (supply status, warnings). None
+    when the air wing isn't known (then every listed weapon counts)."""
+    from game.data.weapons import Pylon
+
+    air_wing = _blue_squadrons(game)
+    if air_wing is None:
+        return None
+    names: set[str] = set()
+    try:
+        for aircraft_type, squadrons in air_wing.items():
+            if not any(
+                getattr(sq, "location", None) is not None and sq.location.id == cp.id
+                for sq in squadrons
+            ):
+                continue
+            for pylon in Pylon.iter_pylons(aircraft_type):
+                names.update(weapon.name for weapon in pylon.allowed)
+    except Exception:
+        logging.getLogger(__name__).exception("Could not list a base's weapons")
+    return names
+
+
+def complete_weapon_list(game: "Game", inventory: WeaponInventory) -> int:
+    """Add every air wing weapon the base doesn't list yet, at 0, so each base
+    shows the full list. Returns how many were added."""
+    added = 0
+    for clsid, name in air_wing_weapons(game).items():
+        if clsid not in inventory.items:
+            inventory.add_item(clsid, name, _weapon_category(name), quantity=0)
+            added += 1
+    return added
+
+
 def build_weapon_inventory(cp: "ControlPoint", game: "Game") -> WeaponInventory:
     """
     Build a WeaponInventory for a control point by inspecting:
     1. Squadrons based there - their aircraft pylons/allowed weapons
     2. Ground units at the base - from cp.base.armor
+    3. Every other weapon of the air wing, at 0 (complete_weapon_list)
     """
     inv = WeaponInventory(cp_id=cp.id, cp_name=cp.name)
 
@@ -196,6 +256,7 @@ def build_weapon_inventory(cp: "ControlPoint", game: "Game") -> WeaponInventory:
     except Exception:
         pass
 
+    complete_weapon_list(game, inv)
     return inv
 
 
@@ -849,22 +910,36 @@ class LogisticsManager:
             return
         wh.stock[category].quantity = wh.stock[category].capacity
 
-    def restock_inventory_cost(self, cp_id: UUID) -> float:
-        """Cost ($M) to refill ALL weapon/equipment inventory to capacity.
+    def _restockable(
+        self, cp_id: UUID, used_here: Optional[set[str]]
+    ) -> List[WeaponStockItem]:
+        """Items a full restock fills: with ``used_here`` (weapon names), the
+        weapons the base's squadrons carry and anything already in stock, not
+        every air wing weapon listed at 0."""
+        inv = self.get_weapon_inventory(cp_id)
+        if inv is None:
+            return []
+        return [
+            i
+            for i in inv.items.values()
+            if used_here is None or i.name in used_here or i.quantity > 0
+        ]
+
+    def restock_inventory_cost(
+        self, cp_id: UUID, used_here: Optional[set[str]] = None
+    ) -> float:
+        """Cost ($M) to refill the weapon/equipment inventory to capacity.
 
         Same prices as one item at a time (item_restock_cost).
         """
-        inv = self.get_weapon_inventory(cp_id)
-        if inv is None:
-            return 0.0
-        return round(sum(item_restock_cost(i) for i in inv.items.values()), 1)
+        items = self._restockable(cp_id, used_here)
+        return round(sum(item_restock_cost(i) for i in items), 1)
 
-    def restock_inventory(self, cp_id: UUID) -> None:
-        """Fill ALL weapon/equipment inventory items to capacity."""
-        inv = self.get_weapon_inventory(cp_id)
-        if inv is None:
-            return
-        for item in inv.items.values():
+    def restock_inventory(
+        self, cp_id: UUID, used_here: Optional[set[str]] = None
+    ) -> None:
+        """Fill the weapon/equipment inventory items to capacity."""
+        for item in self._restockable(cp_id, used_here):
             item.quantity = item.capacity
 
     # ── Transfers ──────────────────────────────────────────────────────
@@ -1101,6 +1176,14 @@ class LogisticsManager:
         from game.logistics.transfer_flights import flight_for_transfer
 
         from game.logistics.fuel import unlimited_fuel
+
+        # Every base lists every air wing weapon (new aircraft types bring new
+        # ones), at 0 where it has none.
+        for inventory in self._weapon_inventories.values():
+            try:
+                complete_weapon_list(game, inventory)
+            except Exception:
+                logging.getLogger(__name__).exception("Weapon list update failed")
 
         if self._last_attrition_turn != game.turn:
             self._last_attrition_turn = game.turn

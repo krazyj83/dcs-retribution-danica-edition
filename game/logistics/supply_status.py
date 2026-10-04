@@ -129,7 +129,13 @@ def supply_status(game: Game) -> List[BaseSupply]:
         supplies = warehouse.stock[WarehouseCategory.SUPPLIES]
         left = turns_left(warehouse)
         inventory = logistics.get_weapon_inventory(cp.id)
-        types, empty, _ = weapon_counts(inventory) if inventory else (0, 0, 0)
+        from game.logistics import squadron_weapon_names
+
+        types, empty, _ = (
+            weapon_counts(inventory, squadron_weapon_names(game, cp))
+            if inventory
+            else (0, 0, 0)
+        )
         status, reasons = classify(
             _level(fuel.quantity, fuel.capacity),
             _level(ammo.quantity, ammo.capacity),

@@ -134,6 +134,14 @@ class QBaseInventory(QFrame):
         self.only_low = QCheckBox("Only low / empty")
         self.only_low.toggled.connect(self._fill_weapons)
         filters.addWidget(self.only_low)
+        self.only_here = QCheckBox("Only for squadrons here")
+        self.only_here.setToolTip(
+            "Every weapon of your air wing is listed at every base, at 0 where\n"
+            "the base has none. Tick to show only the weapons the squadrons\n"
+            "based here can carry, and any others in stock."
+        )
+        self.only_here.toggled.connect(self._fill_weapons)
+        filters.addWidget(self.only_here)
         wl.addLayout(filters)
         self.weapon_summary = QLabel()
         wl.addWidget(self.weapon_summary)
@@ -289,19 +297,21 @@ class QBaseInventory(QFrame):
 
         types, empty, low = inv.weapon_totals
         self.weapon_summary.setText(
-            f"{types} weapon types · "
-            f"<span style='color:{EMPTY}'>{empty} empty</span> · "
+            f"{types} weapon types · {inv.weapons_in_stock} in stock · for the "
+            f"squadrons here: <span style='color:{EMPTY}'>{empty} empty</span> · "
             f"<span style='color:{LOW}'>{low} low</span>"
         )
 
         needle = self.search.text().strip().lower()
         only_low = self.only_low.isChecked()
+        only_here = self.only_here.isChecked()
         for category, rows in inv.weapons.items():
             shown = [
                 r
                 for r in rows
                 if (not needle or needle in r.name.lower())
                 and (not only_low or r.empty or r.low)
+                and (not only_here or r.used_here or r.quantity > 0)
             ]
             if not shown:
                 continue
@@ -313,7 +323,13 @@ class QBaseInventory(QFrame):
             self.tree.addTopLevelItem(parent)
             for r in shown:
                 child = QTreeWidgetItem([r.name, str(r.quantity), str(r.capacity)])
-                if r.empty:
+                if not r.used_here and r.quantity <= 0:
+                    for column in range(3):
+                        child.setForeground(column, QBrush(QColor("#7f8c8d")))
+                    child.setToolTip(
+                        0, "None in store; no squadron based here carries it"
+                    )
+                elif r.empty:
                     child.setForeground(1, QBrush(QColor(EMPTY)))
                 elif r.low:
                     child.setForeground(1, QBrush(QColor(LOW)))
@@ -326,7 +342,7 @@ class QBaseInventory(QFrame):
                 child.setTextAlignment(1, Qt.AlignmentFlag.AlignRight)
                 child.setTextAlignment(2, Qt.AlignmentFlag.AlignRight)
                 parent.addChild(child)
-            parent.setExpanded(bool(needle) or only_low)
+            parent.setExpanded(bool(needle) or only_low or only_here)
 
     # ── Actions ────────────────────────────────────────────────────────
 

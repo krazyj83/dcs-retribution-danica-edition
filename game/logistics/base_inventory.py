@@ -71,14 +71,19 @@ class WeaponRow:
     #: Stock items merged into this row: the same weapon on different racks
     #: or launchers has its own DCS id, but is one weapon to the player.
     variants: int = 1
+    #: A squadron based here can carry it. Every air wing weapon is listed at
+    #: every base (at 0 if it has none); only these count as empty or low.
+    used_here: bool = True
 
     @property
     def empty(self) -> bool:
-        return self.quantity <= 0
+        return self.used_here and self.quantity <= 0
 
     @property
     def low(self) -> bool:
-        return not self.empty and self.quantity < LOW_WEAPON_QUANTITY
+        return (
+            self.used_here and self.quantity > 0 and self.quantity < LOW_WEAPON_QUANTITY
+        )
 
 
 @dataclass
@@ -102,7 +107,8 @@ class BaseInventory:
 
     @property
     def weapon_totals(self) -> tuple[int, int, int]:
-        """(weapon types, empty types, low types)."""
+        """(weapon types, empty types, low types); empty and low count only
+        the weapons the base's squadrons can carry."""
         rows = [r for rows in (self.weapons or {}).values() for r in rows]
         return (
             len(rows),
@@ -110,11 +116,21 @@ class BaseInventory:
             sum(1 for r in rows if r.low),
         )
 
+    @property
+    def weapons_in_stock(self) -> int:
+        return sum(
+            1 for rows in (self.weapons or {}).values() for r in rows if r.quantity > 0
+        )
 
-def weapon_rows(inventory: Any) -> Dict[str, List[WeaponRow]]:
+
+def weapon_rows(
+    inventory: Any, used_here: Optional[set[str]] = None
+) -> Dict[str, List[WeaponRow]]:
     """Weapon category -> weapons, both sorted by name; ground units left out.
 
-    The same weapon on different racks or launchers is one row.
+    The same weapon on different racks or launchers is one row. With
+    ``used_here`` (weapon names), rows of other weapons are marked as not
+    used at the base.
     """
     weapons: Dict[str, List[WeaponRow]] = {}
     for category, items in inventory.items_by_category().items():
@@ -124,7 +140,12 @@ def weapon_rows(inventory: Any) -> Dict[str, List[WeaponRow]]:
         for i in items:
             row = merged.get(i.name)
             if row is None:
-                merged[i.name] = WeaponRow(i.name, int(i.quantity), int(i.capacity))
+                merged[i.name] = WeaponRow(
+                    i.name,
+                    int(i.quantity),
+                    int(i.capacity),
+                    used_here=used_here is None or i.name in used_here,
+                )
             else:
                 row.quantity += int(i.quantity)
                 row.capacity += int(i.capacity)
@@ -133,9 +154,16 @@ def weapon_rows(inventory: Any) -> Dict[str, List[WeaponRow]]:
     return weapons
 
 
-def weapon_counts(inventory: Any) -> tuple[int, int, int]:
-    """(weapon types, empty types, low types) of a base's weapon stores."""
-    rows = [r for rows in weapon_rows(inventory).values() for r in rows]
+def weapon_counts(
+    inventory: Any, used_here: Optional[set[str]] = None
+) -> tuple[int, int, int]:
+    """(weapon types, empty types, low types) of a base's weapon stores.
+
+    With ``used_here``, only weapons the base's squadrons can carry, or that
+    it has in stock, count as types; only the former can be empty or low.
+    """
+    rows = [r for rows in weapon_rows(inventory, used_here).values() for r in rows]
+    rows = [r for r in rows if r.used_here or r.quantity > 0]
     return (
         len(rows),
         sum(1 for r in rows if r.empty),
@@ -162,7 +190,10 @@ def base_inventory(game: Game, cp: Any) -> BaseInventory:
     weapons: Optional[Dict[str, List[WeaponRow]]] = None
     inventory = logistics.get_weapon_inventory(cp.id)
     if inventory is not None:
-        weapons = weapon_rows(inventory)
+        from game.logistics import complete_weapon_list, squadron_weapon_names
+
+        complete_weapon_list(game, inventory)
+        weapons = weapon_rows(inventory, squadron_weapon_names(game, cp))
 
     incoming: List[str] = []
     outgoing: List[str] = []
