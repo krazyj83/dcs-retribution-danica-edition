@@ -14,7 +14,9 @@ For each crate:
                                   ...unless the flight was shot down: lost
 
 "At a base" means on the ground inside one of the base's active drop zones, or
-within BASE_RADIUS_M of the base (FARP/FOB: SMALL_BASE_RADIUS_M).
+within BASE_RADIUS_M of the base (FARP/FOB: SMALL_BASE_RADIUS_M). With forward
+caches on (the default), a crate set down inside a drop zone but outside the
+base's radius stays in that drop zone's cache instead (see forward_cache.py).
 
 Ordered crates only leave the pickup base's stock when they are delivered or
 lost, so an order the pilot never picked up costs nothing.
@@ -165,17 +167,40 @@ def settle_transfer(
     from game.logistics import TransferStatus
     from game.logistics.cargo import manifest_summary
 
+    from game.logistics import forward_cache
+
+    caching = forward_cache.enabled(game)
     settlement = Settlement()
     for report in reports:
         source = _cp_by_id(game, report.source)
         # Base ids are UUIDs, despite the int annotations in LogisticsManager.
         source_id: Any = source.id if source is not None else transfer.source_cp_id
         at_base: Optional[ControlPoint] = None
-        if report.exists and not report.destroyed and report.agl <= ON_GROUND_MAX_AGL_M:
+        cache_dz = None
+        on_ground = (
+            report.exists and not report.destroyed and report.agl <= ON_GROUND_MAX_AGL_M
+        )
+        if (
+            on_ground
+            and caching
+            and forward_cache.base_at(game, report.x, report.z) is None
+        ):
+            cache_dz = forward_cache.drop_zone_at(game, report.x, report.z)
+        if on_ground and cache_dz is None:
             at_base = friendly_base_at(game, report.x, report.z)
         lost = report.destroyed or (not report.exists and flight_lost)
 
-        if at_base is not None:
+        if cache_dz is not None:
+            if report.requested:
+                logistics._take_weapons(source_id, report.contents)
+            forward_cache.leave_in_cache(logistics, cache_dz, report)
+            _add(
+                settlement.delivered.setdefault(
+                    f"the forward cache at {cache_dz.name}", {}
+                ),
+                report.contents,
+            )
+        elif at_base is not None:
             if report.requested:
                 logistics._take_weapons(source_id, report.contents)
             overflow = logistics._put_weapons(at_base, report.contents)

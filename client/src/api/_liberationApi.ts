@@ -524,6 +524,8 @@ export type DropZone = {
   id: string;
   name: string;
   position: LatLng;
+  base?: string;
+  cache?: string[];
 };
 export type ConvoyRoute = {
   id: string;

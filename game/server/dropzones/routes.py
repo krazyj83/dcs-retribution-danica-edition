@@ -34,10 +34,17 @@ def _get_logistics() -> Optional[LogisticsManager]:
 
 def _to_js(dz: DropZone) -> DropZoneJs:
     """Convert a logistics.DropZone to the API model."""
+    from game.logistics.cargo import weapon_name
+    from game.logistics.forward_cache import cache_of
+
+    logistics = _get_logistics()
+    cache = cache_of(logistics, dz.dz_id) if logistics is not None else {}
     return DropZoneJs(
         id=UUID(dz.dz_id),
         name=dz.name,
         position=LeafletPoint(lat=dz.lat, lng=dz.lon),
+        base=dz.cp_name if dz.coalition == "blue" else "",
+        cache=[f"{n}x {weapon_name(c)}" for c, n in cache.items() if n > 0],
     )
 
 

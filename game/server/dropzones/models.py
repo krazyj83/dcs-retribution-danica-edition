@@ -10,6 +10,10 @@ class DropZoneJs(BaseModel):
     id: UUID
     name: str
     position: LeafletPoint
+    #: The friendly base the zone belongs to ("" if none).
+    base: str = ""
+    #: The zone's forward cache, one line per weapon ("8x AGM-114K Hellfire").
+    cache: list[str] = []
 
     class Config:
         title = "DropZone"

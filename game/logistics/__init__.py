@@ -609,6 +609,8 @@ class LogisticsManager:
         self._red_resupply_turn: Optional[int] = None
         #: CTLD troops left in the field (game/livingworld/garrison.py).
         self._ctld_garrison: List[Any] = []
+        #: Crates left in drop zones (game/logistics/forward_cache.py).
+        self._drop_zone_caches: List[Any] = []
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         """Saves from before a field existed get its default: the one place
@@ -627,9 +629,19 @@ class LogisticsManager:
         """Remove a drop zone and cancel the planned transfers to it.
 
         Their cargo goes back to stock (cancel_transfer); with the game given,
-        their LOGISTIC flights are removed from the ATO too.
+        their LOGISTIC flights are removed from the ATO too, and the zone's
+        forward cache goes back to its base (forward_cache.release).
         """
-        self._drop_zones.pop(dz_id, None)
+        dz = self._drop_zones.pop(dz_id, None)
+        if dz is not None and game is not None:
+            try:
+                from game.logistics.forward_cache import release
+
+                self.add_debrief_log(release(game, dz))
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Could not return a drop zone's forward cache"
+                )
         for t in list(self._transfers.values()):
             if t.dz_id == dz_id and t.status == TransferStatus.PLANNED:
                 self.cancel_transfer(t.transfer_id)
@@ -1209,6 +1221,18 @@ class LogisticsManager:
             report.add("garrison", garrison_log)
         except Exception:
             logging.getLogger(__name__).exception("CTLD garrison failed")
+        try:
+            from game.logistics.forward_cache import settle as settle_caches
+
+            cache_log = settle_caches(
+                game,
+                list(getattr(debriefing.state_data, "cargo_crates", None) or []),
+            )
+            self.add_debrief_log(cache_log)
+            log.extend(cache_log)
+            report.add("flights", cache_log)
+        except Exception:
+            logging.getLogger(__name__).exception("Forward caches failed")
         flights_from = len(log)
         stats.start("transfers")
         for t in self._transfers.values():

@@ -563,6 +563,19 @@ class Settings:
             "0 turns the backups off."
         ),
     )
+    drop_zone_caches: bool = boolean_option(
+        "Crates left in a drop zone stay there as a forward cache",
+        page=CAMPAIGN_MANAGEMENT_PAGE,
+        section=BASE_SUPPLIES_SECTION,
+        default=True,
+        detail=(
+            "A cargo crate set down inside a drop zone (outside the base itself) "
+            "stays on the ground and is placed again, where it lay, in the next "
+            "missions, until a pilot carries it to a friendly base (where it "
+            "goes into the stores) or it is destroyed. Off: it is delivered "
+            "straight to the drop zone's base."
+        ),
+    )
     kneeboard_base_supply_page: bool = boolean_option(
         "Base supply page on player kneeboards",
         page=CAMPAIGN_MANAGEMENT_PAGE,

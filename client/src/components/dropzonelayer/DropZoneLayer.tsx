@@ -367,13 +367,25 @@ function DropZoneMarkers() {
           position={[dz.position.lat, dz.position.lng]}
           icon={makeDiamondIcon(DZ_COLOR, DZ_ICON_SIZE)}
         >
-          <Tooltip sticky>{dz.name}</Tooltip>
+          <Tooltip sticky>
+            {dz.name}
+            {dz.cache && dz.cache.length > 0 ? " 📦" : ""}
+          </Tooltip>
           <Popup>
             <div style={popupWrap}>
               <strong style={{ fontSize: 13, color: "#ecf0f1" }}>🎯 {dz.name}</strong>
               <div style={{ fontSize: 11, color: "#7f8c8d", margin: "2px 0 8px" }}>
                 {dz.position.lat.toFixed(4)}, {dz.position.lng.toFixed(4)}
+                {dz.base ? ` · supplies ${dz.base}` : ""}
               </div>
+              {dz.cache && dz.cache.length > 0 && (
+                <div style={{ fontSize: 12, color: "#ecf0f1", margin: "0 0 8px" }}>
+                  <div style={{ color: "#f5a623", fontWeight: 600 }}>📦 Forward cache</div>
+                  {dz.cache.map((line) => (
+                    <div key={line}>{line}</div>
+                  ))}
+                </div>
+              )}
               <button style={{ ...btn, width: "100%", marginBottom: 5 }} onClick={() => openPackageDialog(dz)}>
                 📋 Create Mission
               </button>

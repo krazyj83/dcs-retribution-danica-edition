@@ -20,6 +20,9 @@ It also writes the data table (``dcsRetributionCargo``) for the mission script
 resources/plugins/base/retribution_cargo.lua, which gives client LOGISTIC
 flights an F10 "Cargo" menu to order more crates from a base's stock, and
 reports where every crate ended up (see game/logistics/crate_delivery.py).
+
+Crates left in drop zones earlier (forward caches, game/logistics/
+forward_cache.py) are placed again where they lay, and reported the same way.
 """
 
 from __future__ import annotations
@@ -105,7 +108,11 @@ class TransferCargoGenerator:
                         "Transfer %s: could not place its cargo",
                         transfer.transfer_id[:8],
                     )
-        if self.flights:
+        try:
+            placed += self._place_caches()
+        except Exception:
+            logger.exception("Could not place the forward caches")
+        if self.flights or self.crates:
             try:
                 self._write_script_data()
             except Exception:
@@ -178,6 +185,30 @@ class TransferCargoGenerator:
         inject_data_table(self.mission, "dcsRetributionCargo", data, "cargo")
 
     # ── Placement ─────────────────────────────────────────────────────
+
+    def _place_caches(self) -> int:
+        """Crates left in drop zones, where they lay."""
+        from game.logistics.forward_cache import mission_crates
+
+        crates = mission_crates(self.game)
+        if not crates:
+            return 0
+        country = self.mission.country(self.game.blue.faction.country.name)
+        for crate in crates:
+            group = self.mission.static_group(
+                country,
+                crate["name"],
+                CRATE_TYPE,
+                Point(crate["x"], crate["z"], self.mission.terrain),
+                heading=0,
+            )
+            unit = group.units[0]
+            unit.name = crate["name"]
+            unit.mass = max(1, int(round(crate["mass"])))
+            unit.can_cargo = True
+            self.crates.append(crate["script"])
+        logger.info("Forward caches: %d crate(s) placed", len(crates))
+        return len(crates)
 
     def _place(self, flight: Flight, transfer: LogisticsTransfer) -> int:
         from game.logistics.transfer_flights import control_point

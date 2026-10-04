@@ -6,6 +6,10 @@ export interface DropZone {
   id: string;
   name: string;
   position: { lat: number; lng: number };
+  /** The friendly base the zone belongs to. */
+  base?: string;
+  /** The zone's forward cache, one line per weapon. */
+  cache?: string[];
 }
 
 export function serverBase(): string {

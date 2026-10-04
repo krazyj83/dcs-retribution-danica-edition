@@ -211,7 +211,20 @@ class QFlightCargoTab(QWidget):
         self.pickup_combo.blockSignals(False)
 
         destination = control_point(self.game, self.transfer.dest_cp_id)
-        self.destination_label.setText(destination.name if destination else "?")
+        text = destination.name if destination else "?"
+        from game.logistics import forward_cache
+
+        dz = self.game.logistics.get_drop_zone(self.transfer.dz_id or "")
+        if (
+            dz is not None
+            and getattr(self.flight.package.target, "dz_id", "") == dz.dz_id
+        ):
+            text = (
+                f"{dz.name} drop zone: forward cache of {text}"
+                if forward_cache.enabled(self.game)
+                else f"{text}, via the {dz.name} drop zone"
+            )
+        self.destination_label.setText(text)
         self.dz_combo.blockSignals(True)
         self.dz_combo.clear()
         self.dz_combo.addItem("The base itself", "")
