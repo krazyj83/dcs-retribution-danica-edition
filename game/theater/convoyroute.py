@@ -82,6 +82,9 @@ class ConvoyRouteTarget(MissionTarget):
     start: Optional[Point] = None
     end: Optional[Point] = None
     _coalition: Any = field(default=None, repr=False)
+    #: The PlayerConvoyRoute this target was made for (None in older saves:
+    #: matched by name instead).
+    route_id: Optional[UUID] = None
 
     def is_friendly(self, to_player: Player) -> bool:
         # The convoy route is always a friendly asset — it's the player's supply line.

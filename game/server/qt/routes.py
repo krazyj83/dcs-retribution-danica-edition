@@ -168,6 +168,7 @@ def new_convoy_route_package(
         start=start_point,
         end=end_point,
         _coalition=game.blue,
+        route_id=route.id,
     )
     qt.create_new_package(target)
 

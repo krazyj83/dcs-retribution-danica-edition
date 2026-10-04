@@ -17,6 +17,17 @@ the vehicles that get within ``ARRIVAL_RADIUS_M`` of the route end. After the
 mission, ``MissionResultsProcessor.commit_player_drawn_convoys`` removes dead
 vehicles from the source base and delivers only the vehicles that arrived to
 the destination base; the rest stay at the source base.
+
+Cargo trucks: every convoy also gets up to CARGO_TRUCKS_PER_CONVOY of the
+faction's cargo trucks, behind the borrowed vehicles. They aren't taken from
+a base; they haul ammunition and supplies from the source base's warehouse
+(see logistics/convoy_cargo.py). A route with no spare vehicles still gets a
+convoy of trucks, from the friendly base nearest its start.
+
+Escort hold: a route with a Convoy Escort flight planned on it waits at its
+start (a Hold task stopped by a flag) until an aircraft of that flight is
+airborne within ESCORT_RADIUS_M of the start, or for ESCORT_WAIT_S at most.
+The mission script sets the flag (dcs_retribution.lua).
 """
 
 from __future__ import annotations
@@ -29,6 +40,7 @@ from typing import TYPE_CHECKING, Any
 from dcs import Mission
 from dcs.mapping import LatLng, Point
 from dcs.point import PointAction
+from dcs.task import ControlledTask, Hold
 from dcs.unitgroup import VehicleGroup
 
 from game.dcs.groundunittype import GroundUnitType
@@ -60,6 +72,12 @@ ARRIVAL_RADIUS_M = 2000
 # pydcs spaces a new group's units 20 m apart along Y; extra types continue that.
 _UNIT_SPACING_M = 20
 
+# A convoy with an escort flight waits until an escort aircraft is within this
+# distance of its start (5 nm) ...
+ESCORT_RADIUS_M = 9260
+# ... or this long after mission start, then drives on alone.
+ESCORT_WAIT_S = 3600
+
 
 class PlayerConvoyGenerator:
     """Generates vehicle groups on player-drawn convoy routes."""
@@ -73,12 +91,56 @@ class PlayerConvoyGenerator:
         self._taken: dict[ControlPoint, Counter[GroundUnitType]] = {}
         # Group name and route end of each spawned convoy, for the mission script.
         self._spawned: list[dict[str, Any]] = []
+        # Escort flights of each held convoy, by group name.
+        self._escorts: dict[str, list[Any]] = {}
 
-    def script_data(self) -> dict[str, Any]:
-        """The table the mission script uses to detect arrivals."""
-        return {"radius": ARRIVAL_RADIUS_M, "convoys": list(self._spawned)}
+    def script_data(self, unit_map: UnitMap | None = None) -> dict[str, Any]:
+        """The table the mission script uses to detect arrivals and to release
+        held convoys. Escort unit names need the aircraft generated (unit_map).
+        """
+        convoys = []
+        for convoy in self._spawned:
+            entry = dict(convoy)
+            flights = self._escorts.get(convoy["group"], [])
+            if flights and unit_map is not None:
+                entry["escorts"] = sorted(
+                    name
+                    for name, unit in unit_map.aircraft.items()
+                    if unit.flight in flights
+                )
+            convoys.append(entry)
+        return {
+            "radius": ARRIVAL_RADIUS_M,
+            "escortRadius": ESCORT_RADIUS_M,
+            "escortWait": ESCORT_WAIT_S,
+            "convoys": convoys,
+        }
+
+    def _escort_flights(self, route: PlayerConvoyRoute) -> list[Any]:
+        """Convoy Escort flights planned on this route."""
+        from game.ato.flighttype import FlightType
+        from game.theater.convoyroute import ConvoyRouteTarget
+
+        flights: list[Any] = []
+        ato = getattr(self.game.coalition_for(Player.BLUE), "ato", None)
+        for package in getattr(ato, "packages", None) or []:
+            target = package.target
+            if not isinstance(target, ConvoyRouteTarget):
+                continue
+            route_id = getattr(target, "route_id", None)
+            if route_id is not None and route_id != route.id:
+                continue
+            if route_id is None and target.name != route.name:
+                continue
+            flights.extend(
+                f for f in package.flights if f.flight_type is FlightType.CONVOY_ESCORT
+            )
+        return flights
 
     def generate(self) -> None:
+        from game.logistics.convoy_cargo import start_mission
+
+        start_mission(self.game)
         routes = getattr(self.game, "player_convoy_routes", {})
         for route in list(routes.values()):
             try:
@@ -103,31 +165,72 @@ class PlayerConvoyGenerator:
             logger.warning(f"No friendly base for player convoy '{route.name}'")
             return
 
+        from game.logistics.convoy_cargo import (
+            CARGO_TRUCKS_PER_CONVOY,
+            cargo_truck_type,
+            register,
+        )
+
+        truck_type = cargo_truck_type(self.game.coalition_for(Player.BLUE).faction)
+        trucks = CARGO_TRUCKS_PER_CONVOY if truck_type is not None else 0
+
         origin, units = self._find_source(friendly, start)
         if origin is None:
-            logger.warning(
-                f"Skipping player convoy '{route.name}': no friendly base has "
-                "spare vehicles"
-            )
-            return
+            if not trucks:
+                logger.warning(
+                    f"Skipping player convoy '{route.name}': no friendly base has "
+                    "spare vehicles"
+                )
+                return
+            # Trucks only, from the friendly base nearest the start.
+            origin = min(friendly, key=lambda cp: cp.position.distance_to_point(start))
+            units = {}
         destination = min(friendly, key=lambda cp: cp.position.distance_to_point(end))
 
         self._taken.setdefault(origin, Counter()).update(units)
 
-        group_name = f"Player Convoy {next(self._counter)} - {route.name}"
-        group, unit_types = self._create_group(group_name, start, units)
+        number = next(self._counter)
+        group_name = f"Player Convoy {number} - {route.name}"
+        entries = list(units.items())
+        if truck_type is not None and trucks:
+            entries.append((truck_type, trucks))
+        group, unit_types = self._create_group(group_name, start, entries)
+        borrowed = sum(units.values())
+
+        escorts = self._escort_flights(route)
+        flag = None
+        if escorts:
+            flag = f"convoy-go-{number}"
+            hold = ControlledTask(Hold())
+            hold.stop_if_user_flag(flag, True)
+            hold.stop_after_duration(ESCORT_WAIT_S)
+            group.points[0].tasks.append(hold)
+            self._escorts[group_name] = escorts
+
         group.add_waypoint(end, speed=CONVOY_SPEED, move_formation=PointAction.OnRoad)
         # Allow Combined Arms players to drive convoy vehicles.
         for unit in group.units:
             unit.player_can_drive = True
 
-        self.unit_map.add_player_drawn_convoy_units(
-            group, unit_types, origin, destination
+        if borrowed:
+            self.unit_map.add_player_drawn_convoy_units(
+                group, unit_types[:borrowed], origin, destination, count=borrowed
+            )
+        register(
+            self.game,
+            [str(u.name) for u in group.units[borrowed:]],
+            origin,
+            destination,
         )
-        self._spawned.append({"group": group_name, "x": end.x, "z": end.y})
+        entry: dict[str, Any] = {"group": group_name, "x": end.x, "z": end.y}
+        if flag is not None:
+            entry.update(flag=flag, startX=start.x, startZ=start.y, label=route.name)
+        self._spawned.append(entry)
         logger.info(
-            f"Spawned '{group_name}': {len(unit_types)} vehicles from {origin} "
-            f"to {destination}"
+            f"Spawned '{group_name}': {borrowed} vehicles and "
+            f"{len(unit_types) - borrowed} cargo trucks from {origin} to "
+            f"{destination}"
+            + (f", waiting for {len(escorts)} escort flight(s)" if escorts else "")
         )
 
     def _find_source(
@@ -194,13 +297,16 @@ class PlayerConvoyGenerator:
         return dict(picked)
 
     def _create_group(
-        self, name: str, position: Point, units: dict[GroundUnitType, int]
+        self,
+        name: str,
+        position: Point,
+        units: list[tuple[GroundUnitType, int]] | dict[GroundUnitType, int],
     ) -> tuple[VehicleGroup, list[GroundUnitType]]:
         """A mixed-type vehicle group; the list gives each unit's type in order."""
         faction = self.game.coalition_for(Player.BLUE).faction
         country = self.mission.country(faction.country.name)
 
-        unit_types = list(units.items())
+        unit_types = list(units.items()) if isinstance(units, dict) else list(units)
         main_type, main_count = unit_types[0]
         group = self.mission.vehicle_group(
             country,

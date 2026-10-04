@@ -190,13 +190,17 @@ class UnitMap:
         unit_types: list[GroundUnitType],
         origin: ControlPoint,
         destination: ControlPoint,
+        count: Optional[int] = None,
     ) -> None:
-        """Register a player-drawn convoy. ``unit_types`` follows group.units."""
-        if len(unit_types) != len(group.units):
+        """Register a player-drawn convoy. ``unit_types`` follows group.units;
+        with ``count``, only the group's first ``count`` units (the vehicles
+        borrowed from the base; cargo trucks follow them)."""
+        units = group.units if count is None else group.units[:count]
+        if len(unit_types) != len(units):
             raise ValueError(
-                f"{group.name}: {len(group.units)} units but {len(unit_types)} types"
+                f"{group.name}: {len(units)} units but {len(unit_types)} types"
             )
-        for unit, unit_type in zip(group.units, unit_types):
+        for unit, unit_type in zip(units, unit_types):
             name = str(unit.name)
             if name in self.player_drawn_convoys:
                 raise RuntimeError(f"Duplicate player convoy unit: {name}")

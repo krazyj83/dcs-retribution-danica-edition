@@ -321,6 +321,53 @@ function retribution_check_player_convoys()
     end
 end
 
+-- Held convoys: a route with a Convoy Escort flight waits at its start (a
+-- Hold task stopped by `flag`) until one of the escort aircraft (`escorts`,
+-- unit names) is airborne within data.escortRadius of the start, or until
+-- data.escortWait seconds have passed. The Hold task also stops by itself
+-- after that time, should this script not run.
+player_convoy_released = player_convoy_released or {}
+
+function retribution_release_player_convoys()
+    local data = dcsRetributionPlayerConvoys
+    if type(data) ~= "table" or type(data.convoys) ~= "table" then
+        return
+    end
+    local radius = tonumber(data.escortRadius) or 9260
+    local wait = tonumber(data.escortWait) or 3600
+    for _, convoy in ipairs(data.convoys) do
+        if convoy.flag and not player_convoy_released[convoy.flag] then
+            local escorted = false
+            for _, name in ipairs(convoy.escorts or {}) do
+                local unit = Unit.getByName(name)
+                if unit and unit:isExist() and unit:inAir() then
+                    local p = unit:getPoint()
+                    local dx, dz = p.x - convoy.startX, p.z - convoy.startZ
+                    if dx * dx + dz * dz <= radius * radius then
+                        escorted = true
+                        break
+                    end
+                end
+            end
+            local timed_out = timer.getTime() >= wait
+            if escorted or timed_out then
+                player_convoy_released[convoy.flag] = true
+                trigger.action.setUserFlag(convoy.flag, true)
+                local label = tostring(convoy.label or convoy.group)
+                local text = escorted
+                    and ("Convoy " .. label .. ": escort on station, moving out.")
+                    or ("Convoy " .. label .. ": no escort, moving out alone.")
+                trigger.action.outTextForCoalition(coalition.side.BLUE, text, 15)
+            end
+        end
+    end
+end
+
+timer.scheduleFunction(function(_, t)
+    pcall(retribution_release_player_convoys)
+    return t + 5
+end, nil, timer.getTime() + 5)
+
 local function player_convoy_arrivals()
     pcall(retribution_check_player_convoys)
     local names = {}

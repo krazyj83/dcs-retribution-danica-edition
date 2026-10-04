@@ -611,6 +611,8 @@ class LogisticsManager:
         self._ctld_garrison: List[Any] = []
         #: Crates left in drop zones (game/logistics/forward_cache.py).
         self._drop_zone_caches: List[Any] = []
+        #: Cargo trucks of this mission's player convoys (convoy_cargo.py).
+        self._convoy_cargo_trucks: Dict[str, Any] = {}
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         """Saves from before a field existed get its default: the one place
@@ -1221,6 +1223,20 @@ class LogisticsManager:
             report.add("garrison", garrison_log)
         except Exception:
             logging.getLogger(__name__).exception("CTLD garrison failed")
+        try:
+            from game.logistics.convoy_cargo import settle as settle_trucks
+
+            state_data = debriefing.state_data
+            truck_log = settle_trucks(
+                game,
+                list(getattr(state_data, "killed_ground_units", None) or []),
+                list(getattr(state_data, "player_convoy_arrivals", None) or []),
+            )
+            self.add_debrief_log(truck_log)
+            log.extend(truck_log)
+            report.add("events", truck_log)
+        except Exception:
+            logging.getLogger(__name__).exception("Convoy cargo trucks failed")
         try:
             from game.logistics.forward_cache import settle as settle_caches
 

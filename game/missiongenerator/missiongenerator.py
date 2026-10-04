@@ -119,7 +119,6 @@ class MissionGenerator:
         CargoShipGenerator(self.mission, self.game, self.unit_map).generate()
         player_convoys = PlayerConvoyGenerator(self.mission, self.game, self.unit_map)
         player_convoys.generate()
-        self._write_player_convoy_data(player_convoys)
         # Parked ground units off slopes, roads and town centres at mission
         # start (game/livingworld/terrain.py, plugins/base/terrain_place.lua).
         try:
@@ -142,6 +141,8 @@ class MissionGenerator:
         # rather than the first player flight with a TGP.
         self.generate_ground_conflicts()
         self.generate_air_units(tgo_generator)
+        # After the aircraft: held convoys need their escorts' unit names.
+        self._write_player_convoy_data(player_convoys)
 
         # ----------------------------------------------------------------
         # Logistics hook — inject drop zone trigger zones and generate
@@ -255,7 +256,7 @@ class MissionGenerator:
             inject_data_table(
                 self.mission,
                 "dcsRetributionPlayerConvoys",
-                convoys.script_data(),
+                convoys.script_data(self.unit_map),
                 "player convoy",
             )
         except Exception:
