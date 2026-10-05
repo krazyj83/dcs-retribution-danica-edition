@@ -207,6 +207,13 @@ class PlayerConvoyGenerator:
             group.points[0].tasks.append(hold)
             self._escorts[group_name] = escorts
 
+        # The player's waypoints, in order, then the end; all on roads.
+        for lat, lng in getattr(route, "via", []):
+            group.add_waypoint(
+                Point.from_latlng(LatLng(lat, lng), terrain),
+                speed=CONVOY_SPEED,
+                move_formation=PointAction.OnRoad,
+            )
         group.add_waypoint(end, speed=CONVOY_SPEED, move_formation=PointAction.OnRoad)
         # Allow Combined Arms players to drive convoy vehicles.
         for unit in group.units:

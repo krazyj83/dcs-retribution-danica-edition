@@ -1,6 +1,8 @@
 import {
   CONVOY_SPEED_KPH,
   describeDrive,
+  describePath,
+  pathKm,
   driveEstimate,
   formatMinutes,
   straightLineKm,
@@ -39,5 +41,17 @@ describe("convoy drive time", () => {
     expect(describeDrive(a, b)).toBe(
       "40 km · about 1 h 12 min – 1 h 30 min by road at 40 km/h"
     );
+  });
+
+  it("adds up the legs of a route through waypoints", () => {
+    const a = { lat: 42.0, lng: 42.0 };
+    const b = { lat: 42.1, lng: 42.0 };
+    const c = { lat: 42.1, lng: 42.1 };
+    expect(pathKm([a, b, c])).toBeCloseTo(
+      straightLineKm(a, b) + straightLineKm(b, c),
+      6
+    );
+    expect(pathKm([a])).toBe(0);
+    expect(describePath([a, c])).toBe(describeDrive(a, c));
   });
 });

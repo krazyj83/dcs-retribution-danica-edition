@@ -3,10 +3,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { CircleMarker, LayerGroup, Marker, Polyline, Popup, Tooltip, useMapEvents } from "react-leaflet";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import { DropZone, createDropZone, deleteDropZone, selectDropZones, serverBase } from "../../api/dropZonesSlice";
-import { createConvoyRoute, deleteConvoyRoute, selectConvoyRoutes, setConvoyRouteRepeat } from "../../api/convoyRoutesSlice";
+import { createConvoyRoute, deleteConvoyRoute, routePath, selectConvoyRoutes, setConvoyRouteRepeat } from "../../api/convoyRoutesSlice";
 import type { ConvoyRoute } from "../../api/convoyRoutesSlice";
 import { setOverlayState } from "../../api/mapSlice";
-import { describeDrive } from "./convoyTime";
+import { describePath } from "./convoyTime";
 
 // Name of the layer-list check box that shows drop zones and convoy routes.
 export const DROP_ZONE_OVERLAY = "Drop zones & Convoy routes";
@@ -78,6 +78,8 @@ const ROUTE_START_ICON_SIZE = 36;
 const ROUTE_END_ICON_SIZE = 28;
 const PENDING_START_RADIUS = 16;
 const PENDING_DOT_RADIUS = 12;
+const PENDING_VIA_RADIUS = 9;
+const ROUTE_VIA_RADIUS = 7;
 
 // Diamond SVG icon for drop zones and route ends
 function makeDiamondIcon(color: string, size: number = 36) {
@@ -99,13 +101,14 @@ function makeDiamondIcon(color: string, size: number = 36) {
 // What the right-click workflow is doing right now.
 //  menu        - the "Map actions" popup is open
 //  dz-name     - asking for the name of a new drop zone
-//  route-start - start point placed, waiting for a right-click on the end point
-//  route-name  - both points placed, asking for the route name
+//  route-start - start point placed: left-clicks add waypoints, a right-click
+//                sets the end point
+//  route-name  - all points placed, asking for the route name
 type Pending =
   | { kind: "menu"; latlng: LatLng }
   | { kind: "dz-name"; latlng: LatLng }
-  | { kind: "route-start"; start: LatLng; cursor?: LatLng }
-  | { kind: "route-name"; start: LatLng; end: LatLng };
+  | { kind: "route-start"; start: LatLng; via: LatLng[]; cursor?: LatLng }
+  | { kind: "route-name"; start: LatLng; via: LatLng[]; end: LatLng };
 
 const inputStyle: React.CSSProperties = {
   display: "block",
@@ -229,6 +232,29 @@ export function MapRightClickHandler() {
   const dispatch = useAppDispatch();
   const [pending, setPending] = useState<Pending | null>(null);
   const cancel = () => setPending(null);
+  // When route drawing started: the click on the menu's "Add Convoy Route"
+  // button must not also count as the first waypoint.
+  const routeStartedAt = useRef(0);
+  const drawingRoute = pending?.kind === "route-start";
+
+  // Backspace and Esc while drawing a route, wherever the keyboard focus is
+  // (the map only gets key events while it has focus).
+  useEffect(() => {
+    if (!drawingRoute) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPending(null);
+      if (e.key === "Backspace") {
+        e.preventDefault();
+        setPending((p) =>
+          p?.kind === "route-start" && p.via.length > 0
+            ? { ...p, via: p.via.slice(0, -1) }
+            : p
+        );
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawingRoute]);
   const showLayer = () =>
     dispatch(setOverlayState({ name: DROP_ZONE_OVERLAY, checked: true }));
 
@@ -237,13 +263,20 @@ export function MapRightClickHandler() {
       e.originalEvent.preventDefault();
       setPending((p) =>
         p?.kind === "route-start"
-          ? { kind: "route-name", start: p.start, end: e.latlng }
+          ? { kind: "route-name", start: p.start, via: p.via, end: e.latlng }
           : { kind: "menu", latlng: e.latlng }
       );
     },
-    click() {
-      // A left-click on the map closes the menu; a route in progress stays.
-      setPending((p) => (p?.kind === "menu" ? null : p));
+    click(e) {
+      // A left-click on the map closes the menu, and adds a waypoint to a
+      // route being drawn.
+      const justStarted = Date.now() - routeStartedAt.current < 400;
+      setPending((p) => {
+        if (p?.kind === "menu") return null;
+        if (p?.kind === "route-start" && !justStarted)
+          return { ...p, via: [...p.via, e.latlng] };
+        return p;
+      });
     },
     mousemove(e) {
       // While placing the end point, draw a live line with the drive time.
@@ -252,6 +285,7 @@ export function MapRightClickHandler() {
       );
     },
     keydown(e) {
+      // While drawing a route the window listener above handles the keys.
       if (e.originalEvent.key === "Escape") setPending(null);
     },
   });
@@ -287,7 +321,8 @@ export function MapRightClickHandler() {
             onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
             onClick={() => {
               showLayer();
-              setPending({ kind: "route-start", start: latlng });
+              routeStartedAt.current = Date.now();
+              setPending({ kind: "route-start", start: latlng, via: [] });
             }}
           >
             🚛 Add Convoy Route
@@ -315,39 +350,64 @@ export function MapRightClickHandler() {
   }
 
   if (pending.kind === "route-start") {
-    const cursor = pending.cursor;
+    const { cursor, via } = pending;
+    const placed = [pending.start, ...via];
+    const lastPlaced = placed[placed.length - 1];
     return (
       <>
+        {via.length > 0 && (
+          <Polyline positions={placed} pathOptions={{ color: PENDING_COLOR, weight: 2, dashArray: "6 4", opacity: 0.9 }} />
+        )}
         {cursor && (
-          <Polyline positions={[pending.start, cursor]} pathOptions={{ color: PENDING_COLOR, weight: 2, dashArray: "6 4", opacity: 0.7 }}>
+          <Polyline positions={[lastPlaced, cursor]} pathOptions={{ color: PENDING_COLOR, weight: 2, dashArray: "6 4", opacity: 0.7 }}>
             <Tooltip permanent direction="right" offset={[PENDING_START_RADIUS + 4, 0]}>
-              {describeDrive(pending.start, cursor)}
+              {describePath([...placed, cursor])}
             </Tooltip>
           </Polyline>
         )}
+        {via.map((p, i) => (
+          <CircleMarker key={i} center={p} radius={PENDING_VIA_RADIUS} pathOptions={{ color: PENDING_COLOR, fillColor: PENDING_COLOR, fillOpacity: 0.9, weight: 2 }}>
+            <Tooltip direction="top">Waypoint {i + 1}</Tooltip>
+          </CircleMarker>
+        ))}
       <CircleMarker center={pending.start} radius={PENDING_START_RADIUS} pathOptions={{ color: PENDING_COLOR, fillColor: PENDING_COLOR, fillOpacity: 0.9, weight: 2 }}>
         <Tooltip permanent direction="top" offset={[0, -(PENDING_START_RADIUS + 4)]}>
-          Route start — right-click to set end point (Esc cancels)
+          Route start{via.length > 0 ? ` · ${via.length} waypoint${via.length > 1 ? "s" : ""} so far` : ""}
+          <br />
+          Left-click: add waypoint · Right-click: set end · Backspace: undo · Esc: cancel
         </Tooltip>
       </CircleMarker>
       </>
     );
   }
 
-  const { start, end } = pending;
+  const { start, via, end } = pending;
+  const path = [start, ...via, end];
   const save = async (name: string, repeat: boolean) => {
     await dispatch(
-      createConvoyRoute({ name, start_lat: start.lat, start_lng: start.lng, end_lat: end.lat, end_lng: end.lng, repeat })
+      createConvoyRoute({
+        name,
+        start_lat: start.lat,
+        start_lng: start.lng,
+        end_lat: end.lat,
+        end_lng: end.lng,
+        repeat,
+        via: via.map((p) => ({ lat: p.lat, lng: p.lng })),
+      })
     ).unwrap();
     showLayer();
     setPending(null);
   };
+  const info = via.length > 0 ? `${describePath(path)} · ${via.length} waypoint${via.length > 1 ? "s" : ""}` : describePath(path);
   return (
     <>
-      <Polyline positions={[start, end]} pathOptions={{ color: PENDING_COLOR, weight: 2, dashArray: "6 4", opacity: 0.7 }} />
+      <Polyline positions={path} pathOptions={{ color: PENDING_COLOR, weight: 2, dashArray: "6 4", opacity: 0.7 }} />
       <CircleMarker center={start} radius={PENDING_DOT_RADIUS} pathOptions={{ color: PENDING_COLOR, fillColor: PENDING_COLOR, fillOpacity: 1 }} />
+      {via.map((p, i) => (
+        <CircleMarker key={i} center={p} radius={PENDING_VIA_RADIUS} pathOptions={{ color: PENDING_COLOR, fillColor: PENDING_COLOR, fillOpacity: 1 }} />
+      ))}
       <Popup key="route-name" position={end} closeButton={false} autoClose={false} closeOnClick={false}>
-        <NameForm title="🚛 New Convoy Route" info={describeDrive(start, end)} defaultName="Convoy Route" repeatOption onSave={save} onCancel={cancel} />
+        <NameForm title="🚛 New Convoy Route" info={info} defaultName="Convoy Route" repeatOption onSave={save} onCancel={cancel} />
       </Popup>
     </>
   );
@@ -411,16 +471,18 @@ function ConvoyRouteMarkers() {
       {routes.map((r) => {
         const start: [number, number] = [r.start.lat, r.start.lng];
         const end: [number, number] = [r.end.lat, r.end.lng];
+        const path = routePath(r);
+        const via = r.via ?? [];
         return (
           <React.Fragment key={r.id}>
             {/* Standing routes are drawn solid, one-off routes dashed. */}
             <Polyline
-              positions={[start, end]}
+              positions={path.map((p) => [p.lat, p.lng] as [number, number])}
               pathOptions={{ color: ROUTE_COLOR, weight: 3, dashArray: r.repeat ? undefined : "8 5", opacity: 0.85 }}
             >
               <Tooltip sticky>
                 {r.repeat ? "↻ " : ""}
-                {r.name} — {describeDrive(r.start, r.end)}
+                {r.name} — {describePath(path)}
               </Tooltip>
             </Polyline>
             <Marker position={start} icon={makeDiamondIcon(ROUTE_COLOR, ROUTE_START_ICON_SIZE)}>
@@ -435,9 +497,15 @@ function ConvoyRouteMarkers() {
                   <div style={{ fontSize: 11, color: "#7f8c8d", margin: "2px 0 8px" }}>
                     Start: {r.start.lat.toFixed(4)}, {r.start.lng.toFixed(4)}<br />
                     End: &nbsp;{r.end.lat.toFixed(4)}, {r.end.lng.toFixed(4)}
+                    {via.length > 0 && (
+                      <>
+                        <br />
+                        Waypoints: {via.length}
+                      </>
+                    )}
                   </div>
                   <div style={{ ...infoStyle, margin: "0 0 8px" }}>
-                    🕒 {describeDrive(r.start, r.end)}
+                    🕒 {describePath(path)}
                   </div>
                   <button style={{ ...btn, width: "100%", marginBottom: 5 }} onClick={() => openEscortDialog(r)}>
                     ✈ Plan Escort Mission
@@ -454,6 +522,18 @@ function ConvoyRouteMarkers() {
                 </div>
               </Popup>
             </Marker>
+            {via.map((p, i) => (
+              <CircleMarker
+                key={i}
+                center={[p.lat, p.lng]}
+                radius={ROUTE_VIA_RADIUS}
+                pathOptions={{ color: "#fff", weight: 2, fillColor: ROUTE_COLOR, fillOpacity: 1 }}
+              >
+                <Tooltip direction="top">
+                  {r.name}: waypoint {i + 1} of {via.length}
+                </Tooltip>
+              </CircleMarker>
+            ))}
             <Marker position={end} icon={makeDiamondIcon(ROUTE_COLOR, ROUTE_END_ICON_SIZE)} />
           </React.Fragment>
         );

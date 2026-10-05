@@ -157,6 +157,7 @@ def new_convoy_route_package(
     terrain = game.theater.terrain
     start_point = Point.from_latlng(LatLng(route.start.lat, route.start.lng), terrain)
     end_point = Point.from_latlng(LatLng(route.end.lat, route.end.lng), terrain)
+    via_points = [Point.from_latlng(LatLng(p.lat, p.lng), terrain) for p in route.via]
     mid_point = Point(
         (start_point.x + end_point.x) / 2,
         (start_point.y + end_point.y) / 2,
@@ -169,6 +170,7 @@ def new_convoy_route_package(
         end=end_point,
         _coalition=game.blue,
         route_id=route.id,
+        via=via_points,
     )
     qt.create_new_package(target)
 

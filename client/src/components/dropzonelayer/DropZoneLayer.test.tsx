@@ -115,7 +115,7 @@ describe("DropZoneLayer right-click workflow", () => {
 
     rightClick(1, 2);
     fireEvent.click(screen.getByText(/Add Convoy Route/));
-    expect(screen.getByText(/right-click to set end point/)).toBeInTheDocument();
+    expect(screen.getByText(/Right-click: set end/)).toBeInTheDocument();
 
     // Moving the mouse draws a live line with the drive time.
     act(() => {
@@ -143,7 +143,56 @@ describe("DropZoneLayer right-click workflow", () => {
       end_lat: 3,
       end_lng: 4,
       repeat: false,
+      via: [],
     });
+  });
+
+  it("adds waypoints with left-clicks and takes one back with Backspace", async () => {
+    const fetchMock = mockFetch(201, {
+      id: "r-3",
+      name: "MSR Winding",
+      start: { lat: 1, lng: 2 },
+      end: { lat: 9, lng: 9 },
+      via: [{ lat: 3, lng: 4 }, { lat: 5, lng: 6 }],
+    });
+    const { store } = renderWithProviders(<MapLayers />);
+
+    const now = jest.spyOn(Date, "now").mockReturnValue(10_000);
+    rightClick(1, 2);
+    fireEvent.click(screen.getByText(/Add Convoy Route/));
+    const leftClick = (lat: number, lng: number) =>
+      act(() => {
+        mapHandlers.click({ latlng: { lat, lng } });
+      });
+    // The click on the menu button itself reaches the map too: not a waypoint.
+    leftClick(1.001, 2.001);
+    expect(screen.queryByText(/so far/)).toBeNull();
+    now.mockReturnValue(11_000);
+    leftClick(3, 4);
+    leftClick(5, 6);
+    leftClick(7, 8); // a mistake ...
+    expect(screen.getByText(/3 waypoints so far/)).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Backspace" }); // ... taken back
+    expect(screen.getByText(/2 waypoints so far/)).toBeInTheDocument();
+
+    rightClick(9, 9);
+    expect(screen.getByText(/2 waypoints/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "MSR Winding" },
+    });
+    fireEvent.click(screen.getByText(/Save/));
+
+    await waitFor(() =>
+      expect(store.getState().convoyRoutes.routes).toHaveLength(1)
+    );
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.via).toEqual([
+      { lat: 3, lng: 4 },
+      { lat: 5, lng: 6 },
+    ]);
+    expect([body.end_lat, body.end_lng]).toEqual([9, 9]);
+    // The saved route is drawn with its waypoints.
+    expect(screen.getByText(/waypoint 1 of 2/)).toBeInTheDocument();
   });
 
   it("creates a standing route and can stop it repeating", async () => {
@@ -215,6 +264,6 @@ describe("DropZoneLayer right-click workflow", () => {
     act(() => {
       mapHandlers.keydown({ originalEvent: { key: "Escape" } });
     });
-    expect(screen.queryByText(/right-click to set end point/)).toBeNull();
+    expect(screen.queryByText(/Right-click: set end/)).toBeNull();
   });
 });

@@ -16,6 +16,8 @@ class ConvoyRouteJs(BaseModel):
     end: LeafletPoint
     #: Standing route: a convoy drives it every turn until it is removed.
     repeat: bool = False
+    #: Waypoints between start and end, in driving order.
+    via: list[LeafletPoint] = []
 
     class Config:
         title = "ConvoyRoute"
@@ -28,6 +30,7 @@ class CreateConvoyRouteRequest(BaseModel):
     end_lat: float
     end_lng: float
     repeat: bool = False
+    via: list[LeafletPoint] = []
 
 
 class UpdateConvoyRouteRequest(BaseModel):

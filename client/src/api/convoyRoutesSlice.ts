@@ -10,6 +10,13 @@ export interface ConvoyRoute {
   end: { lat: number; lng: number };
   // Standing route: a new convoy drives it every turn until it is removed.
   repeat?: boolean;
+  // Waypoints between start and end, in driving order.
+  via?: { lat: number; lng: number }[];
+}
+
+/** Start, waypoints and end of a route, in driving order. */
+export function routePath(r: ConvoyRoute): { lat: number; lng: number }[] {
+  return [r.start, ...(r.via ?? []), r.end];
 }
 
 export const createConvoyRoute = createAsyncThunk(
@@ -21,6 +28,7 @@ export const createConvoyRoute = createAsyncThunk(
     end_lat: number;
     end_lng: number;
     repeat?: boolean;
+    via?: { lat: number; lng: number }[];
   }): Promise<ConvoyRoute> => {
     const res = await fetch(`${serverBase()}/convoy-routes/`, {
       method: "POST",

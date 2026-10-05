@@ -533,6 +533,7 @@ export type ConvoyRoute = {
   start: LatLng;
   end: LatLng;
   repeat?: boolean;
+  via?: LatLng[];
 };
 export type BaseSupply = {
   id: string;

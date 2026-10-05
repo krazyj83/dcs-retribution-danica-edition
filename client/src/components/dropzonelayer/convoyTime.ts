@@ -33,8 +33,22 @@ export interface DriveEstimate {
   maxMinutes: number;
 }
 
+/** Straight-line length of a path, leg by leg, in km. */
+export function pathKm(points: Position[]): number {
+  let km = 0;
+  for (let i = 1; i < points.length; i++) {
+    km += straightLineKm(points[i - 1], points[i]);
+  }
+  return km;
+}
+
 export function driveEstimate(a: Position, b: Position): DriveEstimate {
-  const km = straightLineKm(a, b);
+  return pathEstimate([a, b]);
+}
+
+/** Drive time along a path through waypoints. */
+export function pathEstimate(points: Position[]): DriveEstimate {
+  const km = pathKm(points);
   const minutes = (factor: number) =>
     Math.round(((km * factor) / CONVOY_SPEED_KPH) * 60);
   return {
@@ -53,7 +67,12 @@ export function formatMinutes(minutes: number): string {
 
 /** e.g. "23 km · about 41 min – 52 min by road at 40 km/h" */
 export function describeDrive(a: Position, b: Position): string {
-  const e = driveEstimate(a, b);
+  return describePath([a, b]);
+}
+
+/** The same for a path through waypoints. */
+export function describePath(points: Position[]): string {
+  const e = pathEstimate(points);
   const km = e.km < 10 ? e.km.toFixed(1) : Math.round(e.km).toString();
   return (
     `${km} km · about ${formatMinutes(e.minMinutes)} – ` +

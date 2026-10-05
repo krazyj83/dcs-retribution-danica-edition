@@ -41,6 +41,7 @@ def _to_js(route: PlayerConvoyRoute) -> ConvoyRouteJs:
         start=LeafletPoint(lat=route.start_lat, lng=route.start_lng),
         end=LeafletPoint(lat=route.end_lat, lng=route.end_lng),
         repeat=getattr(route, "repeat", False),
+        via=[LeafletPoint(lat=lat, lng=lng) for lat, lng in getattr(route, "via", [])],
     )
 
 
@@ -94,6 +95,7 @@ def create_convoy_route(body: CreateConvoyRouteRequest) -> ConvoyRouteJs:
         end_lat=body.end_lat,
         end_lng=body.end_lng,
         repeat=body.repeat,
+        via=[(p.lat, p.lng) for p in body.via],
     )
     routes[route.id] = route
     return _to_js(route)

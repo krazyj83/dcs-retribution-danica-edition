@@ -49,6 +49,9 @@ class PlayerConvoyRoute:
     the route in the next mission. A one-off route is removed when the turn
     ends; a standing route (``repeat``) stays, and a new convoy drives it every
     turn until the player removes it.
+
+    ``via``: waypoints between start and end, (lat, lng), in driving order.
+    The convoy drives start -> each waypoint -> end, on roads.
     """
 
     id: UUID
@@ -58,11 +61,23 @@ class PlayerConvoyRoute:
     end_lat: float
     end_lng: float
     repeat: bool = False
+    via: list[tuple[float, float]] = field(default_factory=list)
 
     def __setstate__(self, state: dict[str, Any]) -> None:
-        # Routes saved before standing routes existed were all one-off.
+        # Routes saved before standing routes existed were all one-off, and
+        # routes saved before waypoints went straight from start to end.
         state.setdefault("repeat", False)
+        state.setdefault("via", [])
         self.__dict__.update(state)
+
+    @property
+    def points(self) -> list[tuple[float, float]]:
+        """Start, waypoints and end, (lat, lng)."""
+        return [
+            (self.start_lat, self.start_lng),
+            *[(float(lat), float(lng)) for lat, lng in self.via],
+            (self.end_lat, self.end_lng),
+        ]
 
 
 @dataclass
@@ -85,6 +100,23 @@ class ConvoyRouteTarget(MissionTarget):
     #: The PlayerConvoyRoute this target was made for (None in older saves:
     #: matched by name instead).
     route_id: Optional[UUID] = None
+    #: The route's waypoints between start and end, in driving order.
+    via: list[Point] = field(default_factory=list)
+
+    @property
+    def path(self) -> list[Point]:
+        """Start, waypoints and end (empty without start or end)."""
+        if self.start is None or self.end is None:
+            return []
+        return [self.start, *getattr(self, "via", []), self.end]
+
+    @property
+    def path_length(self) -> Distance:
+        """Straight-line length of the route, leg by leg."""
+        from game.utils import meters
+
+        path = self.path
+        return meters(sum(a.distance_to_point(b) for a, b in zip(path, path[1:])))
 
     def is_friendly(self, to_player: Player) -> bool:
         # The convoy route is always a friendly asset — it's the player's supply line.

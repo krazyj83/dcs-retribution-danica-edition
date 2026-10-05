@@ -36,6 +36,10 @@ class ConvoyEscortFlightPlan(CasFlightPlan):
 
     @property
     def route_length(self) -> Distance:
+        """The road's straight-line length, through the route's waypoints."""
+        target = self.package.target
+        if isinstance(target, ConvoyRouteTarget) and target.path:
+            return target.path_length
         return meters(
             self.layout.patrol_start.position.distance_to_point(
                 self.layout.patrol_end.position
@@ -61,6 +65,16 @@ class ConvoyEscortFlightPlan(CasFlightPlan):
         # to reach both ends of it.
         cas_range = super().engagement_distance
         half_route = meters(self.route_length.meters / 2) + nautical_miles(3)
+        # A route with waypoints bends away from the start-end line: reach
+        # every waypoint from the middle too.
+        target = self.package.target
+        if isinstance(target, ConvoyRouteTarget) and target.path:
+            farthest = max(target.position.distance_to_point(p) for p in target.path)
+            half_route = max(
+                half_route,
+                meters(farthest) + nautical_miles(3),
+                key=lambda d: d.meters,
+            )
         return max(cas_range, half_route, key=lambda d: d.meters)
 
 
@@ -85,7 +99,7 @@ class Builder(CasBuilder):
         heading = start.heading_between_point(home)
         ingress_point = start.point_from_heading(heading, INGRESS_DISTANCE.meters)
 
-        drive = drive_time(meters(start.distance_to_point(end)))
+        drive = drive_time(target.path_length)
         start_wp = builder.cas(start, altitude)
         start_wp.name = "CONVOY START"
         start_wp.pretty_name = "Convoy start"
